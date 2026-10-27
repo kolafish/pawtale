@@ -361,6 +361,21 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
     job.payload_json = {"source": "progress", "retry": batch_retry,
         "retry_editorial_copy": (job.payload_json or {}).get("retry_editorial_copy") is True}
     current = {chapter_id for chapter_id, item in progress.chapters.items() if item.status == "ready"}
+    if current and len(current) == len(progress.chapters) and source != "assembly_policy":
+        from app.services.memoir.chapter_structure import review_story_structure
+        user_id = project.user_id
+        lease_token = job.lease_token
+        job.result_json = progress.model_dump(mode="json")
+        await db.commit()
+        changed = await review_story_structure(db, user_id=user_id, project_id=project_id, source="organized")
+        await db.refresh(job)
+        await db.refresh(project)
+        if job.status != MemoirEditingJobStatus.RUNNING.value or job.lease_token != lease_token:
+            raise editing_jobs.EditingJobProgressLost
+        if changed:
+            progress.clear_review()
+            progress.stage = "writing_chapters"
+            return _waiting(job, progress)
     if readable or progress.output_id:
         assembled = await assemble_book_output(db, project_id=project_id, eligible_chapter_ids=readable, automatic=True)
         progress.output_id = assembled.output_id
@@ -394,7 +409,7 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
             return _waiting(job, progress)
     review_signature = ""
     if current and len(current) == len(progress.chapters):
-        review_signature = (await book_reviews.load_book_review_context(db, project_id=project_id, require_digests=False)).input_signature
+        review_signature = (await book_reviews.load_book_review_context(db, project_id=project_id)).input_signature
     previous_review = await db.get(MemoirEditingJob, progress.review_job_id) if progress.review_job_id else None
     if (not current or len(current) != len(progress.chapters) or previous_review is None
             or (previous_review.payload_json or {}).get("input_signature") != review_signature):
@@ -415,7 +430,7 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
             progress.retry_stages = [stage for stage in progress.retry_stages if stage != "review"]
             review = await book_review_jobs.enqueue_book_review_job(db, user_id=project.user_id, project_id=project_id,
                 req=MemoirBookReviewGenerateRequest(), input_signature=review_signature, automatic=not retry_review,
-                apply_structure_guidance=True,
+                apply_structure_guidance=False,
                 on_enqueued=record_review)
             progress.review_status = str(review["status"])
             progress.review_error = str(review.get("error_message") or "")

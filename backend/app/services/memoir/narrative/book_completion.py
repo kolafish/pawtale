@@ -5,9 +5,6 @@ from collections.abc import Awaitable, Callable
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.memoir.types import (
-    MemoirSemanticCacheStatus,
-)
 from app.models.memoir import (
     MemoirBookChapterDraftVersion,
     MemoirBookOutput,
@@ -83,19 +80,6 @@ async def prepare_chapter(
         chapter_id=chapter_id,
         user_id=user_id,
     )
-    digest = await chapter_digests.generate_or_reuse_chapter_digest(
-        db,
-        project_id=project_id,
-        chapter_id=chapter_id,
-        ai_model=ai_model,
-        force_regenerate=not automatic,
-        progress_callback=progress_callback,
-    )
-    if digest.status != MemoirSemanticCacheStatus.READY.value:
-        # Keep provider diagnostics and the failed cache row available after
-        # the API returns an error instead of losing them to the route rollback.
-        await db.commit()
-        raise ValueError(digest.error_message or "章节审阅失败")
     blocking = await completion_issues.open_blocking_book_chapter_ids(
         db, project_id=project_id, all_chapter_ids=[chapter_id],
     )
@@ -127,11 +111,18 @@ async def prepare_chapter(
                 project_id=project_id,
                 chapter_id=chapter_id,
                 ai_model=ai_model,
-                editorial_guidance=chapter_digests.writing_guidance(digest),
                 checkpoint=checkpoint,
                 progress_callback=progress_callback,
                 automatic=automatic,
             )
+    if not blocking:
+        digest = await chapter_digests.generate_or_reuse_chapter_digest(
+            db, project_id=project_id, chapter_id=chapter_id, ai_model=ai_model,
+            force_regenerate=not automatic, progress_callback=progress_callback,
+        )
+        if digest.status != "ready":
+            await db.commit()
+            raise ValueError(digest.error_message or "章节审阅失败")
     if progress_callback is not None:
         await progress_callback(
             {
@@ -167,24 +158,12 @@ async def rewrite_chapter(
         db, project_id=project_id, all_chapter_ids=[chapter_id],
     ):
         raise ValueError("本章还有一项需要您先确认")
-    digest = await chapter_digests.get_current_chapter_digest(
-        db,
-        project_id=project_id,
-        chapter_id=chapter_id,
-    )
-    editorial_guidance = chapter_digests.writing_guidance(digest)
-    # The user has explicitly chosen to write from the current material. Do
-    # not generate another section/chapter review here: those auxiliary LLM
-    # calls can fail even though the section structure is already complete.
-    # Reuse ready guidance when present, then commit the remembered model
-    # preference before the long generation call.
     await db.commit()
     await chapter_generation.generate_and_save_chapter_draft(
         db,
         project_id=project_id,
         chapter_id=chapter_id,
         ai_model=ai_model,
-        editorial_guidance=editorial_guidance,
         checkpoint=checkpoint,
         progress_callback=progress_callback,
         force_refresh=True,

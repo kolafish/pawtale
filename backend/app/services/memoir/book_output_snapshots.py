@@ -123,6 +123,7 @@ def normalized_section_snapshots(value: object) -> list[dict[str, object]]:
                 "content_char_count": len(content),
                 "source_count": len(used_material_ids),
                 "used_material_ids": used_material_ids,
+                **{key: raw_section[key] for key in ("body_digest", "body_digest_hash") if key in raw_section},
             }
         )
     return sections

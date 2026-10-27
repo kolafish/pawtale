@@ -1598,11 +1598,8 @@ async def test_review1470_parallel_initial_growth_keeps_winner_and_manual_draft(
         return GeneratedBookPlan(title=title, chapters=chapters, model='fixture', prompt='fixture')
     async def regenerate(_db, **kwargs):
         section_calls.append(kwargs['chapter_id'])
-    async def no_review(*args, **kwargs):
-        return False
     monkeypatch.setattr(plans, '_generate_book_plan_from_sources', generate)
     monkeypatch.setattr(story_tree_growth, 'regenerate_chapter_sections', regenerate)
-    monkeypatch.setattr(story_tree_growth, 'review_story_structure', no_review)
     monkeypatch.setitem(editing_jobs._HANDLERS, MemoirEditingJobType.ORGANIZE_MATERIAL, story_tree_growth.run_story_tree_growth_job)
     async with AsyncSession(test_db.bind, expire_on_commit=False) as slow, AsyncSession(test_db.bind, expire_on_commit=False) as fast:
         task = asyncio.create_task(editing_jobs.run_editing_job(slow, by_id[slow_job.id]))

@@ -24,7 +24,6 @@ from app.models.memoir import (
     MemoirCompletionIssue,
     MemoirEditingJob,
     MemoirSection,
-    MemoirSectionDigest,
     MemoirSectionMaterial,
 )
 from app.models.projects import Project
@@ -400,43 +399,13 @@ async def _current_chapter_digests(
     project_id: str,
     chapters: list[MemoirBookPlanChapter],
 ) -> dict[str, MemoirChapterDigest]:
-    decisions = await fact_decisions.load_fact_decisions(db, project_id=project_id)
-    question_lines = await section_digests.interviewer_lines(db, (
-        material.utterance.chat_message_id
-        for chapter in chapters for section in chapter.sections for material in section.materials
-    ))
-    section_contexts = {
-        section.id: section_digests.section_digest_context(section, decisions=decisions, question_lines=question_lines)
-        for chapter in chapters
-        for section in chapter.sections
-        if (
-            section.status == MemoirSectionStatus.ACTIVE.value
-            and section.include_in_book
-        )
-    }
-    if not section_contexts:
-        return {}
-    current_section_digests = {
-        digest.section_id: digest
-        for digest in (
-            await db.scalars(
-                select(MemoirSectionDigest).where(
-                    MemoirSectionDigest.project_id == project_id,
-                    MemoirSectionDigest.section_id.in_(section_contexts),
-                    MemoirSectionDigest.engine
-                    == section_digests.SECTION_DIGEST_ENGINE,
-                    MemoirSectionDigest.status
-                    == MemoirSemanticCacheStatus.READY.value,
-                    MemoirSectionDigest.input_signature.in_(
-                        context.input_signature
-                        for context in section_contexts.values()
-                    ),
-                )
-            )
-        ).all()
-        if digest.input_signature
-        == section_contexts[digest.section_id].input_signature
-    }
+    current_section_digests = {}
+    for chapter in chapters:
+        for section in chapter.sections:
+            if section.status == MemoirSectionStatus.ACTIVE.value and section.include_in_book:
+                digest = await section_digests.get_current_section_digest(db, project_id=project_id, section_id=section.id)
+                if digest is not None:
+                    current_section_digests[section.id] = digest
     chapter_contexts = {}
     for chapter in chapters:
         try:

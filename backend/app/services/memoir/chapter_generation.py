@@ -4,6 +4,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 import logging
+import json
 
 from fastapi import HTTPException
 import httpx
@@ -12,7 +13,6 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
-from app.schemas.memoir_editorial import WritingGuidance
 from app.domain.memoir.types import (
     MemoirAutomationEventType,
     MemoirBookChapterDraftStatus,
@@ -51,7 +51,9 @@ from app.services.memoir.project_ai_preferences import (
     load_project_transcript_polish_level,
     text_polish_requirements,
 )
+from app.schemas.memoir_section_digests import MemoirBodyDigest
 from app.services.memoir.section_digests import (
+    BODY_DIGEST_INSTRUCTION, digest_snapshot, snapshot_digest,
     get_current_section_digest,
     mark_section_digests_stale,
 )
@@ -137,6 +139,7 @@ class GeneratedChapterSection:
     title: str
     content: str
     used_material_ids: tuple[str, ...]
+    body_digest: MemoirBodyDigest | None = None
     user_edited: bool = False
     user_edited_at: datetime | None = None
 
@@ -165,6 +168,7 @@ class _GeneratedChapterSectionOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     content: str
+    body_digest: MemoirBodyDigest
     used_material_ids: list[str]
     missing_source_candidates: list[str] = Field(default_factory=list, description="仅列无法继续成文且必须新求证的事实；已回答、拒答、明确记不清的不列；可保留疑义成文则为空")
     editor_notes: list[str] = Field(default_factory=list)
@@ -242,6 +246,7 @@ def _generated_chapter_checkpoint(
                 "title": inputs[section.section_id].title,
                 "section_version": inputs[section.section_id].section_version,
                 "content": section.content,
+                **(digest_snapshot(section.content, section.body_digest) if section.body_digest else {}),
                 "used_material_ids": list(section.used_material_ids),
                 **({"user_edited": True} if section.user_edited else {}),
                 **({"user_edited_at": section.user_edited_at.isoformat()} if section.user_edited_at else {}),
@@ -282,7 +287,8 @@ def _generated_chapter_from_checkpoint(
             return None
         content = str(raw_section.get("content") or "").strip()
         raw_used = raw_section.get("used_material_ids")
-        if not content or not isinstance(raw_used, list):
+        if (not content or not isinstance(raw_used, list)
+                or (raw_section.get("body_digest") is not None and snapshot_digest(raw_section) is None)):
             return None
         used = tuple(
             material_id
@@ -302,6 +308,7 @@ def _generated_chapter_from_checkpoint(
                 section_id=expected.section_id,
                 title=expected.title,
                 content=content,
+                body_digest=snapshot_digest(raw_section),
                 used_material_ids=used,
                 user_edited=raw_section.get("user_edited") is True,
                 user_edited_at=datetime.fromisoformat(raw_section["user_edited_at"]) if raw_section.get("user_edited_at") else None,
@@ -355,6 +362,7 @@ def _previous_draft_section(
         section_id=section.section_id,
         title=section.title,
         content=content,
+        body_digest=snapshot_digest(snapshot),
         used_material_ids=used,
         user_edited=snapshot.get("user_edited") is True,
         user_edited_at=datetime.fromisoformat(snapshot["user_edited_at"]) if snapshot.get("user_edited_at") else None,
@@ -516,8 +524,9 @@ async def _with_previous_material_text(
 ) -> ChapterGenerationContext:
     saved = {item["material_id"]: item for item in (latest.material_snapshot_json or [])
              if isinstance(item, dict) and item.get("material_id")}
-    version_ids = {item.get("transcript_version_id") for item in saved.values()} - {None}
-    unversioned = {source_id for source_id, item in saved.items() if not item.get("transcript_version_id")}
+    changed_ids = _changed_material_ids(context, latest)
+    version_ids = {item.get("transcript_version_id") for mid, item in saved.items() if mid in changed_ids} - {None}
+    unversioned = {mid for mid, item in saved.items() if mid in changed_ids and not item.get("transcript_version_id")}
     versions = (await db.scalars(select(MemoirTranscriptVersion).where(or_(
         MemoirTranscriptVersion.id.in_(version_ids),
         and_(MemoirTranscriptVersion.source_artifact_id.in_(unversioned),
@@ -976,13 +985,13 @@ async def load_chapter_generation_context(
 def build_chapter_generation_prompt(
     context: ChapterGenerationContext,
     *,
-    editorial_guidance: list[WritingGuidance],
     chapter_sections: tuple[ChapterSectionInput, ...] | None = None,
     current_section_content: str = "",
     current_section_user_edited: bool = False,
     current_section_user_edited_at: datetime | None = None,
     revision_instruction: str = "",
     source_update_reason: str = "",
+    previous_body_digest: MemoirBodyDigest | None = None,
     previous_section_context: str = "",
     changed_material_ids: set[str] | None = None,
     previous_material_ids: set[str] | None = None,
@@ -1011,11 +1020,19 @@ def build_chapter_generation_prompt(
         )
         for index, item in enumerate(outline_sections)
     )
+    incremental = bool(current_section_content and previous_material_ids is not None and changed_material_ids is not None)
     edit_cutoff = current_section_user_edited_at or context.previous_draft_at
+    previous_sources = ""
+    if previous_body_digest:
+        previous_sources = "现有正文的来源关联（只定位保留文字，不新增事实）：\n" + json.dumps([
+            {"text": point.text, "material_ids": [material_refs.encode(mid) for mid in point.material_ids
+                if mid in {m.material_id for m in section.materials}]}
+            for point in previous_body_digest.points], ensure_ascii=False)
     blocks = "\n".join(
         [
             f"小节标题: {section.title}",
             f"小节类型: {section.section_type}",
+            previous_sources,
             fact_decisions.prompt(
                 tuple(decision for decision in section.decisions if not (
                     current_section_user_edited and edit_cutoff
@@ -1026,7 +1043,8 @@ def build_chapter_generation_prompt(
                     and edit.edited_at <= edit_cutoff
                 )),
             ),
-            "允许素材：",
+            "全部已归属素材编号（保留正文来源，不代表本次新增）：" + "、".join(material_refs.encode(m.material_id) for m in section.materials),
+            "本次新增或更正的素材：" if incremental else "允许素材：",
             *[
                 (
                     f"material_id: {material_refs.encode(material.material_id)}\n"
@@ -1035,10 +1053,14 @@ def build_chapter_generation_prompt(
                         _confirmed_material_update(material, material.material_id in (changed_material_ids or set()))
                         if current_section_user_edited and current_section_content
                         and previous_material_ids is not None and material.material_id in previous_material_ids
-                        else f"素材版本{'（本次新增或更正）' if changed_material_ids and material.material_id in changed_material_ids else ''}: {material.text}\n"
+                        else (f"素材版本{'（本次新增或更正）' if changed_material_ids and material.material_id in changed_material_ids else ''}: {material.text}\n"
+                            + (transcript_text_changes(material.previous_text, material.text, label="本次素材订正")
+                               if incremental and material.material_id in previous_material_ids
+                               and material.previous_text is not None and material.previous_text != material.text else ""))
                     )
                 )
                 for material in section.materials
+                if not incremental or material.material_id in changed_material_ids
             ],
         ]
     )
@@ -1049,11 +1071,6 @@ def build_chapter_generation_prompt(
         if context.people
         else ""
     )
-    guidance = "\n".join(
-        f"- {item.instruction}"
-        for item in editorial_guidance
-        if not item.section_ids or section.section_id in item.section_ids
-    ) or "（无额外编辑建议）"
     polish_requirements = (
         "本次仅按已确认修改思路局部编辑，不执行通用润色。"
         if revision_instruction
@@ -1099,7 +1116,7 @@ def build_chapter_generation_prompt(
             "现有正文已经由用户修改或确认。其与未变化的旧素材不同之处属于已采纳的表达，"
             "不能仅因旧素材不支持就撤销。只按本次新增素材或明确更正更新实际涉及的事实，保留其余内容。"
             if current_section_user_edited else
-            "保留仍受素材支持的事实；若素材不支持原有表述，不要延续该表述。"
+            "现有正文是此前已采用内容；仅按本次增改素材更新涉及的事实。不能因本次输入未含历史素材而删除未涉及的正文。"
         )
         revision = f"""
 现有小节正文：
@@ -1117,8 +1134,6 @@ def build_chapter_generation_prompt(
 本章完整小节顺序：
 {outline}
 {revision}
-编辑建议：
-{guidance}
 
 {polish_requirements}
 
@@ -1131,12 +1146,14 @@ def build_chapter_generation_prompt(
 {required_materials}输出严格 JSON：
 {{
 {title_output}  "content": "当前小节完整、连贯、第一人称的正文",
+  "body_digest": {{"summary":"最终正文概括","focus":"叙事重点","points":[{{"text":"正文要点","material_ids":["M1"]}}]}},
   "used_material_ids": ["本小节全部已归属素材的 material_id，含保留来源"],
   "missing_source_candidates": ["无法继续成文且必须新求证的事实，或用户明确要求但尚未提供的事实；可保留疑义成文则为空数组"],
   "editor_notes": ["可选的简短编辑说明"]
 }}
 
 要求：
+- {BODY_DIGEST_INSTRUCTION}
 - 本次只生成标记为“本次生成”的一个小节，不得复述其他小节的内容。
 - material_id 是本次请求内的短编号，必须原样返回；used_material_ids 完整列出本小节全部已归属素材，包括当前正文保留的来源，不能只列变化项。
 - 只有本次按用户要求修改且要求涉及标题时，才可修改输入标题。
@@ -1217,7 +1234,7 @@ async def load_section_continuity(
             )[:300],
             key_points=tuple(
                 _string_list(
-                    digest.digest_json.get("covered_points"),
+                    [point["text"] for point in digest.digest_json.get("points", [])],
                     limit=8,
                     item_limit=120,
                 )
@@ -1292,6 +1309,9 @@ def normalize_generated_section(
         title=title,
         content=content,
         used_material_ids=tuple(used),
+        body_digest=payload.body_digest.model_copy(update={"points": [point.model_copy(update={
+            "material_ids": [material_refs.decode(ref) for ref in point.material_ids],
+        }) for point in payload.body_digest.points]}),
     )
     return GeneratedChapter(
         sections=(generated,),
@@ -1310,7 +1330,6 @@ def normalize_generated_section(
 async def generate_chapter(
     context: ChapterGenerationContext,
     *,
-    editorial_guidance: list[WritingGuidance],
     ai_model: str | None = None,
     ai_client: AITextClient | None = None,
     checkpoint: dict[str, object] | None = None,
@@ -1407,7 +1426,6 @@ async def generate_chapter(
             generated_section = await generate_chapter_section(
                 context,
                 section=section,
-                editorial_guidance=editorial_guidance,
                 chapter_sections=full_sections,
                 previous_section_content=previous_content,
                 preceding_section_context=previous_section_context(
@@ -1419,6 +1437,7 @@ async def generate_chapter(
                         else None
                     ),
                 ),
+                previous_body_digest=previous_by_id[section.section_id].body_digest if section.section_id in previous_by_id else None,
                 current_section_content=(
                     previous_by_id[section.section_id].content
                     if section.section_id in previous_by_id else ""
@@ -1492,7 +1511,6 @@ async def generate_chapter_section(
     context: ChapterGenerationContext,
     *,
     section: ChapterSectionInput,
-    editorial_guidance: list[WritingGuidance],
     chapter_sections: tuple[ChapterSectionInput, ...],
     previous_section_content: str = "",
     preceding_section_context: str = "",
@@ -1501,6 +1519,7 @@ async def generate_chapter_section(
     current_section_user_edited_at: datetime | None = None,
     revision_instruction: str = "",
     source_update_reason: str = "",
+    previous_body_digest: MemoirBodyDigest | None = None,
     required_material_ids: set[str] | None = None,
     previous_material_ids: set[str] | None = None,
     ai_model: str | None = None,
@@ -1515,13 +1534,13 @@ async def generate_chapter_section(
     )
     prompt = build_chapter_generation_prompt(
         section_context,
-        editorial_guidance=editorial_guidance,
         chapter_sections=chapter_sections,
         current_section_content=current_section_content,
         current_section_user_edited=current_section_user_edited,
         current_section_user_edited_at=current_section_user_edited_at,
         revision_instruction=revision_instruction,
         source_update_reason=source_update_reason,
+        previous_body_digest=previous_body_digest,
         previous_section_context=preceding_section_context,
         changed_material_ids=required_material_ids,
         previous_material_ids=previous_material_ids,
@@ -1765,6 +1784,7 @@ def _section_snapshot(
             "sort_order": inputs[section.section_id].sort_order,
             "input_signature": _section_input_signature(context, inputs[section.section_id]),
             "content": section.content,
+            **(digest_snapshot(section.content, section.body_digest) if section.body_digest else {}),
             **({"fact_decision_signature": fact_decisions.signature(inputs[section.section_id].decisions),
                 "fact_decision_ids": [decision.issue_id for decision in inputs[section.section_id].decisions]}
                if inputs[section.section_id].decisions else {}),
@@ -1781,7 +1801,6 @@ async def generate_and_save_chapter_draft(
     *,
     project_id: str,
     chapter_id: str,
-    editorial_guidance: list[WritingGuidance],
     ai_model: str | None = None,
     ai_client: AITextClient | None = None,
     checkpoint: dict[str, object] | None = None,
@@ -1802,10 +1821,7 @@ async def generate_and_save_chapter_draft(
     base_version_id = latest_before.id if latest_before else None
     if latest_before is not None:
         before = replace(before, previous_draft_at=latest_before.created_at)
-        if latest_before.created_by == MemoirCreatedBy.USER.value or any(
-            section.get("user_edited") for section in latest_before.section_snapshot_json
-        ):
-            before = await _with_previous_material_text(db, before, latest_before)
+        before = await _with_previous_material_text(db, before, latest_before)
     style_refresh = automatic and not chapter_draft_render_policy_current(
         before, latest_before
     ) and latest_before is not None
@@ -1860,7 +1876,6 @@ async def generate_and_save_chapter_draft(
             )
     generated = await generate_chapter(
         plan.target_context,
-        editorial_guidance=editorial_guidance,
         ai_model=ai_model,
         ai_client=ai_client,
         checkpoint=checkpoint,
@@ -2045,6 +2060,7 @@ async def apply_chapter_section_candidate(
     expected_input_signature: str,
     candidate_title: str,
     candidate_content: str,
+    candidate_body_digest: MemoirBodyDigest | None = None,
     feedback: str,
     requested_ai_model: str | None,
     resolved_ai_model: str | None,
@@ -2146,6 +2162,7 @@ async def apply_chapter_section_candidate(
         section_id=target_input.section_id,
         title=target_input.title,
         content=content,
+        body_digest=candidate_body_digest,
         used_material_ids=tuple(latest_sections[target_index].get("used_material_ids", [])),
         user_edited=True,
         user_edited_at=(

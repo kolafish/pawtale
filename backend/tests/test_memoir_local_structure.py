@@ -10,7 +10,7 @@ from app.services.memoir import chapter_structure as st
 from app.services.memoir.structure_proposals import TargetDirectory, compile_region, finding_context
 from app.schemas.memoir_editorial import BookStructureFinding
 from app.services.memoir.story_tree_growth import _load_tree
-from tests.memoir_helpers import create_test_book_plan_with_chapters, create_test_voice_transcript, ensure_mobile_memoir_project, memoir_source_ref
+from tests.memoir_helpers import create_test_book_plan_with_chapters, create_test_voice_transcript, ensure_mobile_memoir_project, memoir_source_ref, save_test_body_summaries
 
 
 async def local_book(client, db):
@@ -39,6 +39,7 @@ async def local_book(client, db):
             destination, i = by_source[m.utterance_id]
             m.section_id, m.sort_order = destination.id, i
     await db.commit()
+    await save_test_body_summaries(db, pid)
     plan, chapters, sections = await _load_tree(db, project_id=pid)
     context = await st.structure_context(db, plan, chapters, sections)
     uid = (await client.get('/api/auth/me')).json()['id']
@@ -124,9 +125,9 @@ async def test_local_grouping_writes_model_decision_and_preserves_unaffected_str
     assert actual['实习与编程'] == set(mixed_refs[1:])
     diagnosis_input = json.JSONDecoder().raw_decode(calls[0].split('当前目录：\n')[1])[0]
     assert [c['chapter_ref'] for c in diagnosis_input['chapters']] == [old.chapter_ref]
-    grouping_input = json.JSONDecoder().raw_decode(calls[1].split('素材与必要保护约束：')[1])[0]
-    assert set(grouping_input['chapters'][0]['material_refs']) == set(mixed_refs + places_refs)
-    assert grouping_input['chapters'][0]['protected_sections'] == []
+    grouping_input = json.JSONDecoder().raw_decode(calls[1].split('正文摘要与必要保护约束：')[1])[0]
+    assert {ref for g in grouping_input['chapters'][0]['sections'] for ref in g['material_refs']} == set(mixed_refs + places_refs)
+    assert all(g['body_summary'] for g in grouping_input['chapters'][0]['sections'])
     assert not await st.review_story_structure(test_db, user_id=uid, project_id=pid, chapter_ids={chapters[0].id})
     assert len(calls) == 2
     # A different scope is not incorrectly marked as already reviewed.

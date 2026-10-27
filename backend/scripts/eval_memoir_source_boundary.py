@@ -45,8 +45,7 @@ async def evaluate(args: argparse.Namespace) -> int:
             for repeat in range(args.repeat):
                 started = time.monotonic()
                 generated = await generate_chapter_section(
-                    context, section=section, editorial_guidance=[],
-                    chapter_sections=context.sections, ai_model=args.ai_model, ai_client=client,
+                    context, section=section,                     chapter_sections=context.sections, ai_model=args.ai_model, ai_client=client,
                 )
                 failures = [
                     f"missing one of: {group}" for group in case["required"]

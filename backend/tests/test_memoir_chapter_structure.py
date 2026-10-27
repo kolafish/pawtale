@@ -11,7 +11,7 @@ from app.models.projects import Project
 from app.services.memoir import chapter_structure as structure
 from app.services.memoir.story_tree_growth import _load_tree, build_story_growth_prompt
 from app.services.ai_references import ModelReferenceMap
-from tests.memoir_helpers import create_test_book_plan_with_chapters, create_test_voice_transcript, ensure_mobile_memoir_project, memoir_source_ref
+from tests.memoir_helpers import create_test_book_plan_with_chapters, create_test_voice_transcript, ensure_mobile_memoir_project, memoir_source_ref, save_test_body_summaries
 
 
 @pytest.mark.parametrize('split_sources', [False, True])
@@ -156,7 +156,7 @@ async def test_question_edit_invalidates_directory_and_section_regeneration_inpu
     snapshots = await regeneration._material_snapshots(test_db, chapter)
     assert snapshots[0].interviewer_line == question.content_text
     prompt = structure.build_structure_prompt(before, chapters=chapters, sections=sections)
-    assert question.content_text in prompt
+    assert question.content_text not in prompt
     async with AsyncSession(test_db.bind) as writer:
         changed = await writer.get(MemoirChatMessage, question.id)
         changed.content_text = '妈妈在学校教什么？'
@@ -409,7 +409,7 @@ async def test_merge_failure_rolls_back_the_whole_directory(client, test_db, mon
     assert structure.material_identity(sections) == sources
 
 
-async def test_structure_runs_after_session_stops_not_each_material(client, test_db, monkeypatch):
+async def test_growth_defers_structure_until_body_generation(client, test_db, monkeypatch):
     from app.models.memoir import MemoirVoiceSession
     from app.services.memoir import story_tree_growth as growth
     from tests.test_memoir_section_organization import _stopped_growth_job
@@ -430,7 +430,7 @@ async def test_structure_runs_after_session_stops_not_each_material(client, test
     await test_db.commit()
     await growth.run_story_tree_growth_job(test_db, job)
     await growth.run_story_tree_growth_job(test_db, job)
-    assert len(calls) == 1
+    assert calls == []
 
 
 @pytest.mark.db_independent
@@ -466,33 +466,6 @@ async def test_manual_and_automatic_directory_writers_share_lock_order(client, t
                 await asyncio.gather(task, return_exceptions=True)
 
 
-async def test_growth_reports_final_directory_after_a_new_chapter_is_merged(client, test_db, monkeypatch):
-    from app.services.memoir import story_tree_growth as growth
-    from tests.test_memoir_section_organization import _stopped_growth_job
-    pid, _ = await _book(client, test_db)
-    plan, chapters, sections = await _load_tree(test_db, project_id=pid)
-    output = (await structure.structure_context(test_db, plan, chapters, sections)).outline
-    source, job = await _stopped_growth_job(client, test_db, pid, '后来又跟妈妈去课堂，老师给我垫了板凳。')
-    async def assign(**kwargs):
-        return [growth.GrowthGroup(utterance_ids=[source['utterance_id']], action='create_chapter',
-            new_chapter_title='课堂的板凳', new_section_title='老师垫板凳')]
-    async def absorb():
-        plan, chapters, sections = await _load_tree(test_db, project_id=pid)
-        current = (await structure.structure_context(test_db, plan, chapters, sections)).outline
-        temporary = current.chapters.pop()
-        current.chapters[1].sections.extend(temporary.sections)
-        output.chapters = current.chapters
-    _provider(monkeypatch, output, during_call=absorb)
-    monkeypatch.setattr(growth, 'decide_story_growth', assign)
-    result = await growth.run_story_tree_growth_job(test_db, job)
-    assert result.result_json['new_chapter_ids'] == []
-    assert len(result.result_json['new_section_ids']) == 1
-    _, chapters, sections = await _load_tree(test_db, project_id=pid)
-    assert len(chapters) == 4
-    target = next(s for s in sections if any(m.utterance_id == source['utterance_id'] for m in s.materials))
-    assert target.chapter_id == chapters[1].id
-
-
 async def _book_review_feedback(db, pid, *, signature='review-input'):
     from app.models.memoir import MemoirBookReview
     from app.services.memoir import book_reviews
@@ -500,8 +473,8 @@ async def _book_review_feedback(db, pid, *, signature='review-input'):
     context = book_reviews.BookReviewContext(
         project_id=pid, plan_id=plan.id, book_metadata={}, input_signature=signature,
         chapters=tuple(book_reviews.BookReviewChapter(
-            chapter_id=c.id, title=c.title, sort_order=c.sort_order, digest_id='digest',
-            digest_signature='digest-input', digest={}, draft_version_id='draft', draft_hash='text',
+            chapter_id=c.id, title=c.title, sort_order=c.sort_order,
+              draft_version_id='draft', draft_hash='text',
             material_ids=frozenset(),
         ) for c in chapters),
     )
@@ -584,87 +557,6 @@ async def test_outdated_book_review_cannot_apply_a_structure_proposal(client, te
     plan, chapters, sections = await _load_tree(test_db, project_id=pid)
     assert len(chapters) == 4
     assert structure.FEEDBACK_CHECKED_KEY not in plan.metadata_json
-
-
-@pytest.mark.parametrize('rebuild_digests', [False, True])
-@pytest.mark.parametrize('operation', ['keep', 'merge', 'split'])
-async def test_growth_worker_generates_real_digests_and_schedules_book(client, test_db, monkeypatch, rebuild_digests, operation):
-    from app.clock import utcnow_naive
-    from app.domain.memoir.types import MemoirEditingJobType
-    from app.models.memoir import MemoirAutomationEvent, MemoirEditingJob, MemoirVoiceSession
-    from app.services.memoir import chapter_digests, editing_jobs, section_digests, story_tree_growth as growth
-    from tests.test_memoir_chapter_pipeline import FakeChapterAI
-    from tests.test_memoir_section_organization import _stopped_growth_job
-    pid, _ = await _book(client, test_db)
-    plan, chapters, sections = await _load_tree(test_db, project_id=pid)
-    context = await structure.structure_context(test_db, plan, chapters, sections)
-    original_chapter_ids = [c.id for c in chapters]
-    original_section_ids = {s.id for s in sections}
-    original_sources = structure.material_identity(sections)
-    target_section_id = sections[0].id
-    real_digest, real_summaries = structure.generate_or_reuse_chapter_digest, structure.load_structure_summaries
-    merge_sections = operation == 'merge'
-    split_section = operation == 'split'
-    def split_answer(prompt):
-        import json
-        payload, _ = json.JSONDecoder().raw_decode(prompt.split('当前目录：\n', 1)[1])
-        target_ref = context.section_refs.encode(target_section_id)
-        current = next(s for c in payload['chapters'] for s in c['sections'] if s['section_refs'] == [target_ref])
-        answer = context.outline.model_dump()
-        target_chapter = next(c for c in answer['chapters'] if any(s['section_refs'] == [target_ref] for s in c['sections']))
-        target_chapter['sections'].append({'section_refs': ['T1'], 'title': '课堂上的板凳'})
-        answer['section_splits'] = [{'source_section_ref': target_ref, 'new_section_ref': 'T1',
-            'material_refs': [current['material_refs'][-1]]}]
-        return structure.StructureOutput.model_validate(answer)
-    calls = _provider(monkeypatch, split_answer if split_section else
-        _merge(context, merge_sections=True) if merge_sections else context.outline)
-    monkeypatch.setattr(structure, 'generate_or_reuse_chapter_digest', real_digest)
-    monkeypatch.setattr(structure, 'load_structure_summaries', real_summaries)
-    fake = FakeChapterAI(section_material_id='', chapter_section_id='', chapter_material_id='', draft_material_ids=[])
-    monkeypatch.setattr(chapter_digests, 'get_ai_service', lambda _: fake)
-    monkeypatch.setattr(section_digests, 'get_ai_service', lambda _: fake)
-    if rebuild_digests:
-        for chapter_id in original_chapter_ids:
-            await real_digest(test_db, project_id=pid, chapter_id=chapter_id, ai_client=fake)
-    prompts_before = len(fake.prompts)
-    source, job = await _stopped_growth_job(client, test_db, pid, '小时候跟妈妈去课堂，她给我垫了板凳。')
-    session_id, job_id = source['session']['id'], job.id
-    job.status = 'pending'
-    job.run_after = utcnow_naive()
-    job.payload_json = {**job.payload_json, 'source': 'retry' if rebuild_digests else 'transcript_ready'}
-    await test_db.commit()
-    async def assign(**kwargs):
-        return [growth.GrowthGroup(utterance_ids=[source['utterance_id']], action='assign_existing', section_id=target_section_id)]
-    monkeypatch.setattr(growth, 'decide_story_growth', assign)
-    monkeypatch.setitem(editing_jobs._HANDLERS, MemoirEditingJobType.ORGANIZE_MATERIAL, growth.run_story_tree_growth_job)
-    lease, = await editing_jobs.claim_due_editing_jobs(test_db, project_id=pid, job_type=MemoirEditingJobType.ORGANIZE_MATERIAL, limit=1)
-    assert lease.job_id == job_id
-    assert await editing_jobs.run_editing_job(test_db, lease)
-    await test_db.refresh(job)
-    session = await test_db.get(MemoirVoiceSession, session_id, populate_existing=True)
-    assert job.status == 'succeeded' and not job.error_message and session.status == 'stopped'
-    assert job.result_json['voice_session_id'] == session_id
-    assert job.result_json['organized_utterance_ids'] == [source['utterance_id']]
-    assert job.result_json['new_chapter_ids'] == []
-    assert len(job.result_json['new_section_ids']) == int(split_section)
-    assert job.result_json['growth']['placed_ids'] == []
-    assert len(fake.prompts) - prompts_before == 2
-    assert len(calls) == 1
-    assert '小时候跟妈妈去课堂，她给我垫了板凳。' in calls[0]  # Source evidence, not generated summary, defines grouping.
-    _, chapters, sections = await _load_tree(test_db, project_id=pid)
-    assert len(chapters) == (2 if merge_sections else 4)
-    assert len(sections) == (3 if merge_sections else 5 if split_section else 4)
-    assert {c.id for c in chapters} <= set(original_chapter_ids)
-    assert {s.id for s in sections} - original_section_ids == set(job.result_json['new_section_ids'])
-    assert set(original_sources) < set(structure.material_identity(sections))
-    event = await test_db.scalar(select(MemoirAutomationEvent).where(MemoirAutomationEvent.editing_job_id == job_id,
-        MemoirAutomationEvent.event_type == 'story_structure_updated'))
-    assert event.utterance_ids_json == [source['utterance_id']]
-    assert event.metadata_json['voice_session_id'] == session_id
-    book_job = await test_db.scalar(select(MemoirEditingJob).where(MemoirEditingJob.dedupe_key == f'update-book-draft:{pid}'))
-    assert book_job.status == 'pending'
-    assert book_job.payload_json['source'] == ('retry' if rebuild_digests else 'organized')
-    assert book_job.run_after <= utcnow_naive()
 
 
 async def test_adopted_section_rewrite_keeps_manual_text_and_history_during_structure_review(client, test_db, monkeypatch):
@@ -937,6 +829,7 @@ async def _mixed_section(client, db):
         link.assigned_by = 'ai'
     plan.created_by = 'ai'
     await db.commit()
+    await save_test_body_summaries(db, pid)
     return pid, uid
 
 
@@ -1026,7 +919,7 @@ async def test_protected_field_allows_other_sections_to_join_the_chapter(client,
 @pytest.mark.parametrize('bad', ['all_materials', 'duplicate_material', 'foreign_material', 'missing_new_section',
     'duplicate_new_section', 'manual_assignment', 'manual_title', 'manual_draft'])
 async def test_invalid_section_split_cannot_change_directory_or_memberships(client, test_db, monkeypatch, bad):
-    from tests.memoir_helpers import create_test_chapter_draft
+    from app.models.memoir import MemoirBookChapterDraftVersion
     pid, uid = await _mixed_section(client, test_db)
     plan, chapters, sections = await _load_tree(test_db, project_id=pid)
     mixed = next(s for s in sections if len(s.materials) == 2)
@@ -1035,8 +928,10 @@ async def test_invalid_section_split_cannot_change_directory_or_memberships(clie
     if bad == 'manual_title':
         mixed.metadata_json = {'title_updated_by': 'user'}
     if bad == 'manual_draft':
-        await create_test_chapter_draft(test_db, project_id=pid, chapter_id=mixed.chapter_id,
-            content='不能覆盖的人工正文。')
+        latest = await test_db.scalar(select(MemoirBookChapterDraftVersion).where(
+            MemoirBookChapterDraftVersion.chapter_id == mixed.chapter_id).order_by(MemoirBookChapterDraftVersion.version.desc()))
+        latest.created_by = 'user'
+        latest.content = '不能覆盖的人工正文。'
     await test_db.commit()
     context = await structure.structure_context(test_db, plan, chapters, sections)
     original = structure.material_identity(sections)
@@ -1130,6 +1025,7 @@ async def test_multiple_splits_from_one_section_preserve_all_memberships(client,
         link.assigned_by = 'ai'
     plan.created_by = 'ai'
     await test_db.commit()
+    await save_test_body_summaries(test_db, pid)
     plan, chapters, sections = await _load_tree(test_db, project_id=pid)
     mixed = next(s for s in sections if len(s.materials) == 3)
     original = structure.material_identity(sections)
@@ -1174,9 +1070,9 @@ async def test_split_prompt_uses_material_references_but_omits_excluded_text(cli
     hidden_group = next(g for g in groups if hidden_ref in g['material_refs'])
     assert hidden_ref in hidden_group['assignment_locked_material_refs']
     assert hidden_ref in hidden_group['excluded_material_refs']
-    assert hidden_ref not in {m['material_ref'] for m in payload['material_overviews']}
+    assert 'material_overviews' not in payload
     assert sum(len(g['material_refs']) for g in groups) == sum(len(s.materials) for s in sections)
-    assert all(m['text'] for m in payload['material_overviews'])
+    assert any(g.get('body_summary') for g in groups)
 
 
 async def test_manual_split_records_title_ownership_without_freezing_the_chapter(client, test_db, monkeypatch):
@@ -1233,6 +1129,7 @@ async def test_unreadable_chapter_does_not_block_other_chapter_review(client, te
     from app.services.memoir import chapter_digests, section_digests
     from tests.test_memoir_chapter_pipeline import FakeChapterAI
     pid, uid = await _book(client, test_db)
+    await save_test_body_summaries(test_db, pid)
     _, chapters, sections = await _load_tree(test_db, project_id=pid)
     unreadable = next(s for s in sections if s.chapter_id == chapters[0].id)
     if unavailable == 'empty':
@@ -1275,11 +1172,11 @@ async def test_unreadable_chapter_does_not_block_other_chapter_review(client, te
 @pytest.mark.parametrize('count,text', [(4, '妈妈的课堂。'), (600, '童年往事。' * 1000), (2000, '\x01"\\' * 1000)],
                          ids=['short', '600-long-materials', '2000-json-escaped-materials'])
 @pytest.mark.parametrize('has_questions', [False, True])
-def test_structure_material_overviews_obey_serialized_budget(count, text, has_questions):
+def test_structure_prompt_uses_summaries_without_raw_material_or_questions(count, text, has_questions):
     sections = [SimpleNamespace(id=f's{i}', chapter_id='c', include_in_book=True, status='active', materials=[])
                 for i in range(4)]
     for i in range(count):
-        sections[i % len(sections)].materials.append(SimpleNamespace(id=f'm{i}', sort_order=i,
+        sections[i % len(sections)].materials.append(SimpleNamespace(id=f'm{i}', utterance_id=f'u{i}', sort_order=i,
             include_in_book=True, transcript_version=SimpleNamespace(content=text),
             utterance=SimpleNamespace(chat_message_id=f'q{i}')))
     refs = ModelReferenceMap('M', (m.id for s in sections for m in s.materials))
@@ -1288,6 +1185,7 @@ def test_structure_material_overviews_obey_serialized_budget(count, text, has_qu
             sections=[structure.SectionGroup(section_refs=[f'S{i+1}'], title='往事') for i in range(4)])]),
         chapter_refs=ModelReferenceMap('C', ['c']), section_refs=ModelReferenceMap('S', [s.id for s in sections]),
         locked_chapters=frozenset(), signature='', material_refs=refs,
+        body_digests={s.id: {'summary': '正文摘要', 'points': []} for s in sections},
         fixed_materials={refs.encode('m0'): ('S1', 'C1')},
         question_lines={f'q{i}': '您愿意再讲讲妈妈的课堂吗？' * 25 for i in range(count)} if has_questions else {})
     prompt = structure.build_structure_prompt(context, chapters=[SimpleNamespace(id='c', include_in_book=True)],
@@ -1296,12 +1194,8 @@ def test_structure_material_overviews_obey_serialized_budget(count, text, has_qu
     groups = payload['chapters'][0]['sections']
     assert {ref for g in groups for ref in g['material_refs']} == {refs.encode(f'm{i}') for i in range(count)}
     assert groups[0]['assignment_locked_material_refs'] == [refs.encode('m0')]
-    overviews = payload['material_overviews']
-    assert len(json.dumps({'material_overviews': overviews}, ensure_ascii=False, separators=(',', ':'))) <= 8000
+    assert 'material_overviews' not in payload
+    assert all(g['body_summary'] == '正文摘要' for g in groups)
+    assert text not in prompt
+    assert '您愿意再讲讲妈妈的课堂吗？' not in prompt
     assert len(prompt) <= 100_000
-    assert len({row['material_ref'] for row in overviews}) == len(overviews)
-    assert all(any(row['material_ref'] in g['material_refs'] for row in overviews) for g in groups)
-    assert all(row['text_truncated'] == (row['text'] != text) for row in overviews)
-    assert all(bool(row.get('interviewer_line')) == has_questions for row in overviews)
-    if count == 4:
-        assert len(overviews) == count and all(row['text'] == text for row in overviews)

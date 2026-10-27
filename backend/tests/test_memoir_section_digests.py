@@ -1,19 +1,17 @@
 import json
 
+import pytest
+from fastapi import HTTPException
+from pydantic import ValidationError
 from sqlalchemy import select
-
+from app.models.memoir import MemoirBookChapterDraftVersion, MemoirSectionDigest
+from app.schemas.memoir_section_digests import MemoirBodyDigest
 from app.services.ai_base import AITextServiceBase
-from app.domain.memoir.types import MemoirSemanticCacheStatus
-from app.models.memoir import MemoirSectionDigest, MemoirSectionMaterial
-from app.services.ai_timeouts import AIProviderTimeoutError
 from app.services.memoir import section_digests
 from tests.memoir_helpers import (
-    create_test_book_plan_with_chapters,
-    create_test_voice_transcript,
-    ensure_mobile_memoir_project,
-    memoir_source_ref,
+    create_test_book_plan_with_chapters, create_test_voice_transcript,
+    create_test_chapter_draft, ensure_mobile_memoir_project, memoir_source_ref,
 )
-
 
 class FakeDigestAI(AITextServiceBase):
     provider_name = "test"
@@ -38,24 +36,6 @@ class FakeDigestAI(AITextServiceBase):
         self.prompts.append(user_prompt)
         self.max_tokens.append(max_tokens)
         return json.dumps(self.payload, ensure_ascii=False)
-
-
-class TimeoutDigestAI(FakeDigestAI):
-    async def _call_llm(
-        self,
-        system_prompt,
-        user_prompt,
-        temperature=0.7,
-        max_tokens=4000,
-        timeout=60.0,
-        return_raw=False,
-    ):
-        self.calls += 1
-        raise AIProviderTimeoutError(
-            provider=self.provider_name,
-            model=self.model_name,
-            timeout_seconds=timeout,
-        )
 
 
 async def _bootstrapped_section(client, test_db):
@@ -87,219 +67,97 @@ async def _bootstrapped_section(client, test_db):
     return project_id, response.json()["sections"][0], (first, second)
 
 
-def _valid_digest_payload(material_id: str) -> dict:
-    return {
-        "summary": "朋友发来山桃花照片，随后两人重新联系并一起参加爬山。",
-        "focus": "一段疏远的关系如何重新搭上线。",
-        "covered_points": ["重新联系的契机", "第一次共同活动"],
-        "editorial_guidance": ["合并两处重复的爬山经过。"],
-        "candidate_issues": [
-            {
-                "issue_type": "meaning",
-                "question": "这次重新联系对你来说，最特别的地方是什么？",
-                "reason": "现在经过已经清楚，再补充个人意义会让重点更鲜明。",
-                "priority": "high",
-                "material_ids": [material_id],
-            }
-        ],
-    }
-
-
-async def test_section_digest_signature_reuses_same_material_input(client, test_db):
+async def _body(client, test_db):
     project_id, section, created = await _bootstrapped_section(client, test_db)
-    fake = FakeDigestAI(_valid_digest_payload("M1"))
+    await create_test_chapter_draft(test_db, project_id=project_id, chapter_id=section["chapter_id"],
+        content="他们全部都是新都本地人，并不是都姓杜。")
+    version = await test_db.scalar(select(MemoirBookChapterDraftVersion).where(
+        MemoirBookChapterDraftVersion.project_id == project_id))
+    return project_id, section, created, version
 
-    first = await section_digests.generate_or_reuse_section_digest(
-        test_db,
-        project_id=project_id,
-        section_id=section["id"],
-        ai_client=fake,
-    )
-    await test_db.commit()
-    second = await section_digests.generate_or_reuse_section_digest(
-        test_db,
-        project_id=project_id,
-        section_id=section["id"],
-        ai_client=fake,
-    )
-    await test_db.commit()
 
-    assert second.id == first.id
-    assert second.input_signature == first.input_signature
+async def test_backfill_reads_only_body_and_reuses_cache(client, test_db):
+    project_id, section, created, version = await _body(client, test_db)
+    original = version.content
+    fake = FakeDigestAI({"summary": "家人都是新都本地人，不是都姓杜。", "points": []})
+    first = await section_digests.generate_or_reuse_section_digest(test_db,
+        project_id=project_id, section_id=section["id"], ai_client=fake)
+    await test_db.commit()
+    second = await section_digests.generate_or_reuse_section_digest(test_db,
+        project_id=project_id, section_id=section["id"], ai_client=fake)
+    assert first.id == second.id
     assert fake.calls == 1
-    assert fake.max_tokens == [4000]
+    assert original in fake.prompts[0]
+    assert "朋友发来一张山桃花照片" not in fake.prompts[0]
     assert created[0]["utterance_id"] not in fake.prompts[0]
-    assert "material_id: M1" in fake.prompts[0]
-    assert "不要逐条检查时间、地点、人物" in fake.prompts[0]
-    assert first.digest_json["candidate_issues"][0]["material_ids"] == [
-        created[0]["utterance_id"]
-    ]
-    assert first.digest_json["editorial_guidance"] == [
-        "合并两处重复的爬山经过。"
-    ]
-
-    response = await client.get(
-        f"/api/memoir/projects/{project_id}/sections/{section['id']}/digest"
-    )
-    assert response.status_code == 200
-    assert response.json()["digest"]["focus"] == "一段疏远的关系如何重新搭上线。"
+    assert version.content == original
+    assert "editorial_guidance" not in first.digest_json
 
 
-async def test_section_change_removes_previous_digest(client, test_db):
-    project_id, section, created = await _bootstrapped_section(client, test_db)
-    fake = FakeDigestAI(_valid_digest_payload("M1"))
-    digest = await section_digests.generate_or_reuse_section_digest(
-        test_db,
-        project_id=project_id,
-        section_id=section["id"],
-        ai_client=fake,
-    )
-    await test_db.commit()
-
-    update = await client.patch(
-        f"/api/memoir/projects/{project_id}/sections/{section['id']}",
-        json={
-            "title": "重新联系与第一次爬山",
-            "expected_version": section["version"],
-        },
-    )
-    assert update.status_code == 200
-
-    assert await test_db.get(MemoirSectionDigest, digest.id) is None
-    current = await client.get(
-        f"/api/memoir/projects/{project_id}/sections/{section['id']}/digest"
-    )
-    assert current.status_code == 404
-
-
-async def test_section_digest_rejects_material_outside_allowlist(client, test_db):
-    project_id, section, _ = await _bootstrapped_section(client, test_db)
-    fake = FakeDigestAI(_valid_digest_payload("M99"))
-
-    digest = await section_digests.generate_or_reuse_section_digest(
-        test_db,
-        project_id=project_id,
-        section_id=section["id"],
-        ai_client=fake,
-    )
-    await test_db.commit()
-
-    assert digest.status == MemoirSemanticCacheStatus.FAILED.value
-    assert digest.digest_json["generation"]["error_type"] == "ValueError"
-    assert digest.error_message == "小节审阅服务暂时不可用，请稍后重试"
-
-
-async def test_section_digest_timeout_persists_model_and_deadline(client, test_db):
-    project_id, section, _ = await _bootstrapped_section(client, test_db)
-    fake = TimeoutDigestAI({})
-
-    digest = await section_digests.generate_or_reuse_section_digest(
-        test_db,
-        project_id=project_id,
-        section_id=section["id"],
-        ai_model="deepseek-v4-pro",
-        ai_client=fake,
-    )
-    await test_db.commit()
-
-    generation = digest.digest_json["generation"]
-    assert digest.status == MemoirSemanticCacheStatus.FAILED.value
-    assert digest.error_message == "模型处理超过 180 秒，请稍后重试"
-    assert generation["requested_model"] == "deepseek-v4-pro"
-    assert generation["provider"] == "test"
-    assert generation["model"] == "test-section-digest"
-    assert generation["timeout_seconds"] == 180.0
-    assert generation["error_type"] == "AIProviderTimeoutError"
-
-
-async def test_material_order_changes_section_digest_signature(client, test_db):
-    project_id, section, created = await _bootstrapped_section(client, test_db)
-    before = await section_digests.load_section_digest_context(
-        test_db,
-        project_id=project_id,
-        section_id=section["id"],
-    )
-
-    move = await client.post(
-        f"/api/memoir/projects/{project_id}/section-materials/{created[1]['utterance_id']}/move",
-        json={
-            "target_section_id": section["id"],
-            "target_sort_order": 0,
-        },
-    )
-    assert move.status_code == 200
-    after = await section_digests.load_section_digest_context(
-        test_db,
-        project_id=project_id,
-        section_id=section["id"],
-    )
-
-    assert before.input_signature != after.input_signature
-    assert [item.material_id for item in after.materials] == [
-        created[1]["utterance_id"],
-        created[0]["utterance_id"],
-    ]
-
-
-async def test_excluded_material_is_not_sent_to_digest_model(client, test_db):
-    project_id, section, created = await _bootstrapped_section(client, test_db)
-    excluded = await test_db.scalar(
-        select(MemoirSectionMaterial).where(
-            MemoirSectionMaterial.project_id == project_id,
-            MemoirSectionMaterial.section_id == section["id"],
-            MemoirSectionMaterial.utterance_id == created[1]["utterance_id"],
-        )
-    )
-    assert excluded is not None
-    excluded.include_in_book = False
+async def test_embedded_summary_is_reused_without_second_model_call(client, test_db):
+    project_id, section, _, version = await _body(client, test_db)
+    summary = MemoirBodyDigest(summary="家人来自新都。")
+    version.section_snapshot_json = [{**s, **section_digests.digest_snapshot(s["content"], summary)}
+        for s in version.section_snapshot_json]
     await test_db.flush()
-
-    fake = FakeDigestAI(_valid_digest_payload("M1"))
-    digest = await section_digests.generate_or_reuse_section_digest(
-        test_db,
-        project_id=project_id,
-        section_id=section["id"],
-        ai_client=fake,
-    )
-    await test_db.commit()
-
-    assert digest.status == MemoirSemanticCacheStatus.READY.value
-    assert created[0]["utterance_id"] not in fake.prompts[0]
-    assert "material_id: M1" in fake.prompts[0]
-    assert "朋友发来一张山桃花照片" in fake.prompts[0]
-    assert created[1]["utterance_id"] not in fake.prompts[0]
-    assert "那天六个人一起爬了西山" not in fake.prompts[0]
+    fake = FakeDigestAI({})
+    first = await section_digests.get_current_section_digest(test_db, project_id=project_id, section_id=section["id"])
+    second = await section_digests.generate_or_reuse_section_digest(test_db,
+        project_id=project_id, section_id=section["id"], ai_client=fake)
+    assert first.id == second.id
+    assert first.created_at == second.created_at == version.created_at
+    assert second.digest_json["summary"] == "家人来自新都。"
+    assert fake.calls == 0
+    assert not (await test_db.scalars(select(MemoirSectionDigest))).all()
 
 
-async def test_question_changes_invalidate_digest_and_reach_both_context_readers(client, test_db):
-    from app.models.memoir import MemoirChatMessage, MemoirSection
-    from sqlalchemy.orm import selectinload
-    from app.services.memoir.material_roles import interviewer_lines
+async def test_body_edit_invalidates_old_summary_even_if_sources_unchanged(client, test_db):
+    project_id, section, _, version = await _body(client, test_db)
+    fake = FakeDigestAI({"summary": "家人来自新都。"})
+    old = await section_digests.generate_or_reuse_section_digest(test_db,
+        project_id=project_id, section_id=section["id"], ai_client=fake)
+    old_signature = old.input_signature
+    version.section_snapshot_json = [{**s, "content": "我后来住在成都。"} for s in version.section_snapshot_json]
+    await test_db.flush()
+    assert await section_digests.get_current_section_digest(test_db, project_id=project_id, section_id=section["id"]) is None
+    current = await section_digests.generate_or_reuse_section_digest(test_db,
+        project_id=project_id, section_id=section["id"], ai_client=fake)
+    assert current.input_signature != old_signature
+    assert fake.calls == 2
 
-    project_id, section, sources = await _bootstrapped_section(client, test_db)
-    source = sources[0]
-    question = MemoirChatMessage(
-        project_id=project_id, voice_session_id=source["session"]["id"], role="assistant",
-        content_text="朋友怎样邀请您爬山？", content_status="final", turn_index=-1,
-    )
-    test_db.add(question)
-    await test_db.commit()
-    before = await section_digests.load_section_digest_context(test_db, project_id=project_id, section_id=section["id"])
-    fake = FakeDigestAI(_valid_digest_payload("M1"))
-    await section_digests.generate_or_reuse_section_digest(
-        test_db, project_id=project_id, section_id=section["id"], ai_client=fake,
-    )
-    assert question.content_text in fake.prompts[0]
-    loaded = await test_db.scalar(select(MemoirSection).where(MemoirSection.id == section["id"]).options(
-        selectinload(MemoirSection.materials).selectinload(MemoirSectionMaterial.utterance),
-        selectinload(MemoirSection.materials).selectinload(MemoirSectionMaterial.transcript_version),
-    ))
-    lines = await interviewer_lines(test_db, (item.utterance.chat_message_id for item in loaded.materials))
-    assert section_digests.section_digest_context(loaded, question_lines=lines).input_signature == before.input_signature
-    question.content_text = "朋友什么时候邀请您爬山？"
-    await test_db.commit()
-    after = await section_digests.load_section_digest_context(test_db, project_id=project_id, section_id=section["id"])
-    assert after.input_signature != before.input_signature
-    assert await section_digests.get_current_section_digest(
-        test_db, project_id=project_id, section_id=section["id"],
-    ) is None
+
+async def test_no_summary_before_body_exists(client, test_db):
+    project_id, section, _ = await _bootstrapped_section(client, test_db)
+    assert await section_digests.get_current_section_digest(test_db, project_id=project_id, section_id=section["id"]) is None
+    with pytest.raises(HTTPException) as exc:
+        await section_digests.generate_or_reuse_section_digest(test_db,
+            project_id=project_id, section_id=section["id"], ai_client=FakeDigestAI({}))
+    assert exc.value.status_code == 409
+
+
+def test_summary_rejects_editorial_instructions_and_mismatched_body():
+    with pytest.raises(ValidationError):
+        MemoirBodyDigest.model_validate({"summary": "新都", "editorial_guidance": ["合并姓杜更正"]})
+    data = {"content": "旧正文", **section_digests.digest_snapshot("旧正文", MemoirBodyDigest(summary="旧摘要"))}
+    assert section_digests.snapshot_digest(data).summary == "旧摘要"
+    assert section_digests.snapshot_digest({**data, "content": "新正文"}) is None
+
+
+async def test_backfill_does_not_publish_summary_after_concurrent_body_edit(client, test_db):
+    from sqlalchemy.ext.asyncio import AsyncSession
+    project_id, section, _, version = await _body(client, test_db)
+    version_id = version.id
+
+    class ConcurrentEditAI(FakeDigestAI):
+        async def _call_llm(self, *args, **kwargs):
+            async with AsyncSession(test_db.bind) as writer:
+                saved = await writer.get(MemoirBookChapterDraftVersion, version_id)
+                saved.section_snapshot_json = [{**item, "content": "用户刚刚修改的正文。"} for item in saved.section_snapshot_json]
+                await writer.commit()
+            return await super()._call_llm(*args, **kwargs)
+
+    with pytest.raises(HTTPException) as exc:
+        await section_digests.generate_or_reuse_section_digest(test_db,
+            project_id=project_id, section_id=section["id"], ai_client=ConcurrentEditAI({"summary": "过时摘要"}))
+    assert exc.value.status_code == 409
+    assert not (await test_db.scalars(select(MemoirSectionDigest))).all()

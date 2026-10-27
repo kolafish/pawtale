@@ -55,7 +55,7 @@ async def _setup(client, test_db, monkeypatch):
         chapter_material_id=materials[0]["utterance_id"],
         draft_material_ids=[materials[0]["utterance_id"]],
     )
-    for module in ("chapter_generation", "chapter_digests", "section_digests", "book_reviews"):
+    for module in ("chapter_generation", "chapter_digests", "section_digests", "book_reviews", "chapter_structure"):
         monkeypatch.setattr(f"app.services.memoir.{module}.get_ai_service", lambda *_: fake)
     call = fake._call_llm
     async def with_book_review(system, prompt, **kwargs):
@@ -85,6 +85,12 @@ async def test_backend_alone_creates_chapter_and_reuses_same_input(client, test_
         test_db, project_id=project_id, chapter_id=chapter_id
     )
     assert latest and "朋友" in latest.content
+    body_at = next(i for i, prompt in enumerate(fake.prompts) if "请把下面的素材版本整理" in prompt)
+    digest_at = next(i for i, prompt in enumerate(fake.prompts) if "请通读回忆录章节" in prompt)
+    structure_at = next(i for i, prompt in enumerate(fake.prompts) if "审阅现有回忆录目录" in prompt)
+    assert body_at < digest_at < structure_at
+    assert latest.section_snapshot_json[0]["body_digest"]["summary"]
+    assert not any("你只概括当前已保存的小节正文" in prompt for prompt in fake.prompts)
     events = list((await test_db.scalars(select(MemoirAutomationEvent).where(
         MemoirAutomationEvent.project_id == project_id,
     ))).all())
@@ -166,7 +172,7 @@ async def test_five_chapter_review_does_not_cover_six_chapters_when_an_update_fa
             status=MemoirBookChapterDraftStatus.DRAFT)
         version.created_by = "ai"
     fake = LayeredBookAI()
-    for module in ("chapter_generation", "chapter_digests", "section_digests", "book_reviews"):
+    for module in ("chapter_generation", "chapter_digests", "section_digests", "book_reviews", "chapter_structure"):
         monkeypatch.setattr(f"app.services.memoir.{module}.get_ai_service", lambda *_: fake)
     clear_editing_job_handlers()
     register_memoir_editing_job_handlers()
@@ -221,7 +227,7 @@ async def test_five_chapter_review_does_not_cover_six_chapters_when_an_update_fa
 
     # After chapter recovery the normal scheduler reviews the new six-chapter input exactly once.
     await chapter_generation.generate_and_save_chapter_draft(test_db, project_id=project_id,
-        chapter_id=first_chapter_id, editorial_guidance=[], ai_client=fake, automatic=True)
+        chapter_id=first_chapter_id, ai_client=fake, automatic=True)
     await automatic_book_draft.schedule_book_draft(test_db, project_id=project_id)
     await test_db.commit()
     assert not await run_test_editing_job(test_db, parent_id)
@@ -335,7 +341,7 @@ async def test_polish_setting_change_schedules_one_refresh_for_existing_draft(cl
     project_id, chapter_id, _, fake, _ = await _setup(client, test_db, monkeypatch)
     await chapter_generation.generate_and_save_chapter_draft(
         test_db, project_id=project_id, chapter_id=chapter_id,
-        editorial_guidance=[], ai_client=fake,
+        ai_client=fake,
     )
     await test_db.commit()
     scheduled: list[str] = []
@@ -357,7 +363,7 @@ async def test_old_confirmation_candidate_is_requeued_under_automatic_policy(cli
     project_id, chapter_id, _, fake, _ = await _setup(client, test_db, monkeypatch)
     _, version = await chapter_generation.generate_and_save_chapter_draft(
         test_db, project_id=project_id, chapter_id=chapter_id,
-        editorial_guidance=[], ai_client=fake,
+        ai_client=fake,
     )
     context = await chapter_generation.load_chapter_generation_context(
         test_db, project_id=project_id, chapter_id=chapter_id,
@@ -388,7 +394,7 @@ async def test_automatic_generation_preserves_manual_text_or_discards_stale_outp
 ):
     project_id, chapter_id, section_id, fake, _ = await _setup(client, test_db, monkeypatch)
     _, initial = await chapter_generation.generate_and_save_chapter_draft(
-        test_db, project_id=project_id, chapter_id=chapter_id, editorial_guidance=[], ai_client=fake
+        test_db, project_id=project_id, chapter_id=chapter_id, ai_client=fake
     )
     await test_db.commit()
     values = {
@@ -431,8 +437,7 @@ async def test_automatic_generation_preserves_manual_text_or_discards_stale_outp
     )
     with pytest.raises(expected) as caught:
         await chapter_generation.generate_and_save_chapter_draft(
-            test_db, project_id=project_id, chapter_id=chapter_id, editorial_guidance=[],
-            ai_client=fake, automatic=True, force_refresh=True,
+            test_db, project_id=project_id, chapter_id=chapter_id,             ai_client=fake, automatic=True, force_refresh=True,
         )
     latest = await chapter_generation.latest_chapter_draft_version(
         test_db, project_id=project_id, chapter_id=chapter_id
@@ -546,7 +551,7 @@ async def test_only_fact_conflict_during_generation_requires_confirmation(client
     if issue_type == "privacy":
         _, version = await chapter_generation.generate_and_save_chapter_draft(
             test_db, project_id=project_id, chapter_id=chapter_id,
-            editorial_guidance=[], ai_client=fake, automatic=True,
+            ai_client=fake, automatic=True,
         )
         draft, confirmed_version = await chapter_generation.confirm_chapter_draft(
             test_db, project_id=project_id, chapter_id=chapter_id,
@@ -556,7 +561,7 @@ async def test_only_fact_conflict_during_generation_requires_confirmation(client
         return
     with pytest.raises(chapter_generation.ChapterDraftCandidateReady):
         await chapter_generation.generate_and_save_chapter_draft(test_db, project_id=project_id,
-            chapter_id=chapter_id, editorial_guidance=[], ai_client=fake, automatic=True)
+            chapter_id=chapter_id, ai_client=fake, automatic=True)
     assert await chapter_generation.latest_chapter_draft_version(test_db, project_id=project_id,
         chapter_id=chapter_id) is None
 
