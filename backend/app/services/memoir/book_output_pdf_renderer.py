@@ -539,6 +539,7 @@ class PDFBookBuilder:
         display_size: str = "full_width",
         max_height: int | None = None,
         wrap_right: bool = False,
+        wrap_max_height: float | None = None,
     ) -> bool:
         if not image_path.exists() or not image_path.is_file():
             return False
@@ -553,6 +554,8 @@ class PDFBookBuilder:
                 image_width = content_width * 0.38
                 image_height = image_width * height / width
                 available_height = self.layout.page_height - self.layout.margin_top - self.layout.margin_bottom - self.layout.line_height
+                if wrap_max_height is not None:
+                    available_height = min(available_height, wrap_max_height)
                 if image_height > available_height:
                     image_width *= available_height / image_height
                     image_height = available_height
@@ -770,7 +773,7 @@ class PDFBookBuilder:
             avoid_single_char_last_line=True,
         )
 
-    def add_section_heading(self, text: str, *, following_image_height: float = 0) -> None:
+    def add_section_heading(self, text: str, *, following_image_height: float = 0) -> float:
         self.finish_image_wrap()
         template = self.layout.manuscript_template
         font_size = self.layout.font_size + 2
@@ -792,11 +795,16 @@ class PDFBookBuilder:
         heading_lines = _wrap_pdf_line(
             text.strip(), max_units, avoid_single_char_last_line=True
         )
-        self._ensure_space_height(
-            len(heading_lines) * heading_line_height
-            + spacing_after
-            + max(2 * self.layout.line_height, following_image_height)
-        )
+        heading_height = len(heading_lines) * heading_line_height + spacing_after
+        image_space = 0.0
+        if following_image_height:
+            # Match the illustration spacer and add_image's baseline offset.
+            image_gap = int(self.layout.line_height * 0.25)
+            bottom_gap = 8 - self.layout.font_size
+            available_height = self.layout.page_height - self.layout.margin_top - self.layout.margin_bottom
+            following_image_height = min(following_image_height, available_height - heading_height - image_gap - bottom_gap)
+            image_space = image_gap + following_image_height + bottom_gap
+        self._ensure_space_height(heading_height + max(2 * self.layout.line_height, image_space))
         heading_y = self.y
         heading_x = self._content_left()
         self.add_text(
@@ -838,6 +846,8 @@ class PDFBookBuilder:
                     width=self.layout.page_width - 2 * self.layout.margin_x,
                     height=0, color=(0.83, 0.86, 0.86), line_width=0.5,
                 )
+
+        return following_image_height
 
     def add_centered(
         self,
