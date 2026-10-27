@@ -1356,6 +1356,21 @@ class MemoirBookShare(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, nullable=False)
 
 
+class MemoirExcerptShare(Base):
+    __tablename__ = "memoir_excerpt_shares"
+    __table_args__ = (CheckConstraint("char_length(content) BETWEEN 1 AND 120", name="ck_memoir_excerpt_share_length"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id: Mapped[str] = mapped_column(String(36), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    chapter_id: Mapped[str] = mapped_column(String(36), ForeignKey("memoir_book_plan_chapters.id", ondelete="CASCADE"), nullable=False)
+    version_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("memoir_book_chapter_draft_versions.id", ondelete="SET NULL"), nullable=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    book_title: Mapped[str] = mapped_column(Text, nullable=False)
+    chapter_title: Mapped[str] = mapped_column(Text, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, nullable=False)
+
+
 class MemoirChapterShare(Base):
     __tablename__ = "memoir_chapter_shares"
     __table_args__ = (CheckConstraint("card_excerpt_start >= 0 AND card_excerpt_length BETWEEN 0 AND 48", name="ck_memoir_chapter_shares_card_excerpt"),)

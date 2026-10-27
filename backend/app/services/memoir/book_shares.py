@@ -18,12 +18,13 @@ from app.clock import utcnow_naive
 from app.config import get_settings
 from app.domain.memoir.types import MemoirCreatedBy, MemoirOutputStatus
 from app.models.memoir import (
-    AudioFile, MemoirBookOutput, MemoirBookOutputVersion, MemoirBookShare,
+    AudioFile, MemoirBookOutput, MemoirBookOutputVersion, MemoirBookShare, MemoirExcerptShare,
     MemoirBookPlan, MemoirBookPlanChapter, MemoirBookChapterDraftVersion, MemoirChapterShare, MemoirSection, MemoirSectionMaterial, MemoirSectionShare, MemoirImageAsset,
 )
 from app.models.projects import Project
 from app.schemas.memoir_book import (
     MemoirBookOutputResponse, MemoirBookManuscriptIllustration,
+    MemoirExcerptShareRequest, MemoirExcerptShareResponse, MemoirExcerptShareCreated,
     MemoirBookOutputVersionSummaryResponse,
     MemoirBookShareCreateResponse,
     MemoirReadingShareCardSelection, MemoirReadingShareCardRequest,
@@ -354,6 +355,12 @@ def _like_target(resource: ShareResource) -> ShareLikeTarget:
 
 async def reading_like_target(db: AsyncSession, token: str) -> ShareLikeTarget:
     """Readers like what the link shows: the whole book or one chapter."""
+    if token.startswith("x1."):
+        excerpt = await _excerpt_share(db, token)
+        chapter = await db.get(MemoirBookPlanChapter, excerpt.chapter_id)
+        if chapter is None:
+            raise HTTPException(404, "分享链接已失效")
+        return chapter_target(chapter)
     resource, _ = await readable_share(db, token)
     return _like_target(resource)
 
@@ -361,6 +368,52 @@ async def reading_like_target(db: AsyncSession, token: str) -> ShareLikeTarget:
 async def read_share(db: AsyncSession, token: str) -> MemoirBookOutputResponse:
     resource, version = await readable_share(db, token)
     return await _resource_reading_response(db, resource, version, token=token)
+
+
+async def create_excerpt_share(
+    db: AsyncSession, *, user_id: str, project_id: str, chapter_id: str, selection: MemoirExcerptShareRequest,
+) -> MemoirExcerptShareCreated:
+    await _owned_resource(db, user_id, project_id, chapter_id)
+    from app.services.memoir.sections import lock_project_chapters
+    await lock_project_chapters(db, project_id=project_id)
+    chapter = await _owned_resource(db, user_id, project_id, chapter_id)
+    await db.refresh(chapter)
+    version, stale = await _current_version(db, user_id=user_id, project_id=project_id, chapter_id=chapter_id)
+    if stale or version is None or version.id != selection.version_id:
+        raise HTTPException(409, "正文已更新，请重新选择划线内容")
+    content = selection.content.strip()
+    if not content or content not in version.content:
+        raise HTTPException(422, "请选择当前章节中的原文")
+    project = await db.get(Project, project_id)
+    token = "x1." + secrets.token_urlsafe(32)
+    share = MemoirExcerptShare(project_id=project_id, chapter_id=chapter_id, version_id=version.id,
+        token_hash=session_token_hash(token), book_title=project.title, chapter_title=chapter.title, content=content)
+    db.add(share)
+    await db.commit()
+    return MemoirExcerptShareCreated(token=token, **_excerpt_response(share).model_dump())
+
+
+async def _excerpt_share(db: AsyncSession, token: str) -> MemoirExcerptShare:
+    if not re.fullmatch(r"x1\.[A-Za-z0-9_-]{43}", token):
+        raise HTTPException(404, "分享链接已失效")
+    share = await db.scalar(select(MemoirExcerptShare).where(MemoirExcerptShare.token_hash == session_token_hash(token)))
+    if share is None:
+        raise HTTPException(404, "分享链接已失效")
+    return share
+
+
+def _excerpt_response(share: MemoirExcerptShare) -> MemoirExcerptShareResponse:
+    return MemoirExcerptShareResponse(book_title=share.book_title, chapter_title=share.chapter_title, content=share.content)
+
+
+async def read_excerpt_share(db: AsyncSession, token: str) -> MemoirExcerptShareResponse:
+    return _excerpt_response(await _excerpt_share(db, token))
+
+
+async def excerpt_share_card(db: AsyncSession, token: str) -> bytes:
+    from app.services.memoir.reading_share_card import render_excerpt_share_card
+    share = await read_excerpt_share(db, token)
+    return await asyncio.to_thread(render_excerpt_share_card, **share.model_dump())
 
 
 async def shared_card(db: AsyncSession, token: str, *, version_id: str = "", excerpt_start: int = 0, excerpt_length: int = 0) -> bytes:

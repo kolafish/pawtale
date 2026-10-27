@@ -1,5 +1,42 @@
 <import src="../../templates/share-likes.wxml" />
-<view class="ui-page-shell {{pageClass}}">
+<view wx:if="{{excerptMode}}" class="ui-page-shell {{pageClass}} excerpt-page">
+  <view wx:if="{{loading}}" class="reader-state ui-card">正在打开正文…</view>
+  <block wx:else>
+    <block wx:if="{{excerptMode === 'select'}}">
+      <view class="excerpt-heading">
+        <text class="reader-title">{{excerptChapterTitle || '选择划线内容'}}</text>
+        <text class="excerpt-help">长按正文，拖动选区选择 1–120 字。好友只能看到选中的片段。</text>
+      </view>
+      <editor id="excerpt-editor" class="excerpt-selector ui-card" read-only="{{true}}" bindready="onExcerptEditorReady" />
+      <view class="excerpt-actions">
+        <button class="ui-share-primary" catchtouchend="previewExcerptSelection" loading="{{excerptBusy}}" disabled="{{excerptBusy || excerptReloadRequired}}">预览划线卡片</button>
+      </view>
+    </block>
+    <block wx:elif="{{excerptMode === 'preview'}}">
+      <text class="excerpt-help">好友将看到这段原文，请确认没有不想公开的内容。</text>
+      <image class="excerpt-card-image" src="{{excerptImageUrl}}" data-url="{{excerptImageUrl}}" mode="widthFix" bindload="onExcerptImageLoad" binderror="onExcerptImageError" />
+      <text class="excerpt-help">已选 {{excerptSelectionCount}} 字 · 仅分享此片段</text>
+      <view class="excerpt-actions">
+        <button class="ui-share-more" bindtap="reselectExcerpt">重新选择</button>
+        <button class="ui-share-primary" open-type="{{excerptImageReady ? 'share' : ''}}" disabled="{{!excerptImageReady}}">分享划线</button>
+      </view>
+    </block>
+    <block wx:elif="{{excerptContent}}">
+      <view class="excerpt-paper ui-card">
+        <text class="excerpt-eyebrow">划线分享</text>
+        <text class="excerpt-quote" user-select="{{true}}">{{excerptContent}}</text>
+        <text class="excerpt-attribution">选自《{{excerptBookTitle}}》</text>
+        <text class="excerpt-help">{{excerptChapterTitle}}</text>
+      </view>
+      <template is="shareLikeBar" data="{{shareLikeVisible, shareLiked, shareCanLike, shareLikeBusy, shareLikeAvatars, shareLikeText, shareLikeProfileMissing, shareForward: true}}" />
+    </block>
+    <view wx:if="{{error}}" class="reader-state error ui-card">
+      <text>{{error}}</text>
+      <button wx:if="{{excerptMode === 'shared' || !excerptChapterTitle || excerptReloadRequired}}" class="ui-share-more" bindtap="retryExcerpt">{{excerptReloadRequired ? '重新载入正文' : '重试'}}</button>
+    </view>
+  </block>
+</view>
+<view wx:else class="ui-page-shell {{pageClass}}">
   <text wx:if="{{sharePreview}}" class="share-preview-notice">好友将看到这些内容</text>
   <view wx:if="{{loading}}" class="reader-state ui-card">
     <text>正在打开成书...</text>

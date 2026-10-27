@@ -1,4 +1,6 @@
 import { downloadAuthenticatedFile } from "../../services/authenticated-media";
+import { INITIAL_EXCERPT_DATA, readingExcerptMethods } from "../../services/reading-excerpt-share";
+import { excerptShareMessage } from "../../services/share";
 import type {
   MemoirBookAudioPlan,
   MemoirBookManuscriptIllustration,
@@ -61,7 +63,7 @@ type ReaderData = Omit<BookReadingData, "bookPreviewTocItems"> & {
   bookPreviewTocItems: BookReaderTocItem[];
 };
 
-type BookReaderData = ReaderData & BookTTSState & ShareLikeData & {
+type BookReaderData = ReaderData & BookTTSState & ShareLikeData & typeof INITIAL_EXCERPT_DATA & {
   responseToken: string;
   pageClass: string;
   loading: boolean;
@@ -318,6 +320,11 @@ function chapterReaderData(
 }
 
 definePage<BookReaderData>()({
+  excerptSource: "",
+  excerptVersionId: "",
+  excerptToken: "",
+  excerptGeneration: 0,
+  excerptEditor: null as WechatMiniprogram.EditorContext | null,
   audioPlayback: pageRuntime(() => new AudioPlaybackController()),
   ttsProgress: pageRuntime(() => new VoiceAssistantTTSProgressRuntime()),
   playToken: 0,
@@ -338,6 +345,7 @@ definePage<BookReaderData>()({
 
 
   data: {
+    ...INITIAL_EXCERPT_DATA,
     responseToken: "",
     pageClass: accessibilityPageClass(PAGE_CLASS),
     loading: false,
@@ -374,6 +382,7 @@ definePage<BookReaderData>()({
   },
 
   ...shareLikeMethods,
+  ...readingExcerptMethods,
 
   startMyStory() {
     if (!this.data.readerDemo) return;
@@ -384,6 +393,15 @@ definePage<BookReaderData>()({
   async onLoad(query: PageQuery = {}) {
     const projectId = queryParam(query, "projectId");
     const chapterId = queryParam(query, "chapterId");
+    this.excerptToken = queryParam(query, "excerptToken");
+    if (this.excerptToken || queryParam(query, "excerptSelect") === "1") {
+      this.setData({ projectId, chapterId, excerptMode: this.excerptToken ? "shared" : "select" });
+      setPageNavigationTitle(this.excerptToken ? "划线分享" : "选择划线内容");
+      if (this.excerptToken) await this.loadExcerptSnapshot();
+      else if (projectId && chapterId) await this.loadExcerptSource();
+      else this.setData({ error: "缺少章节信息" });
+      return;
+    }
     const sectionId = queryParam(query, "sectionId");
     const versionId = queryParam(query, "versionId");
     const shareToken = queryParam(query, "shareToken");
@@ -418,6 +436,11 @@ definePage<BookReaderData>()({
   },
 
   onShow() {
+    if (this.data.excerptMode) {
+      if (this.data.excerptMode === "shared" && !this.data.loading) void this.loadExcerptSnapshot();
+      else if (this.data.excerptMode === "select" && !this.excerptSource && !this.data.loading) void this.loadExcerptSource();
+      return;
+    }
     const returningToShare = Boolean(this.readingToken && this.sharedReadingShown);
     if (this.readingToken) this.sharedReadingShown = true;
     this.setData(accessibilityPagePatch(PAGE_CLASS));
@@ -432,6 +455,7 @@ definePage<BookReaderData>()({
   },
 
   onShareAppMessage() {
+    if (this.data.excerptMode) return excerptShareMessage(this.data.excerptImageReady ? this.excerptToken : "", this.data.excerptContent);
     const token = this.data.error ? "" : this.readingToken;
     return readingShareMessage(this.data.readerTitle, token, token ? readingShareImageUrl(token, undefined, this.readerAudioVersionId) : "");
   },
@@ -466,11 +490,13 @@ definePage<BookReaderData>()({
   },
 
   onHide() {
+    if (this.data.excerptMode) this.invalidateExcerptRequests();
     this.saveReadingProgress();
     this.stopPlayback();
   },
 
   onUnload() {
+    if (this.data.excerptMode) this.invalidateExcerptRequests();
     this.saveReadingProgress();
     this.stopPlayback();
   },

@@ -138,6 +138,11 @@ export const readingShareMethods = defineReadingShareMethods({
     const { projectId, chapterId, sectionId } = this.readingShareTarget();
     wx.navigateTo({ url: pageUrl("/pages/book-reader/index", { projectId, chapterId, sectionId, sharePreview: "1" }) });
   },
+  openExcerptShare() {
+    const { projectId, chapterId, available } = this.readingShareTarget();
+    if (!projectId || !chapterId || !available) return;
+    wx.navigateTo({ url: pageUrl("/pages/book-reader/index", { projectId, chapterId, excerptSelect: "1" }) });
+  },
   openReadingShareMore() {
     if (this.data.bookShareBusy) return;
     const { chapterId, sectionId } = this.readingShareTarget();

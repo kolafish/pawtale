@@ -6,6 +6,7 @@
 }
 .has-reader .ui-share-actions {
   align-items: stretch;
+  flex-wrap: wrap;
 }
 .has-reader .hero-reading-action,
 .has-reader .ui-share-primary,

@@ -1,4 +1,5 @@
 import type {
+  MemoirExcerptShare,
   MemoirBookAudioRequest,
   MemoirBookAudioPlan,
   MemoirAudioPlanRequest,
@@ -44,6 +45,16 @@ function memoirBookSharePath(projectId: string, chapterId: string, sectionId = "
   const path = memoirProjectPath(projectId, `/book-output/share${preview ? "/preview" : ""}`);
   const query = [chapterId ? `chapter_id=${encodeURIComponent(chapterId)}` : "", sectionId ? `section_id=${encodeURIComponent(sectionId)}` : ""].filter(Boolean).join("&");
   return query ? `${path}?${query}` : path;
+}
+
+export function createMemoirExcerptShare(projectId: string, chapterId: string, data: { version_id: string; content: string }): Promise<MemoirExcerptShare & { token: string }> {
+  return memoirRequest(memoirProjectPath(projectId, `/chapters/${encodeURIComponent(chapterId)}/excerpt-shares`), {
+    method: "POST", data, invalidatesSnapshots: false,
+  });
+}
+
+export function readMemoirExcerptShare(token: string): Promise<MemoirExcerptShare> {
+  return request("/api/mobile/memoir/excerpt-shares/read", { method: "POST", data: { token } });
 }
 
 export function getMemoirBookShareStatus(projectId: string, chapterId = "", sectionId = ""): Promise<MemoirBookShareStatus> {

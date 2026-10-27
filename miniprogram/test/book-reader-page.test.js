@@ -42,6 +42,7 @@ function loadBookReaderPage(voiceApiExports = {}, ttsExports = {}) {
     ...ttsExports,
   });
   clearModule("../services/share-likes.ts");
+  clearModule("../services/reading-excerpt-share.ts");
   return loadPageModule("../pages/book-reader/index.ts");
 }
 
@@ -822,4 +823,125 @@ for (const shared of [false, true]) test(`${shared ? "shared" : "owner"} chapter
   assert.deepEqual(context.data.shareImages.map(image => image.paragraphBefore), [0, 2, 3]);
   assert.equal(context.data.shareImages.every(image => image.chapterId === "chapter-1" && image.sectionId === "section-1" && image.url), true);
   assert.equal(downloads.length, shared ? 0 : 3);
+});
+
+function excerptContext(api = {}) {
+  global.wx = { getStorageSync: () => "", setStorageSync() {}, hideShareMenu() {}, showShareMenu() {}, setNavigationBarTitle() {} };
+  const { page } = loadBookReaderPage(api);
+  const context = pageContext(page);
+  context.loadShareLikes = async (target) => { context.likeTarget = target; };
+  return context;
+}
+
+test("excerpt selection previews only the chosen text and forwards the same immutable card", async () => {
+  let request;
+  const source = "一段开头。\n奶奶坐在门口。\n不想分享的正文。";
+  const context = excerptContext({
+    previewMemoirBookShare: async () => ({ title: "第一章", latest_version: { id: "v1", content: source } }),
+    createMemoirExcerptShare: async (...args) => { request = args; return { token: "x1.token", content: args[2].content, book_title: "回忆录", chapter_title: "第一章" }; },
+  });
+  await context.onLoad({ projectId: "p", chapterId: "c", excerptSelect: "1" });
+  assert.equal(context.data.excerptMode, "select");
+  assert.equal(context.excerptSource, source);
+  context.excerptEditor = { getSelectionText: ({ success }) => success({ text: "奶奶坐在门口。" }) };
+  await context.previewExcerptSelection();
+  assert.deepEqual(request, ["p", "c", { version_id: "v1", content: "奶奶坐在门口。" }]);
+  assert.equal(context.data.excerptMode, "preview");
+  assert.equal(context.data.excerptContent, "奶奶坐在门口。");
+  assert.equal(context.data.excerptImageReady, false);
+  assert.ok(!context.onShareAppMessage().path.includes("x1.token"));
+  context.onExcerptImageLoad({ currentTarget: { dataset: { url: context.data.excerptImageUrl } } });
+  const payload = context.onShareAppMessage();
+  assert.equal(payload.title, "奶奶坐在门口。");
+  assert.equal(payload.path, "/pages/book-reader/index?excerptToken=x1.token");
+  assert.match(payload.imageUrl, /\/excerpt-shares\/x1.token\/card.jpg$/);
+  context.onHide();
+  assert.deepEqual(context.onShareAppMessage(), payload);
+});
+
+test("excerpt recipient reads only the snapshot and uses its token for the chapter likes", async () => {
+  const context = excerptContext({
+    readMemoirExcerptShare: async () => ({ book_title: "原书名", chapter_title: "原章名", content: "只公开这句话。" }),
+    readMemoirBookShare: async () => assert.fail("must not load a whole chapter"),
+  });
+  await context.onLoad({ excerptToken: "x1.token", projectId: "ignored", chapterId: "ignored" });
+  assert.equal(context.data.excerptMode, "shared");
+  assert.equal(context.data.excerptContent, "只公开这句话。");
+  assert.equal(context.readerText, "");
+  assert.equal(context.data.bookPreviewChapters.length, 0);
+  assert.equal(context.data.responseToken, "");
+  assert.deepEqual(context.likeTarget, { reading_token: "x1.token" });
+  assert.equal(context.onShareAppMessage().path, "/pages/book-reader/index?excerptToken=x1.token");
+  assert.ok(!context.onShareAppMessage().path.includes("chapterId"));
+});
+
+test("excerpt selection rejects empty, overlong and edited text before creating a share", async () => {
+  let selection = "";
+  const context = excerptContext({ createMemoirExcerptShare: async () => assert.fail("invalid selection") });
+  context.excerptSource = "有效原文。";
+  context.setData({ excerptMode: "select" });
+  context.excerptEditor = { getSelectionText: ({ success }) => success({ text: selection }) };
+  for (selection of ["", "字".repeat(121), "篡改文字"]) {
+    await context.previewExcerptSelection();
+    assert.ok(context.data.error);
+    assert.equal(context.excerptToken, "");
+    assert.equal(context.data.excerptBusy, false);
+  }
+});
+
+for (const leave of ["onHide", "onUnload"]) {
+  test(`${leave} discards pending excerpt selection and does not publish its result`, async () => {
+    let complete;
+    const context = excerptContext({ createMemoirExcerptShare: async () => assert.fail("left before selection completed") });
+    context.excerptSource = "真实原文。";
+    context.setData({ excerptMode: "select" });
+    context.excerptEditor = { getSelectionText: ({ success }) => { complete = success; } };
+    const pending = context.previewExcerptSelection();
+    context[leave]();
+    complete({ text: "真实原文。" });
+    await pending;
+    assert.equal(context.excerptToken, "");
+    assert.equal(context.data.excerptBusy, false);
+    assert.equal(context.data.excerptMode, "select");
+  });
+}
+
+test("excerpt viewer has no whole-reading, audio or response entry points", () => {
+  const template = fs.readFileSync(path.join(__dirname, "../pages/book-reader/index.wxml"), "utf8");
+  const excerptBranch = template.split('<view wx:else class="ui-page-shell')[0];
+  assert.match(excerptBranch, /read-only="\{\{true\}\}"/);
+  assert.match(excerptBranch, /catchtouchend="previewExcerptSelection"/);
+  assert.ok(!/openReaderChapter|playReaderAudio|share-response-form|分享整章|阅读整章/.test(excerptBranch));
+});
+
+test("excerpt editor readiness ignores missing or detached nodes after page exit", () => {
+  const context = excerptContext();
+  let complete;
+  const query = { select: () => query, context: callback => { complete = callback; return query; }, exec() {} };
+  context.createSelectorQuery = () => query;
+  context.setData({ excerptMode: "select" });
+  context.onExcerptEditorReady();
+  assert.doesNotThrow(() => complete(null));
+  context.onExcerptEditorReady();
+  context.onUnload();
+  complete({ context: { setContents: () => assert.fail("detached editor") } });
+  assert.equal(context.excerptEditor, null);
+});
+
+test("excerpt version conflict requires reloading source before another selection", async () => {
+  const context = excerptContext({
+    createMemoirExcerptShare: async () => { throw new ApiError(409, "正文已更新，请重新选择划线内容", {}); },
+    previewMemoirBookShare: async () => ({ title: "新版章节", latest_version: { id: "v2", content: "新的原文。" } }),
+  });
+  context.excerptSource = "原来的文字。";
+  context.setData({ excerptMode: "select", projectId: "p", chapterId: "c" });
+  context.excerptEditor = { getSelectionText: ({ success }) => success({ text: "原来的文字。" }) };
+  await context.previewExcerptSelection();
+  assert.equal(context.data.excerptReloadRequired, true);
+  assert.equal(context.excerptToken, "");
+  context.retryExcerpt();
+  await flushAsyncWork();
+  assert.equal(context.data.excerptReloadRequired, false);
+  assert.equal(context.excerptVersionId, "v2");
+  assert.equal(context.excerptSource, "新的原文。");
 });
