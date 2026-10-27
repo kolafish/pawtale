@@ -579,7 +579,7 @@ def test_chapter_inline_illustrations_render_after_their_source_section(monkeypa
     monkeypatch.setattr(
         book_output_export,
         "_add_illustration",
-        lambda builder, illustration: builder.add_text(
+        lambda builder, illustration, **kwargs: builder.add_text(
             f"IMAGE:{illustration['image_asset_id']}"
         ),
     )
@@ -609,7 +609,7 @@ def test_inline_images_are_distributed_without_changing_section_text(monkeypatch
         {"image_asset_id": position, "storage_path": "unused.png", "placement": "chapter_inline", "section_id": "s", "inline_position": position}
         for position in ("after", "middle", "before")
     ]
-    monkeypatch.setattr(book_output_export, "_add_illustration", lambda builder, image: builder.add_text("IMAGE:" + image["image_asset_id"]))
+    monkeypatch.setattr(book_output_export, "_add_illustration", lambda builder, image, **kwargs: builder.add_text("IMAGE:" + image["image_asset_id"]))
     pages = _build_manuscript_pdf_pages(title="回忆", content="", manuscript=manuscript,
         layout=PDF_LAYOUTS[MemoirBookOutputExportLayout.STANDARD], show_source_appendix=None)
     text = [command.text for page in pages for command in page.commands]

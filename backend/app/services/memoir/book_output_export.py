@@ -1112,7 +1112,7 @@ def _illustration_file_path(illustration: dict[str, Any]) -> Path | None:
     return resolved
 
 
-def _add_illustration(builder: PDFBookBuilder, illustration: dict[str, Any]) -> None:
+def _add_illustration(builder: PDFBookBuilder, illustration: dict[str, Any], *, wrap_max_height: float | None = None) -> None:
     path = _illustration_file_path(illustration)
     if not path:
         return
@@ -1120,6 +1120,7 @@ def _add_illustration(builder: PDFBookBuilder, illustration: dict[str, Any]) -> 
         path,
         display_size=_str(illustration.get("display_size")) or "full_width",
         wrap_right=illustration.get("placement") == "chapter_inline",
+        wrap_max_height=wrap_max_height,
     )
 
 
@@ -1135,13 +1136,15 @@ def _illustration_aspect_ratio(illustration: dict[str, Any]) -> float:
 def _add_illustrations(
     builder: PDFBookBuilder,
     illustrations: list[dict[str, Any]],
+    *,
+    wrap_max_height: float | None = None,
 ) -> None:
     if not illustrations:
         return
     if not builder.wrapped_image:
         builder.add_spacer(0.25)
     for illustration in illustrations:
-        _add_illustration(builder, illustration)
+        _add_illustration(builder, illustration, wrap_max_height=wrap_max_height)
 
 
 def _add_chapter_artwork(builder: PDFBookBuilder, *, template: str, centered: bool) -> bool:
@@ -1358,9 +1361,9 @@ def _add_chapters(builder: PDFBookBuilder, chapters: list[Any]) -> None:
                         if index == 0:
                             first_image_height = max(first_image_height, (builder.layout.page_width - builder.layout.margin_x * 2) * 0.38 * aspect_ratio)
                     images_before.setdefault(index, []).append(image)
-                builder.add_section_heading(_str(section.get("title")), following_image_height=first_image_height)
+                first_image_height = builder.add_section_heading(_str(section.get("title")), following_image_height=first_image_height)
                 for index in range(len(paragraphs) + 1):
-                    _add_illustrations(builder, images_before.get(index, []))
+                    _add_illustrations(builder, images_before.get(index, []), wrap_max_height=first_image_height if index == 0 and first_image_height else None)
                     if index < len(paragraphs):
                         builder.add_body_text(paragraphs[index], spacing_after=4 if index == len(paragraphs) - 1 else 0)
                 builder.finish_image_wrap()

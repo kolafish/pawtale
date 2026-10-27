@@ -85,11 +85,13 @@ def test_portrait_wraps_on_right_then_restores_full_width_without_losing_text(tm
 
 
 @pytest.mark.parametrize("edition", list(MemoirBookOutputExportLayout))
-def test_section_heading_stays_with_its_first_portrait(tmp_path, monkeypatch, edition):
+@pytest.mark.parametrize("image_height", [900, 2400])
+def test_section_heading_stays_with_its_first_portrait(tmp_path, monkeypatch, edition, image_height):
     from app.services.memoir import book_output_export
     monkeypatch.setattr(book_output_export, "DATA_DIR", tmp_path)
-    Image.new("RGB", (600, 900), "#789081").save(tmp_path / "portrait.jpg")
-    builder = PDFBookBuilder(title="往事", layout=PDF_LAYOUTS[edition])
+    Image.new("RGB", (600, image_height), "#789081").save(tmp_path / "portrait.jpg")
+    layout = configured_pdf_layout(PDF_LAYOUTS[edition], template="classic_family")
+    builder = PDFBookBuilder(title="往事", layout=layout)
     text = "那年我们沿着河边去学校，路上总有说不完的话。" * 15
     _add_chapters(builder, [{
         "title": "我的童年", "sections": [{"section_id": "s", "title": "河边的小路", "content": text}],
@@ -97,6 +99,11 @@ def test_section_heading_stays_with_its_first_portrait(tmp_path, monkeypatch, ed
     }])
     page = next(page for page in builder.pages if any(image.path.name == "portrait.jpg" for image in page.images))
     assert any(line.text == "河边的小路" for line in page.commands)
+    image = next(image for image in page.images if image.path.name == "portrait.jpg")
+    assert image.y >= builder.layout.margin_bottom
+    assert image.width / image.height == pytest.approx(600 / image_height)
+    assert any(line.font_size == builder.layout.font_size for line in page.commands)
+    assert "".join(line.text for item in builder.pages for line in item.commands if line.font_size == builder.layout.font_size) == text
     assert all(line.y >= builder.layout.margin_bottom for item in builder.pages for line in item.commands)
 
 
