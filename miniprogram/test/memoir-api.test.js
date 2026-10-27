@@ -829,8 +829,12 @@ test("story share requests retain their section selector for status, preparation
   await api.updateMemoirBookShare("p/1", "c/1", "s/1");
   await api.previewMemoirBookShare("p/1", "c/1", "s/1");
   await api.revokeMemoirBookShare("p/1", "c/1", "s/1");
+  const selection = { token: "s1.token", version_id: "v1", excerpt_start: 0, excerpt_length: 7 };
+  await api.saveMemoirShareCardSelection("p/1", selection, "c/1", "s/1");
   const shares = requests.filter(item => item.url.includes("/book-output/share"));
-  assert.equal(shares.length, 4);
+  assert.equal(shares.length, 5);
+  assert.equal(shares[4].method, "PATCH");
+  assert.deepEqual(shares[4].data, selection);
   for (const item of shares) {
     const url = new URL(item.url);
     assert.equal(url.searchParams.get("section_id"), "s/1");

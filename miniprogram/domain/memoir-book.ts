@@ -558,7 +558,14 @@ export interface MemoirBookOutput {
   updated_at: string;
 }
 
+export interface MemoirReadingShareCardSelection {
+  version_id: string;
+  excerpt_start: number;
+  excerpt_length: number;
+}
+
 export interface MemoirBookShareStatus {
+  card_selection?: MemoirReadingShareCardSelection | null;
   active: boolean;
   expires_at: string | null;
   token: string | null;

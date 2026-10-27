@@ -231,6 +231,7 @@ function loadWorkspacePage({
     reviseMemoirBookChapterDraft: async () => ({}),
     confirmMemoirBookChapterDraft: async () => ({}),
     getMemoirBookPlan: async () => ({ chapters: [{ id: "chapter-1", include_in_book: true }] }),
+    saveMemoirShareCardSelection: async (_projectId, selection) => selection,
     ...voiceApiExports,
   });
   mockModule("../services/navigation.ts", {
@@ -2011,12 +2012,14 @@ for (const existingShare of [false, true]) {
     installWx();
     let confirm = false;
     let preparations = 0;
+    let savedSelection = null;
     const prompts = [];
     const sheets = [];
     global.wx.showActionSheet = (options) => sheets.push(options);
     global.wx.showModal = ({ content, success }) => { prompts.push(content); success({ confirm }); };
     const { page } = loadWorkspacePage({ voiceApiExports: {
-      getMemoirBookShareStatus: async () => ({ active: true, current: true, stale: false, token: "c1.chapter-token" }),
+      getMemoirBookShareStatus: async () => ({ active: true, current: true, stale: false, token: "c1.chapter-token", card_selection: savedSelection }),
+      saveMemoirShareCardSelection: async (_projectId, { token, ...selection }) => { savedSelection = selection; return selection; },
       updateMemoirBookShare: async () => { preparations += 1; return { token: "c1.chapter-token" }; },
       readMemoirBookShare: async () => ({ latest_version: { id: "v1", content: "# 标题\n\n奶奶坐在门口。另一句话。" } }),
     } });
@@ -2047,17 +2050,71 @@ for (const existingShare of [false, true]) {
     await chooseExcerptSettings();
     assert.ok(prompts.at(-1).includes("奶奶坐在门口。"));
     assert.match(context.onShareAppMessage().imageUrl, /version_id=v1&excerpt_start=6&excerpt_length=7$/);
+    const confirmedImage = context.onShareAppMessage().imageUrl;
+    await context.refreshBookShareStatus();
+    assert.equal(context.onShareAppMessage().imageUrl, confirmedImage);
+    const reopened = pageContext(page, { projectId: "project-1", chapterId: "chapter-1", workspace: workspace(), chapterHasReadableDraft: true });
+    await reopened.refreshBookShareStatus();
+    assert.equal(reopened.onShareAppMessage().imageUrl, confirmedImage);
     confirm = false;
     await chooseExcerptSettings();
+    await context.refreshBookShareStatus();
+    await reopened.refreshBookShareStatus();
     assert.ok(!context.onShareAppMessage().imageUrl.includes("excerpt_length"));
+    assert.ok(!reopened.onShareAppMessage().imageUrl.includes("excerpt_length"));
+    assert.equal(savedSelection.excerpt_length, 0);
   });
 }
+
+test("a new reading version requires confirmation without silently applying the old excerpt", async () => {
+  installWx();
+  let prompts = 0;
+  let saved = { version_id: "v1", excerpt_start: 0, excerpt_length: 7 };
+  global.wx.showModal = ({ success }) => { prompts++; success({ confirm: true }); };
+  const { page } = loadWorkspacePage({ voiceApiExports: {
+    getMemoirBookShareStatus: async () => ({ active: true, current: true, stale: false, token: "c1.token", card_selection: saved }),
+    updateMemoirBookShare: async () => ({ token: "c1.token" }),
+    readMemoirBookShare: async () => ({ latest_version: { id: "v2", content: "这是新版正文。" } }),
+    saveMemoirShareCardSelection: async (_projectId, { token, ...selection }) => { saved = selection; return selection; },
+  } });
+  const context = pageContext(page, { projectId: "p", chapterId: "c", workspace: workspace(), chapterHasReadableDraft: true });
+  await context.refreshBookShareStatus();
+  assert.equal(prompts, 0);
+  assert.equal(context.data.bookShareReady, false);
+  assert.ok(!context.data.bookShareImageUrl.includes("excerpt_length"));
+  await context.prepareReadingShare();
+  assert.equal(prompts, 1);
+  assert.equal(saved.version_id, "v2");
+  await context.refreshBookShareStatus();
+  assert.equal(context.data.bookShareReady, true);
+  assert.match(context.onShareAppMessage().imageUrl, /version_id=v2&excerpt_start=0&excerpt_length=7$/);
+  assert.equal(prompts, 1);
+});
+
+test("failed excerpt persistence never reports a prepared share and can reload the server choice", async () => {
+  installWx();
+  const { page } = loadWorkspacePage({ voiceApiExports: {
+    getMemoirBookShareStatus: async () => ({ active: true, current: true, stale: false, token: "c1.token", card_selection: { version_id: "v1", excerpt_start: 0, excerpt_length: 0 } }),
+    readMemoirBookShare: async () => ({ latest_version: { id: "v1", content: "奶奶坐在门口。" } }),
+    saveMemoirShareCardSelection: async () => { throw Error("保存失败"); },
+  } });
+  const context = pageContext(page, { projectId: "p", chapterId: "c", workspace: workspace(), chapterHasReadableDraft: true });
+  await context.refreshBookShareStatus();
+  await context.configureReadingShareCard();
+  assert.equal(context.data.bookShareReady, false);
+  assert.equal(context.data.bookShareBusy, false);
+  assert.equal(context.data.error, "保存失败");
+  await context.refreshBookShareStatus();
+  assert.equal(context.data.bookShareReady, true);
+  assert.ok(!context.onShareAppMessage().imageUrl.includes("excerpt_length"));
+});
 
 test("an excerpt confirmed after switching chapters cannot affect the new share", async () => {
   installWx();
   let finish;
   global.wx.showModal = ({ success }) => { finish = success; };
   const { page } = loadWorkspacePage({ voiceApiExports: {
+    saveMemoirShareCardSelection: async () => { assert.fail("stale confirmation must not be persisted"); },
     updateMemoirBookShare: async () => ({ token: "c1.old" }),
     readMemoirBookShare: async () => ({ latest_version: { id: "v1", content: "奶奶坐在门口。" } }),
   } });

@@ -1,4 +1,5 @@
-import { getMemoirBookShareStatus, readMemoirBookShare, revokeMemoirBookShare, updateMemoirBookShare } from "./memoir-book-api";
+import type { MemoirReadingShareCardSelection } from "../domain/memoir-book";
+import { getMemoirBookShareStatus, readMemoirBookShare, revokeMemoirBookShare, updateMemoirBookShare, saveMemoirShareCardSelection } from "./memoir-book-api";
 import { routeAuthError } from "./navigation";
 import { pageUrl } from "./page-input";
 import { shareLikerViews, type ShareLikerView } from "./share-likes";
@@ -46,20 +47,31 @@ export const readingShareMethods = defineReadingShareMethods({
   onShareAppMessage() {
     return readingShareMessage(this.readingShareTarget().title, this.data.bookShareReady ? this.bookShareToken : "", this.data.bookShareImageUrl);
   },
-  async loadReadingShareCard(token: string, confirmExcerpt = false): Promise<string> {
+  async loadReadingShareCard(token: string, confirmExcerpt = false, saved?: MemoirReadingShareCardSelection | null) {
     const { projectId, chapterId, sectionId } = this.readingShareTarget();
     const sequence = this.bookShareStatusSequence;
     const output = await readMemoirBookShare(token);
     const version = output.latest_version;
-    const excerpt = confirmExcerpt && (chapterId || sectionId) && version
-      ? readingShareExcerpt(version.content, version.id) : undefined;
-    if (!excerpt || !this.isReadingShareTarget(projectId, chapterId, sectionId) || sequence !== this.bookShareStatusSequence) return readingShareImageUrl(token, undefined, version?.id);
-    const confirmed = await new Promise<boolean>(resolve => wx.showModal({
+    const plain = { imageUrl: readingShareImageUrl(token, undefined, version?.id), needsConfirmation: false };
+    if (!version || !(chapterId || sectionId) || !this.isReadingShareTarget(projectId, chapterId, sectionId) || sequence !== this.bookShareStatusSequence) return plain;
+    if (!confirmExcerpt) {
+      if (!saved) return plain;
+      if (saved.version_id !== version.id) return { ...plain, needsConfirmation: true };
+      return { ...plain, imageUrl: readingShareImageUrl(token, saved.excerpt_length ? {
+        versionId: saved.version_id, start: saved.excerpt_start, length: saved.excerpt_length,
+      } : undefined, version.id) };
+    }
+    const excerpt = readingShareExcerpt(version.content, version.id);
+    const confirmed = excerpt && await new Promise<boolean>((resolve, reject) => wx.showModal({
       title: "在分享封面展示这段原文？", content: `“${excerpt.text}”\n\n封面在微信聊天中直接可见，请确认没有不想公开的内容。`,
       confirmText: "使用摘录", cancelText: "不放摘录",
-      success: result => resolve(Boolean(result.confirm)), fail: () => resolve(false),
+      success: result => resolve(Boolean(result.confirm)), fail: () => reject(new Error("无法确认封面摘录，请重试")),
     }));
-    return readingShareImageUrl(token, confirmed ? excerpt : undefined, version?.id);
+    if (!this.isReadingShareTarget(projectId, chapterId, sectionId) || sequence !== this.bookShareStatusSequence) return plain;
+    await saveMemoirShareCardSelection(projectId, {
+      token, version_id: version.id, excerpt_start: confirmed ? excerpt.start : 0, excerpt_length: confirmed ? excerpt.length : 0,
+    }, chapterId, sectionId);
+    return { ...plain, imageUrl: readingShareImageUrl(token, confirmed ? excerpt : undefined, version.id) };
   },
   async refreshBookShareStatus() {
     const { projectId, chapterId, sectionId } = this.readingShareTarget();
@@ -79,10 +91,11 @@ export const readingShareMethods = defineReadingShareMethods({
         bookShareDescription: status.stale ? "已移除部分内容，分享暂停；书稿更新后自动恢复。" : DESCRIPTION,
       });
       if (status.current && !status.stale && this.bookShareToken) {
-        const image = await this.loadReadingShareCard(this.bookShareToken);
+        const card = await this.loadReadingShareCard(this.bookShareToken, false, status.card_selection);
         if (this.isReadingShareTarget(projectId, chapterId, sectionId) && sequence === this.bookShareStatusSequence) {
-          this.setData({ bookShareImageUrl: image, bookShareReady: true });
-          enableMiniProgramShareMenu();
+          this.setData({ bookShareImageUrl: card.imageUrl, bookShareReady: !card.needsConfirmation,
+            ...(card.needsConfirmation ? { bookShareFeedbackVisible: true, bookShareDescription: "正文已更新，请点击分享重新确认封面摘录。" } : {}) });
+          if (!card.needsConfirmation) enableMiniProgramShareMenu();
         }
       }
     } catch (error) {
@@ -104,11 +117,11 @@ export const readingShareMethods = defineReadingShareMethods({
       if (!this.isReadingShareTarget(projectId, chapterId, sectionId) || sequence !== this.bookShareStatusSequence) return;
       this.bookShareToken = share.token;
       this.setData({ bookShareActive: true, bookShareStatusKnown: true });
-      const image = await this.loadReadingShareCard(share.token, true);
+      const card = await this.loadReadingShareCard(share.token, true);
       if (!this.isReadingShareTarget(projectId, chapterId, sectionId) || sequence !== this.bookShareStatusSequence) return;
       this.bookShareToken = share.token;
       this.setData({ bookShareActive: true, bookShareReady: true, bookShareStale: false, bookShareStatusKnown: true,
-        bookShareImageUrl: image, bookShareDescription: `已准备好，再点「分享给好友」发送。${DESCRIPTION}` });
+        bookShareImageUrl: card.imageUrl, bookShareDescription: `已准备好，再点「分享给好友」发送。${DESCRIPTION}` });
       enableMiniProgramShareMenu();
     } catch (error) {
       if (this.isReadingShareTarget(projectId, chapterId, sectionId) && sequence === this.bookShareStatusSequence && !routeAuthError(error, "login")) {
@@ -142,9 +155,9 @@ export const readingShareMethods = defineReadingShareMethods({
     this.setData({ bookShareBusy: true, bookShareReady: false });
     hideMiniProgramShareMenu();
     try {
-      const image = await this.loadReadingShareCard(this.bookShareToken, true);
+      const card = await this.loadReadingShareCard(this.bookShareToken, true);
       if (!this.isReadingShareTarget(projectId, chapterId, sectionId) || sequence !== this.bookShareStatusSequence) return;
-      this.setData({ bookShareImageUrl: image, bookShareReady: true });
+      this.setData({ bookShareImageUrl: card.imageUrl, bookShareReady: true });
       enableMiniProgramShareMenu();
     } catch (error) {
       if (this.isReadingShareTarget(projectId, chapterId, sectionId) && sequence === this.bookShareStatusSequence && !routeAuthError(error, "login")) {
