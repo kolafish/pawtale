@@ -106,29 +106,11 @@
         </view>
       </view>
 
-      <view wx:if="{{item.detailsExpanded}}" class="caption-box">
-        <text class="asset-meta">{{item.sourceLabel}} · {{item.createdAtText}}</text>
-        <text wx:if="{{item.source_quote}}" class="asset-source">来源：{{item.source_quote}}</text>
-        <text class="caption-label">图片说明</text>
-        <textarea
-          class="caption-input"
-          value="{{item.captionDraft}}"
-          data-id="{{item.id}}"
-          maxlength="500"
-          auto-height
-          placeholder="写一句会放进书里的图片说明"
-          bindinput="onCaptionInput"
-        />
-        <button
-          class="minor-button ui-button"
-          data-id="{{item.id}}"
-          loading="{{savingTarget === item.id}}"
-          disabled="{{savingTarget === item.id || !item.captionChanged}}"
-          bindtap="saveCaption"
-        >
-          {{item.captionChanged ? "保存说明" : "说明已保存"}}
-        </button>
-
+      <view wx:if="{{item.detailsExpanded}}" class="asset-more">
+        <picker wx:if="{{item.source_utterance_id}}" range="{{['自动分散', '素材前面', '素材中间', '素材后面']}}"
+          value="{{item.inlinePositionIndex}}" data-id="{{item.id}}" disabled="{{placingTarget === item.id || item.status !== 'ready'}}" bindchange="chooseSourcePosition">
+          <view class="action-button ui-pressable">调整位置</view>
+        </picker>
         <view class="asset-secondary-actions">
           <button
             class="action-button danger ui-button"
@@ -143,10 +125,8 @@
       </view>
 
       <view class="asset-actions">
-        <picker wx:if="{{item.source_utterance_id}}" range="{{['素材前面', '素材中间', '素材后面']}}"
-          data-id="{{item.id}}" disabled="{{placingTarget === item.id || item.status !== 'ready'}}" bindchange="placeNearSource">
-          <view class="action-button primary-action ui-pressable {{placingTarget === item.id || item.status !== 'ready' ? 'disabled' : ''}}">放在素材附近</view>
-        </picker>
+        <button wx:if="{{item.source_utterance_id}}" class="action-button primary-action ui-button"
+          data-id="{{item.id}}" loading="{{placingTarget === item.id}}" disabled="{{placingTarget === item.id || item.status !== 'ready'}}" bindtap="placeNearSource">自动放置</button>
         <picker
           wx:if="{{chapterOptions.length}}"
           range="{{chapterOptions}}"
@@ -188,7 +168,7 @@
         aria-expanded="{{item.detailsExpanded}}"
         bindtap="toggleAssetDetails"
       >
-        {{item.detailsExpanded ? "收起详情" : "图片说明与更多"}}
+        {{item.detailsExpanded ? "收起" : "更多"}}
       </view>
     </view>
   </view>

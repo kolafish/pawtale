@@ -14,7 +14,7 @@ export type MemoirImageAssetSourceType =
   | "utterance_illustration"
   | "cover_candidate"
   | "manual_upload";
-export type MemoirImageInlinePosition = "before" | "middle" | "after";
+export type MemoirImageInlinePosition = "auto" | "before" | "middle" | "after";
 
 export type MemoirBookImagePlacementType =
   | "chapter_opening"
@@ -472,7 +472,7 @@ export interface MemoirBookManuscriptSourceRef {
 }
 
 export interface MemoirBookManuscriptIllustration {
-  inline_position?: MemoirImageInlinePosition;
+  inline_position?: Exclude<MemoirImageInlinePosition, "auto">;
   image_url?: string;
   image_asset_id: string;
   storage_path: string;

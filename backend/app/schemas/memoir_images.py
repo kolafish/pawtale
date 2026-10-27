@@ -13,7 +13,7 @@ from app.domain.memoir.types import (
 )
 
 
-MemoirImageInlinePosition = Literal["before", "middle", "after"]
+MemoirImageInlinePosition = Literal["auto", "before", "middle", "after"]
 MemoirImageDisplaySize = Literal["full_width", "half_width", "inline"]
 # A cover photo is either set into the layout's artwork (frame) or fills the
 # whole front cover with the text on a darkened band (full_bleed).
@@ -68,7 +68,7 @@ class MemoirBookImagePlacementResponse(BaseModel):
     chapter_id: str | None = None
     chapter_title: str = ""
     source_utterance_ids: list[str] = Field(default_factory=list)
-    inline_position: MemoirImageInlinePosition = "after"
+    inline_position: MemoirImageInlinePosition = "auto"
     caption_override: str = ""
     display_size: str = "full_width"
     sort_order: int = 0

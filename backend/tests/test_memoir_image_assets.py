@@ -974,3 +974,29 @@ def test_material_illustration_samples_the_whole_selection_for_every_style(style
     assert selected == style
     assert "开头在家里。" in prompt and "中间在车间。" in prompt and "最后在学校。" in prompt
     assert len(prompt) < 4500
+
+
+async def test_unselected_image_positions_distribute_and_keep_manual_choices(client, test_db, tmp_path, monkeypatch):
+    _, project_id, chapter_id, first = await _seed_image_asset(client, test_db, tmp_path, monkeypatch)
+    second = await _register_another_video_image(test_db, tmp_path, asset_id=first, scene_index=2)
+    third = await _register_another_video_image(test_db, tmp_path, asset_id=first, scene_index=3)
+    path = f"/api/mobile/memoir/projects/{project_id}"
+    original = (await client.get(f"{path}/book-output")).json()["latest_version"]["content"]
+    placements = {}
+    for asset_id, expected in zip([first, second, third], [["middle"], ["before", "after"], ["before", "middle", "after"]]):
+        response = await client.post(f"{path}/image-assets/{asset_id}/placements", json={"placement_type": "chapter_inline"})
+        assert response.status_code == 201, response.text
+        placement = next(item for item in response.json()["placements"] if item["enabled"])
+        assert placement["inline_position"] == "auto"
+        placements[asset_id] = placement["id"]
+        snapshot, _, _ = await image_assets.manuscript_image_snapshots(test_db, project_id=project_id)
+        assert [image["inline_position"] for image in snapshot[chapter_id]] == expected
+    response = await client.patch(f"{path}/image-assets/{first}/placements/{placements[first]}", json={"inline_position": "middle"})
+    assert response.status_code == 200, response.text
+    output = (await client.get(f"{path}/book-output")).json()["latest_version"]
+    images = output["manuscript"]["chapters"][0]["illustrations"]
+    assert {image["image_asset_id"]: image["inline_position"] for image in images} == {first: "middle", second: "before", third: "after"}
+    assert output["content"] == original
+    for asset_id in (second, third):
+        placement = await test_db.get(MemoirBookImagePlacement, placements[asset_id], populate_existing=True)
+        assert placement.inline_position == "auto"
