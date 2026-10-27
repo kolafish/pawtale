@@ -216,26 +216,6 @@
   text-wrap: pretty;
 }
 
-.share-video-style-option {
-  display: flex;
-  align-items: center;
-  gap: 20rpx;
-}
-
-.share-video-style-preview {
-  flex: none;
-  width: 128rpx;
-  height: 228rpx;
-  border-radius: 2rpx;
-  outline: 1px solid rgba(0, 0, 0, 0.1);
-  outline-offset: -1px;
-}
-
-.share-video-style-copy {
-  min-width: 0;
-  flex: 1;
-}
-
 .custom-background-panel {
   padding: 22rpx;
   border: 0;

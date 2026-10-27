@@ -238,6 +238,10 @@ _ALIASES = {
 }
 
 _UNIT_PRICING: dict[tuple[str, str], AIUnitPricing] = {
+    ("volc_ark", "doubao-seedream-5-0-flash-260915"): AIUnitPricing(
+        provider="volc_ark", model="doubao-seedream-5-0-flash-260915", unit="image", rmb_per_unit=0.12,
+        source="https://docs.volcengine.com/docs/ark/model-pricing?lang=en&redirect=1",
+    ),
     ("volc_ark", "doubao-seedream-5-0-260128"): AIUnitPricing(
         provider="volc_ark",
         model="doubao-seedream-5-0-260128",

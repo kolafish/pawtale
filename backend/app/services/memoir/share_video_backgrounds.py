@@ -383,11 +383,11 @@ def _decode_base64_image(value: str) -> bytes:
 class VolcArkImageGenerationService:
     provider_name = "volc_ark"
 
-    def __init__(self) -> None:
+    def __init__(self, *, model: str | None = None) -> None:
         settings = get_settings()
         self.api_key = settings.volc_ark_api_key.strip()
         self.base_url = settings.volc_ark_base_url.rstrip("/")
-        self.model = settings.volc_ark_image_model.strip()
+        self.model = (model or settings.volc_ark_image_model).strip()
         self.size = settings.volc_ark_image_size.strip()
         self.output_format = settings.volc_ark_image_output_format.strip().lower() or "png"
         self.response_format = settings.volc_ark_image_response_format.strip() or "b64_json"

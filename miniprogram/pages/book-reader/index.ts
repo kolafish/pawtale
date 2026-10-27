@@ -320,6 +320,7 @@ function chapterReaderData(
 }
 
 definePage<BookReaderData>()({
+  excerptImageController: null as import("../../services/transcript-material-image").TranscriptMaterialImageController | null,
   excerptSource: "",
   excerptVersionId: "",
   excerptToken: "",
@@ -439,6 +440,7 @@ definePage<BookReaderData>()({
 
   onShow() {
     if (this.data.excerptMode) {
+      if (this.data.excerptMode === "compose") this.resumeExcerptImage();
       if (this.data.excerptMode === "shared" && !this.data.loading) void this.loadExcerptSnapshot();
       else if (this.data.excerptMode === "select" && !this.excerptSource && !this.data.loading) void this.loadChapterReader(this.data.projectId, this.data.chapterId);
       else if (this.data.excerptMode === "select" && !this.data.loading && !this.excerptEditor) this.onExcerptEditorReady();
@@ -458,7 +460,7 @@ definePage<BookReaderData>()({
   },
 
   onShareAppMessage() {
-    if (this.data.excerptMode) return excerptShareMessage(this.data.excerptImageReady ? this.excerptToken : "", this.data.excerptContent);
+    if (this.data.excerptMode) return excerptShareMessage(this.data.excerptImageReady ? this.excerptToken : "", this.data.excerptTitle);
     const token = this.data.error ? "" : this.readingToken;
     return readingShareMessage(this.data.readerTitle, token, token ? readingShareImageUrl(token, undefined, this.readerAudioVersionId) : "");
   },
@@ -499,6 +501,7 @@ definePage<BookReaderData>()({
   },
 
   onUnload() {
+    this.excerptImageController?.dispose();
     if (this.data.excerptMode) this.invalidateExcerptRequests();
     this.saveReadingProgress();
     this.stopPlayback();

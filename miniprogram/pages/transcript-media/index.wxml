@@ -235,24 +235,8 @@
             <text class="share-video-background-current">{{shareVideoBackgroundStyleLabel}}</text>
           </view>
           <text class="share-video-background-help">画风示意，内容按讲述生成。</text>
-          <view class="share-video-background-options" aria-role="radiogroup" aria-label="插图风格">
-            <view
-              wx:for="{{shareVideoBackgroundStyleOptions}}"
-              wx:key="value"
-              class="share-video-background-option share-video-style-option {{item.value === shareVideoBackgroundStyle ? 'selected' : ''}}"
-              data-background-style="{{item.value}}"
-              bindtap="selectShareVideoBackgroundStyle"
-              aria-role="radio"
-              aria-checked="{{item.value === shareVideoBackgroundStyle}}"
-              aria-label="{{item.label}}，{{item.description}}"
-            >
-              <image wx:if="{{item.previewImage}}" class="share-video-style-preview" src="{{item.previewImage}}" mode="aspectFill" aria-hidden="true" />
-              <view class="share-video-style-copy">
-                <text class="share-video-background-label">{{item.label}}</text>
-                <text class="share-video-background-desc">{{item.description}}</text>
-              </view>
-            </view>
-          </view>
+          <illustration-style-picker options="{{shareVideoBackgroundStyleOptions}}" value="{{shareVideoBackgroundStyle}}"
+            disabled="{{shareVideoCreating || shareVideoPolling}}" bindchange="changeIllustrationStyle" />
         </view>
 
         <view wx:if="{{shareVideoBackgroundUsesAi && shareVideoMoreSettingsOpen}}" class="share-video-background">

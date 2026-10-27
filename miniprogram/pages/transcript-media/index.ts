@@ -92,6 +92,10 @@ definePage<TranscriptMediaData & { shareCardPreparing: boolean }>()({
 
   ...videoPlaybackMethods,
 
+  changeIllustrationStyle(event: { detail: { value: string } }) {
+    this.selectShareVideoBackgroundStyle({ currentTarget: { dataset: { backgroundStyle: event.detail.value } } });
+  },
+
   async onLoad(options?: PageQuery) {
     this.shareVideoController.setStateListener((patch) => {
       const previousJob = this.data.shareVideoJob;

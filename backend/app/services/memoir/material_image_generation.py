@@ -24,6 +24,7 @@ from app.domain.memoir.types import (
 )
 from app.models.memoir import MemoirEditingJob, MemoirImageAsset
 from app.models.projects import Project
+from app.schemas.memoir_book import MemoirExcerptSelection
 from app.schemas.memoir_images import (
     MemoirMaterialImageGenerationJobResponse,
     MemoirMaterialImageGenerationRequest,
@@ -266,6 +267,32 @@ async def create_material_image_generation_job(
             if asset is None:
                 raise
 
+    return await _enqueue_image_generation(db, asset)
+
+
+async def create_excerpt_image_generation_job(db: AsyncSession, *, user_id: str, project_id: str,
+                                              chapter_id: str, selection: MemoirExcerptSelection, style_id: str) -> MemoirMaterialImageGenerationJobResponse:
+    from app.services.memoir.book_shares import validate_excerpt_selection
+    _, version, content = await validate_excerpt_selection(db, user_id=user_id, project_id=project_id,
+                                                          chapter_id=chapter_id, selection=selection)
+    style_id = normalize_share_video_background_style(style_id)
+    model = get_settings().memoir_excerpt_image_model.strip()
+    signature = "excerpt:" + sha256("\0".join((version.id, content, style_id, model, MATERIAL_IMAGE_PROMPT_VERSION)).encode()).hexdigest()
+    asset = await db.scalar(select(MemoirImageAsset).where(MemoirImageAsset.project_id == project_id,
+                                                         MemoirImageAsset.source_signature == signature))
+    if asset is None:
+        asset = MemoirImageAsset(project_id=project_id, user_id=user_id, status="pending",
+            source_type=MemoirImageAssetSourceType.CHAPTER_ILLUSTRATION.value, source_signature=signature,
+            title=_asset_title(content), caption=content[:500], alt_text=_asset_title(content),
+            source_chapter_id=chapter_id, source_quote=content, style_id=style_id,
+            metadata_json={"disclosure": AI_GENERATED_IMAGE_DISCLOSURE, "source_version_id": version.id,
+                           "generation_requested_model": model})
+        db.add(asset)
+        await db.flush()
+    return await _enqueue_image_generation(db, asset)
+
+
+async def _enqueue_image_generation(db: AsyncSession, asset: MemoirImageAsset) -> MemoirMaterialImageGenerationJobResponse:
     existing_job = await _job_for_asset(db, asset)
     if (
         existing_job is not None
@@ -302,7 +329,7 @@ async def create_material_image_generation_job(
         job_type=MemoirEditingJobType.GENERATE_MATERIAL_IMAGE,
         payload_json={
             "asset_id": asset.id,
-            "utterance_id": utterance.id,
+            "utterance_id": asset.source_utterance_id or "",
         },
         dedupe_key=f"material-image:{asset.id}",
         replace_completed=True,
@@ -411,8 +438,8 @@ async def run_material_image_generation_job(
         select(MemoirImageAsset).where(
             MemoirImageAsset.id == asset_id,
             MemoirImageAsset.project_id == job.project_id,
-            MemoirImageAsset.source_type
-            == MemoirImageAssetSourceType.UTTERANCE_ILLUSTRATION.value,
+            MemoirImageAsset.source_type.in_([MemoirImageAssetSourceType.UTTERANCE_ILLUSTRATION.value,
+                                             MemoirImageAssetSourceType.CHAPTER_ILLUSTRATION.value]),
         )
     )
     if asset is None:
@@ -423,6 +450,8 @@ async def run_material_image_generation_job(
         )
     started_at = perf_counter()
     settings = get_settings()
+    model = (str((asset.metadata_json or {}).get("generation_requested_model") or settings.memoir_excerpt_image_model)
+             if asset.source_type == MemoirImageAssetSourceType.CHAPTER_ILLUSTRATION.value else settings.volc_ark_image_model).strip()
     try:
         style_id, prompt, prompt_hash = build_material_image_prompt(
             asset.source_quote,
@@ -456,11 +485,11 @@ async def run_material_image_generation_job(
         asset.prompt_hash = prompt_hash
         asset.prompt_version = MATERIAL_IMAGE_PROMPT_VERSION
         asset.provider = VolcArkImageGenerationService.provider_name
-        asset.model = settings.volc_ark_image_model.strip()
+        asset.model = model
         asset.metadata_json = {
             **(asset.metadata_json or {}),
             "generation_stage": "generating",
-            "generation_requested_model": settings.volc_ark_image_model.strip(),
+            "generation_requested_model": model,
             "generation_provider": VolcArkImageGenerationService.provider_name,
             "generation_timeout_seconds": settings.volc_ark_image_timeout_seconds,
         }
@@ -482,15 +511,18 @@ async def run_material_image_generation_job(
             usage_context = current_ai_usage_context()
             try:
                 await assert_current_ai_credit_available()
-                image = await VolcArkImageGenerationService().generate(prompt)
+                service = (VolcArkImageGenerationService(model=model)
+                           if asset.source_type == MemoirImageAssetSourceType.CHAPTER_ILLUSTRATION.value
+                           else VolcArkImageGenerationService())
+                image = await service.generate(prompt)
             except Exception as exc:
                 await record_ai_usage(
                     provider=VolcArkImageGenerationService.provider_name,
-                    model=asset.model or settings.volc_ark_image_model.strip() or "unknown",
+                    model=asset.model or model or "unknown",
                     status="failed",
                     cost=estimate_image_cost(
                         provider=VolcArkImageGenerationService.provider_name,
-                        model=asset.model or settings.volc_ark_image_model.strip(),
+                        model=asset.model or model,
                         image_count=1,
                     ),
                     image_count=1,
@@ -552,7 +584,7 @@ async def run_material_image_generation_job(
                 "stage": "ready",
                 "asset_id": asset.id,
                 "provider": asset.provider,
-                "requested_model": settings.volc_ark_image_model.strip(),
+                "requested_model": model,
                 "resolved_model": resolved_model,
                 "timeout_seconds": settings.volc_ark_image_timeout_seconds,
                 "elapsed_seconds": round(elapsed_seconds, 3),
@@ -587,7 +619,7 @@ async def run_material_image_generation_job(
                 "stage": "failed",
                 "asset_id": asset.id,
                 "provider": VolcArkImageGenerationService.provider_name,
-                "requested_model": settings.volc_ark_image_model.strip(),
+                "requested_model": model,
                 "timeout_seconds": settings.volc_ark_image_timeout_seconds,
                 "elapsed_seconds": round(elapsed_seconds, 3),
                 "error_type": type(exc).__name__,
@@ -611,7 +643,7 @@ async def run_material_image_generation_job(
                 "stage": "failed",
                 "asset_id": asset.id,
                 "provider": VolcArkImageGenerationService.provider_name,
-                "requested_model": settings.volc_ark_image_model.strip(),
+                "requested_model": model,
                 "timeout_seconds": settings.volc_ark_image_timeout_seconds,
                 "elapsed_seconds": round(elapsed_seconds, 3),
                 "error_type": type(exc).__name__,

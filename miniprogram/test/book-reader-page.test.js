@@ -837,7 +837,7 @@ for (const shared of [false, true]) test(`${shared ? "shared" : "owner"} chapter
 
 function excerptContext(api = {}) {
   global.wx = { getStorageSync: () => "", setStorageSync() {}, hideShareMenu() {}, showShareMenu() {}, setNavigationBarTitle() {} };
-  const { page } = loadBookReaderPage(api);
+  const { page } = loadBookReaderPage({ suggestMemoirExcerptTitle: async () => ({ title: "门口的那段往事" }), ...api });
   const context = pageContext(page);
   context.loadShareLikes = async (target) => { context.likeTarget = target; };
   return context;
@@ -848,21 +848,28 @@ test("excerpt selection previews only the chosen text and forwards the same immu
   const source = "一段开头。\n奶奶坐在门口。\n不想分享的正文。";
   const context = excerptContext({
     getMemoirChapterWorkspace: async () => ({ chapter_id: "c", chapter_title: "第一章", draft_version_id: "v1", draft_content: source, draft_sections: [] }),
-    createMemoirExcerptShare: async (...args) => { request = args; return { token: "x1.token", content: args[2].content, book_title: "回忆录", chapter_title: "第一章" }; },
+    createMemoirExcerptShare: async (...args) => { request = args; return { token: "x1.token", title: args[2].title, content: args[2].content, book_title: "回忆录", chapter_title: "第一章" }; },
   });
   await context.onLoad({ projectId: "p", chapterId: "c", excerptSelect: "1" });
   assert.equal(context.data.excerptMode, "select");
   assert.equal(context.excerptSource, source);
+  const scrolls = [];
+  global.wx.pageScrollTo = (options) => scrolls.push(options.scrollTop);
   context.excerptEditor = { getSelectionText: ({ success }) => success({ text: "奶奶坐在门口。" }) };
   await context.previewExcerptSelection();
-  assert.deepEqual(request, ["p", "c", { version_id: "v1", content: "奶奶坐在门口。" }]);
+  assert.equal(context.data.excerptMode, "compose");
+  assert.equal(request, undefined, "recommendation does not publish a share");
+  assert.equal(scrolls.at(-1), 0, "configuration starts at its title even after selecting deep in a chapter");
+  context.changeExcerptTitle({ detail: { value: "奶奶等我回家" } });
+  await context.confirmExcerptCard();
+  assert.deepEqual(request, ["p", "c", { version_id: "v1", content: "奶奶坐在门口。", title: "奶奶等我回家" }]);
   assert.equal(context.data.excerptMode, "preview");
   assert.equal(context.data.excerptContent, "奶奶坐在门口。");
   assert.equal(context.data.excerptImageReady, false);
   assert.ok(!context.onShareAppMessage().path.includes("x1.token"));
   context.onExcerptImageLoad({ currentTarget: { dataset: { url: context.data.excerptImageUrl } } });
   const payload = context.onShareAppMessage();
-  assert.equal(payload.title, "奶奶坐在门口。");
+  assert.equal(payload.title, "奶奶等我回家");
   assert.equal(payload.path, "/pages/book-reader/index?excerptToken=x1.token");
   assert.match(payload.imageUrl, /\/excerpt-shares\/x1.token\/card.jpg$/);
   context.onHide();
@@ -871,7 +878,7 @@ test("excerpt selection previews only the chosen text and forwards the same immu
 
 test("excerpt recipient reads only the snapshot and uses its token for the chapter likes", async () => {
   const context = excerptContext({
-    readMemoirExcerptShare: async () => ({ book_title: "原书名", chapter_title: "原章名", content: "只公开这句话。" }),
+    readMemoirExcerptShare: async () => ({ title: "一个故事", book_title: "原书名", chapter_title: "原章名", content: "只公开这句话。" }),
     readMemoirBookShare: async () => assert.fail("must not load a whole chapter"),
   });
   await context.onLoad({ excerptToken: "x1.token", projectId: "ignored", chapterId: "ignored" });
@@ -916,7 +923,7 @@ for (const leave of ["onHide", "onUnload"]) {
   });
 }
 
-test("excerpt viewer has no whole-reading, audio or response entry points", () => {
+test("excerpt viewer only exposes an authorized continuation link and no audio or response entry points", () => {
   const template = fs.readFileSync(path.join(__dirname, "../pages/book-reader/index.wxml"), "utf8");
   const excerptBranch = template.split('<view wx:else class="ui-page-shell')[0];
   assert.match(template, /read-only="\{\{true\}\}"/);
@@ -977,14 +984,14 @@ for (const timing of ["early preview", "hidden callback", "late callback after r
     context.onShow();
     assert.equal(callbacks.length, 0, "ready editor keeps its current selection on return");
     await context.previewExcerptSelection();
-    assert.equal(context.data.excerptMode, "preview");
+    assert.equal(context.data.excerptMode, "compose");
     assert.equal(context.data.excerptContent, source);
   });
 }
 
 test("excerpt version conflict requires reloading source before another selection", async () => {
   const context = excerptContext({
-    createMemoirExcerptShare: async () => { throw new ApiError(409, "正文已更新，请重新选择分享内容", {}); },
+    suggestMemoirExcerptTitle: async () => { throw new ApiError(409, "正文已更新，请重新选择分享内容", {}); },
     getMemoirChapterWorkspace: async () => ({ chapter_id: "c", chapter_title: "新版章节", draft_version_id: "v2", draft_content: "新的原文。", draft_sections: [] }),
   });
   context.excerptSource = "原来的文字。";
@@ -1018,11 +1025,12 @@ test("selected-text entry reuses the chapter preview loader and presentation", a
   assert.equal(context.excerptVersionId, "v1");
 });
 
-test("512 Unicode characters remain complete in selected-text preview and recipient while the card title is shortened", async () => {
+test("512 Unicode characters reach title recommendation and remain complete behind an independent sharing title", async () => {
   const content = "回忆🌿。".repeat(128);
   let posted;
-  const snapshot = { token: "x1.long", content, book_title: "回忆录", chapter_title: "童年" };
+  const snapshot = { token: "x1.long", title: "小时候的回忆", content, book_title: "回忆录", chapter_title: "童年" };
   const context = excerptContext({
+    suggestMemoirExcerptTitle: async (_p, _c, selection) => { assert.equal(selection.content, content); return { title: snapshot.title }; },
     createMemoirExcerptShare: async (_p, _c, selection) => { posted = selection.content; return snapshot; },
     readMemoirExcerptShare: async () => snapshot,
   });
@@ -1030,11 +1038,12 @@ test("512 Unicode characters remain complete in selected-text preview and recipi
   context.setData({ excerptMode: "select" });
   context.excerptEditor = { getSelectionText: ({ success }) => success({ text: content }) };
   await context.previewExcerptSelection();
+  await context.confirmExcerptCard();
   assert.equal(context.data.excerptSelectionCount, 512);
   assert.equal(posted, content);
   assert.equal(context.data.excerptContent, content);
   context.onExcerptImageLoad({ currentTarget: { dataset: { url: context.data.excerptImageUrl } } });
-  assert.equal(context.onShareAppMessage().title, Array.from(content).slice(0, 80).join("") + "…");
+  assert.equal(context.onShareAppMessage().title, snapshot.title);
   await context.onLoad({ excerptToken: snapshot.token });
   assert.equal(context.data.excerptContent, content);
   assert.equal(context.data.excerptBeforeHighlight + context.data.excerptHighlight, content);
@@ -1056,4 +1065,60 @@ test("returning to selection retries a hidden chapter load without letting the o
   assert.equal(context.excerptSource, "新原文");
   assert.equal(context.excerptVersionId, "v2");
   assert.equal(context.data.loading, false);
+});
+
+
+test("selected-text cards only publish an explicitly chosen image and preserve manual titles after AI failure", async () => {
+  const posts = [];
+  const context = excerptContext({
+    suggestMemoirExcerptTitle: async () => { throw Error("provider unavailable"); },
+    createMemoirExcerptShare: async (_p, _c, selection) => { posts.push(selection); return { ...selection, token: "x1.card", book_title: "书", chapter_title: "章" }; },
+  });
+  context.excerptSource = "讲一场课能挣四百块钱。";
+  context.excerptEditor = { getSelectionText: ({ success }) => success({ text: context.excerptSource }) };
+  context.setData({ excerptMode: "select" });
+  await context.previewExcerptSelection();
+  assert.ok(context.data.excerptTitleError);
+  context.changeExcerptTitle({ detail: { value: "讲一场课，四百块钱" } });
+  context.setData({ excerptStyle: "image", excerptImageSource: "photo" });
+  await context.confirmExcerptCard();
+  assert.equal(posts.length, 0);
+  context.changeExcerptPhotos({ detail: { photoIds: ["photo-asset"] } });
+  await context.confirmExcerptCard();
+  assert.equal(posts[0].image_asset_id, "photo-asset");
+  context.editExcerptCard();
+  context.setData({ excerptImageSource: "ai", excerptAiAssetIds: ["ai-asset"] });
+  await context.confirmExcerptCard();
+  assert.equal(posts[1].image_asset_id, "ai-asset");
+  context.editExcerptCard();
+  context.setData({ excerptStyle: "text" });
+  await context.confirmExcerptCard();
+  assert.equal(posts[2].image_asset_id, undefined);
+});
+
+test("recipient continuation uses only server-authorized links and updates after revocation", async () => {
+  let link = { scope: "book", token: "v1.authorized" };
+  const context = excerptContext({ readMemoirExcerptShare: async () => ({ title: "标题", content: "选文", book_title: "书", chapter_title: "章", reading_link: link }) });
+  const navigations = [];
+  global.wx.navigateTo = ({ url }) => navigations.push(url);
+  await context.onLoad({ excerptToken: "x1.card" });
+  context.openExcerptReading();
+  assert.equal(navigations[0], "/pages/book-reader/index?shareToken=v1.authorized");
+  link = null;
+  await context.loadExcerptSnapshot();
+  context.openExcerptReading();
+  assert.equal(navigations.length, 1);
+});
+
+test("leaving title recommendation or publishing discards its late result", async () => {
+  let finish;
+  const context = excerptContext({ suggestMemoirExcerptTitle: () => new Promise(resolve => { finish = resolve; }) });
+  context.setData({ excerptMode: "compose", excerptContent: "选文" });
+  const pending = context.suggestExcerptTitle();
+  context.onHide();
+  context.changeExcerptTitle({ detail: { value: "我自己写的标题" } });
+  finish({ title: "过期建议" });
+  await pending;
+  assert.equal(context.data.excerptTitle, "我自己写的标题");
+  assert.equal(context.data.excerptTitleBusy, false);
 });
