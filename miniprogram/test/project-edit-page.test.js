@@ -2,6 +2,7 @@ require("./register-ts");
 
 const assert = require("node:assert/strict");
 const test = require("node:test");
+const { ApiError } = require("../services/request.ts");
 const {
   loadPageModule,
   mockModule,
@@ -138,9 +139,11 @@ test("failed sharing changes restore the switch and concurrent changes cannot re
   const project = { id: "project-1", title: "爷爷的回忆" };
   let failChange;
   let mutations = 0;
+  let reads = 0;
   global.wx = { setNavigationBarTitle() {} };
   const { page } = loadProjectEditPage({
     project,
+    getMemoirBookShareStatus: async () => { reads += 1; return { active: false }; },
     updateMemoirBookShare: () => {
       mutations += 1;
       return new Promise((_, reject) => { failChange = reject; });
@@ -153,17 +156,82 @@ test("failed sharing changes restore the switch and concurrent changes cannot re
   const change = context.toggleBookShare({ detail: { value: true } });
   assert.equal(context.data.bookShareBusy, true);
   await context.toggleBookShare({ detail: { value: false } });
+  await context.onShow();
   await context.saveProject();
-  failChange(new Error("书稿正在更新，请完成更新后再分享"));
+  failChange(new ApiError(409, "书稿正在更新，请完成更新后再分享", null));
   await change;
   assert.equal(mutations, 1);
+  assert.equal(reads, 1);
   assert.equal(context.data.bookShareEnabled, false);
   assert.equal(context.data.bookShareBusy, false);
   assert.match(context.data.bookShareError, /书稿正在更新/);
 });
 
+test("a committed sharing change with a lost response is reconciled with the server instead of reverted", async () => {
+  for (const statusCode of [0, 502]) for (const initialActive of [false, true]) {
+    const project = { id: "project-1", title: "爷爷的回忆" };
+    let active = initialActive;
+    let reads = 0;
+    let writes = 0;
+    const committedChange = async () => {
+      writes += 1;
+      active = !initialActive;
+      throw new ApiError(statusCode, "响应丢失，操作结果待确认", null);
+    };
+    global.wx = { setNavigationBarTitle() {} };
+    const { page } = loadProjectEditPage({
+      project,
+      getMemoirBookShareStatus: async () => { reads += 1; return { active }; },
+      updateMemoirBookShare: committedChange,
+      revokeMemoirBookShare: committedChange,
+    });
+    const context = pageContext(page);
+    await context.onLoad({ projectId: project.id });
+    await context.toggleBookShare({ detail: { value: !initialActive } });
+    assert.equal(context.data.bookShareEnabled, active);
+    assert.equal(context.data.bookShareState, "ready");
+    assert.equal(context.data.bookShareBusy, false);
+    assert.equal(reads, 2);
+    assert.equal(writes, 1);
+  }
+});
+
+test("an unconfirmed sharing change stays unknown until a successful status read", async () => {
+  const project = { id: "project-1", title: "爷爷的回忆" };
+  let active = false;
+  let statusUnavailable = false;
+  let writes = 0;
+  global.wx = { setNavigationBarTitle() {} };
+  const { page } = loadProjectEditPage({
+    project,
+    getMemoirBookShareStatus: async () => {
+      if (statusUnavailable) throw new ApiError(0, "网络连接失败", null);
+      return { active };
+    },
+    updateMemoirBookShare: async () => {
+      writes += 1;
+      active = true;
+      statusUnavailable = true;
+      throw new ApiError(0, "请求超时，操作结果可能仍在处理中", null);
+    },
+    revokeMemoirBookShare: () => assert.fail("an unknown result must not be reversed by another write"),
+  });
+  const context = pageContext(page);
+  await context.onLoad({ projectId: project.id });
+  await context.toggleBookShare({ detail: { value: true } });
+  assert.equal(context.data.bookShareState, "error");
+  assert.equal(context.data.bookShareBusy, false);
+  assert.ok(context.data.bookShareError);
+  await context.toggleBookShare({ detail: { value: false } });
+  assert.equal(writes, 1);
+  statusUnavailable = false;
+  await context.loadBookShareSetting();
+  assert.equal(context.data.bookShareEnabled, true);
+  assert.equal(context.data.bookShareState, "ready");
+  assert.equal(context.data.bookShareError, "");
+});
+
 test("an unavailable or unknown share status cannot grant access, and new memoirs do not request sharing", async () => {
-  const { ApiError } = require("../services/request.ts");
   const project = { id: "project-1", title: "爷爷的回忆" };
   let reads = 0;
   let failure = new Error("网络不可用");

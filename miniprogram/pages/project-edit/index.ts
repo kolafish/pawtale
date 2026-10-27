@@ -29,7 +29,7 @@ import {
   revokeMemoirBookShare,
   updateMemoirBookShare,
 } from "../../services/memoir-book-api";
-import { optionalApiResource } from "../../services/request";
+import { ApiError, optionalApiResource } from "../../services/request";
 import {
   defaultNarrationSessionFields,
   memoirProjectProfile,
@@ -144,7 +144,7 @@ definePage<ProjectEditData>()({
 
   onShow() {
     this.setData(accessibilityPagePatch(PAGE_CLASS));
-    if (this.data.projectId && !this.data.loading) return this.loadBookShareSetting();
+    if (this.data.projectId && !this.data.loading && !this.data.bookShareBusy) return this.loadBookShareSetting();
   },
 
   async onLoad(query?: PageQuery) {
@@ -199,14 +199,16 @@ definePage<ProjectEditData>()({
     }
   },
 
-  async loadBookShareSetting() {
-    if (!this.data.projectId || this.data.bookShareBusy || this.data.bookShareState === "loading") return;
+  async loadBookShareSetting(): Promise<boolean> {
+    if (!this.data.projectId || this.data.bookShareState === "loading") return false;
     this.setData({ bookShareState: "loading", bookShareError: "" });
     try {
       const status = await optionalApiResource(getMemoirBookShareStatus(this.data.projectId));
       this.setData({ bookShareEnabled: status?.active ?? false, bookShareState: status ? "ready" : "unavailable" });
+      return true;
     } catch (error) {
       this.setData({ bookShareState: "error", bookShareError: error instanceof Error ? error.message : "分享状态加载失败" });
+      return false;
     }
   },
 
@@ -219,7 +221,17 @@ definePage<ProjectEditData>()({
       if (enabled) await updateMemoirBookShare(this.data.projectId);
       else await revokeMemoirBookShare(this.data.projectId);
     } catch (error) {
-      this.setData({ bookShareEnabled: previous, bookShareError: error instanceof Error ? error.message : "分享设置失败，请重试" });
+      const message = error instanceof Error ? error.message : "分享设置失败";
+      const rejected = error instanceof ApiError && error.statusCode >= 400 && error.statusCode < 500 && error.statusCode !== 408;
+      if (rejected) {
+        this.setData({ bookShareEnabled: previous, bookShareError: message });
+      } else {
+        // A lost response does not undo a committed grant or revocation.
+        const confirmed = await this.loadBookShareSetting();
+        this.setData({ bookShareError: confirmed
+          ? `${message}；已重新读取当前分享状态。`
+          : `操作结果尚未确认，请重新读取分享状态。${this.data.bookShareError}` });
+      }
     } finally {
       this.setData({ bookShareBusy: false });
     }
