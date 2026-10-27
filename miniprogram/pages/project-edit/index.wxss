@@ -60,6 +60,12 @@
   padding: 6px 0;
 }
 
+.sharing-setting-status {
+  color: var(--ui-text-secondary);
+  font-size: var(--ui-font-body);
+  line-height: var(--ui-line-body);
+}
+
 .sharing-setting-error {
   display: block;
   margin-top: 12rpx;

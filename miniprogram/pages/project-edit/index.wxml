@@ -72,8 +72,9 @@
     <view wx:if="{{projectId}}" class="field">
       <view class="sharing-setting-row">
         <text class="field-label sharing-setting-label">分享全书</text>
-        <switch checked="{{bookShareEnabled}}" color="#a35445" aria-label="分享全书"
+        <switch wx:if="{{bookShareState !== 'error'}}" checked="{{bookShareEnabled}}" color="#a35445" aria-label="分享全书"
           disabled="{{loading || saving || bookShareBusy || bookShareState !== 'ready'}}" bindchange="toggleBookShare" />
+        <text wx:if="{{bookShareState === 'error'}}" class="sharing-setting-status" aria-live="polite">状态待确认</text>
       </view>
       <text class="mode-desc">即时生效。开启后，收到分享的人可阅读全书。关闭后，旧全书链接失效，选文和整章分享不受影响。</text>
       <text wx:if="{{bookShareBusy}}" class="mode-desc" aria-live="polite">正在更新分享设置…</text>
