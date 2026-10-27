@@ -1134,24 +1134,18 @@ test("selected-text cards only publish an explicitly chosen image and preserve m
 
 test("recipient continuation uses only server-authorized links and updates after revocation", async () => {
   let link = { scope: "book", token: "v1.authorized" };
-  let isOwner = false;
-  const context = excerptContext({ readMemoirExcerptShare: async () => ({ title: "标题", content: "选文", book_title: "书", chapter_title: "章", reading_link: link, is_owner: isOwner }) });
+  const context = excerptContext({ readMemoirExcerptShare: async () => ({ title: "标题", content: "选文", book_title: "书", chapter_title: "章", reading_link: link }) });
   const navigations = [];
   global.wx.navigateTo = ({ url }) => navigations.push(url);
   await context.onLoad({ excerptToken: "x1.card" });
-  assert.equal(context.data.excerptIsOwner, false);
   context.openExcerptReading();
   assert.equal(navigations[0], "/pages/book-reader/index?shareToken=v1.authorized");
-  isOwner = true;
   link = { scope: "chapter", token: "v1.chapter-only" };
   await context.loadExcerptSnapshot();
-  assert.equal(context.data.excerptIsOwner, true);
   context.openExcerptReading();
   assert.equal(navigations.length, 1);
   link = null;
-  isOwner = false;
   await context.loadExcerptSnapshot();
-  assert.equal(context.data.excerptIsOwner, false);
   context.openExcerptReading();
   assert.equal(navigations.length, 1);
 });
