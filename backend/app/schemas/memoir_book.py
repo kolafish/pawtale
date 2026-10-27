@@ -713,6 +713,22 @@ class MemoirBookOutputResponse(BaseModel):
     updated_at: datetime
 
 
+class MemoirExcerptShareRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    version_id: str = Field(min_length=1, max_length=36)
+    content: str = Field(min_length=1, max_length=120)
+
+
+class MemoirExcerptShareResponse(BaseModel):
+    book_title: str
+    chapter_title: str
+    content: str
+
+
+class MemoirExcerptShareCreated(MemoirExcerptShareResponse):
+    token: str
+
+
 class MemoirReadingShareCardSelection(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

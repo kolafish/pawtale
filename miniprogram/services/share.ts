@@ -136,6 +136,15 @@ export function readingShareImageUrl(token: string, excerpt?: Pick<ReadingShareE
   return `${base}/api/mobile/memoir/book-shares/${encodeURIComponent(token)}/card.jpg?design=1${revision}${selection}`;
 }
 
+export function excerptShareMessage(token: string, content: string): WechatMiniprogram.ShareAppMessagePayload {
+  if (!token) return readingShareMessage("", "");
+  return {
+    title: content,
+    path: `/pages/book-reader/index?excerptToken=${encodeURIComponent(token)}`,
+    imageUrl: `${cleanBaseUrl(readBackendConfig().httpBaseUrl)}/api/mobile/memoir/excerpt-shares/${encodeURIComponent(token)}/card.jpg`,
+  };
+}
+
 export function readingShareMessage(title: string, token: string, imageUrl = ""): WechatMiniprogram.ShareAppMessagePayload {
   return token ? {
     title: title.trim() || "一段家里的故事",

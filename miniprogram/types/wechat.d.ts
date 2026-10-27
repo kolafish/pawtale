@@ -72,10 +72,15 @@ declare function Component<
 declare namespace WechatMiniprogram {
   interface BoundingClientRectResult { top: number; bottom: number; left: number; right: number; width: number; height: number }
   interface NodesRef {
+    context(callback: (result: { context: EditorContext } | null) => void): SelectorQuery;
     boundingClientRect(callback: (rect: BoundingClientRectResult | null) => void): SelectorQuery;
     scrollOffset(callback: (offset: { scrollTop: number; scrollLeft: number }) => void): SelectorQuery;
   }
   interface SelectorQuery { select(selector: string): NodesRef; selectViewport(): NodesRef; exec(): void }
+  interface EditorContext {
+    setContents(options: { delta: { ops: { insert: string }[] }; success?: () => void; fail?: () => void }): void;
+    getSelectionText(options: { success: (result: { text: string }) => void; fail?: () => void }): void;
+  }
 
   type RequestMethod = "OPTIONS" | "GET" | "HEAD" | "POST" | "PUT" | "DELETE" | "TRACE" | "CONNECT" | "PATCH";
 

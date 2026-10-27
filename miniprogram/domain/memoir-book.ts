@@ -564,6 +564,12 @@ export interface MemoirBookOutput {
   updated_at: string;
 }
 
+export interface MemoirExcerptShare {
+  book_title: string;
+  chapter_title: string;
+  content: string;
+}
+
 export interface MemoirReadingShareCardSelection {
   version_id: string;
   excerpt_start: number;

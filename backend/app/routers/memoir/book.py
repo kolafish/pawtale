@@ -35,6 +35,7 @@ from app.schemas.memoir_book import (
     MemoirBookOutputVersionResponse,
     MemoirBookShareCreateResponse,
     MemoirReadingShareCardRequest, MemoirReadingShareCardSelection,
+    MemoirExcerptShareRequest, MemoirExcerptShareResponse, MemoirExcerptShareCreated,
     MemoirBookShareReadRequest, MemoirSharedAudioPlanRequest, MemoirSharedAudioPlanResponse,
     MemoirBookShareStatusResponse,
     MemoirBookPlanConfirmRequest,
@@ -125,6 +126,27 @@ async def revoke_mobile_memoir_book_share(
 ):
     await memoir_book_shares.revoke_share(db, user_id=current_user.id, project_id=project_id, chapter_id=chapter_id, section_id=section_id)
     return Response(status_code=204)
+
+
+@router.post("/projects/{project_id}/chapters/{chapter_id}/excerpt-shares", response_model=MemoirExcerptShareCreated)
+async def create_mobile_memoir_excerpt_share(
+    project_id: str, chapter_id: str, req: MemoirExcerptShareRequest,
+    db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
+):
+    return await memoir_book_shares.create_excerpt_share(db, user_id=current_user.id,
+        project_id=project_id, chapter_id=chapter_id, selection=req)
+
+
+@router.post("/excerpt-shares/read", response_model=MemoirExcerptShareResponse)
+async def read_mobile_memoir_excerpt_share(req: MemoirBookShareReadRequest, response: Response, db: AsyncSession = Depends(get_db)):
+    response.headers["Cache-Control"] = "no-store"
+    return await memoir_book_shares.read_excerpt_share(db, req.token)
+
+
+@router.get("/excerpt-shares/{token}/card.jpg")
+async def get_mobile_memoir_excerpt_card(token: str, db: AsyncSession = Depends(get_db)):
+    image = await memoir_book_shares.excerpt_share_card(db, token)
+    return Response(image, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
 
 @router.post("/book-shares/read", response_model=MemoirBookOutputResponse)

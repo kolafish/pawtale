@@ -8,7 +8,8 @@
       <button wx:if="{{showBookReader}}" class="hero-reading-action" bindtap="openBookReader">
         <text>{{bookStaleNotice ? '阅读已保存书稿' : '阅读全书'}}</text><text aria-hidden="true">→</text>
       </button>
-      <button class="ui-share-primary" open-type="{{bookShareReady ? 'share' : ''}}" bindtap="prepareReadingShare" loading="{{bookShareBusy}}" disabled="{{bookShareBusy}}">分享给好友</button>
+      <button class="ui-share-primary" open-type="{{bookShareReady ? 'share' : ''}}" bindtap="prepareReadingShare" loading="{{bookShareBusy}}" disabled="{{bookShareBusy}}">{{showChapterReader ? '分享整章' : '分享给好友'}}</button>
+      <button wx:if="{{showChapterReader}}" class="ui-share-primary" bindtap="openExcerptShare" disabled="{{readerDisabled}}">分享划线</button>
       <button wx:if="{{!hideShareMore}}" class="ui-share-more" bindtap="openReadingShareMore" disabled="{{bookShareBusy}}" aria-label="分享更多操作">···</button>
     </view>
     <text wx:if="{{!hideShareDescription || bookShareFeedbackVisible}}" class="reading-share-scope"><block wx:if="{{!showBookReader && !showChapterReader}}">{{shareScopeLabel || '整本书'}} · </block>{{bookShareDescription}}</text>
