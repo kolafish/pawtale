@@ -2007,12 +2007,52 @@ test("removing the focused story clears its in-flight sharing state before retur
   assert.equal(context.bookShareToken, "");
 });
 
+for (const sectionId of [undefined, "s"]) {
+  test(`legacy ${sectionId ? "story" : "chapter"} share confirms an unset excerpt choice before sharing`, async () => {
+    installWx();
+    let selection = sectionId ? undefined : null;
+    let prompts = 0;
+    let saves = 0;
+    global.wx.showModal = ({ success }) => { prompts++; success({ confirm: true }); };
+    const token = sectionId ? "s1.token" : "c1.token";
+    const { page } = loadWorkspacePage({ voiceApiExports: {
+      getMemoirBookShareStatus: async () => ({ active: true, current: true, stale: false, token, card_selection: selection }),
+      updateMemoirBookShare: async () => ({ token }),
+      readMemoirBookShare: async () => ({ latest_version: { id: "v1", content: "奶奶坐在门口。" } }),
+      saveMemoirShareCardSelection: async (_projectId, { token: _, ...choice }, chapterId, storyId) => {
+        assert.equal(chapterId, "c");
+        assert.equal(storyId, sectionId);
+        saves++;
+        selection = choice;
+        return choice;
+      },
+    } });
+    const data = { projectId: "p", chapterId: "c", workspace: workspace(), chapterHasReadableDraft: true,
+      ...(sectionId ? { focusedSectionId: sectionId, focusedSection: { hasDraft: true } } : {}) };
+    const context = pageContext(page, data);
+    await context.refreshBookShareStatus();
+    assert.equal(prompts, 0);
+    assert.equal(context.data.bookShareReady, false);
+    assert.equal(context.onShareAppMessage().path, "/pages/home/index?from=share_home");
+    await context.prepareReadingShare();
+    assert.equal(prompts, 1);
+    assert.equal(saves, 1);
+    assert.equal(context.data.bookShareReady, true);
+    assert.match(context.onShareAppMessage().imageUrl, /version_id=v1&excerpt_start=0&excerpt_length=7$/);
+    const reopened = pageContext(page, data);
+    await reopened.refreshBookShareStatus();
+    assert.equal(reopened.data.bookShareReady, true);
+    assert.equal(reopened.onShareAppMessage().imageUrl, context.onShareAppMessage().imageUrl);
+    assert.equal(prompts, 1);
+  });
+}
+
 for (const existingShare of [false, true]) {
   test(`chapter more menu can add and remove a confirmed excerpt for ${existingShare ? "existing" : "new"} shares`, async () => {
     installWx();
     let confirm = false;
     let preparations = 0;
-    let savedSelection = null;
+    let savedSelection = existingShare ? { version_id: "v1", excerpt_start: 0, excerpt_length: 0 } : null;
     const prompts = [];
     const sheets = [];
     global.wx.showActionSheet = (options) => sheets.push(options);
@@ -2185,7 +2225,7 @@ for (const exitPage of ["onHide", "onUnload"]) {
       assert.equal(context.data.bookShareReady, false);
       resumed = true;
       await context.refreshBookShareStatus();
-      await context.configureReadingShareCard();
+      await context.prepareReadingShare();
       assert.equal(saves, 1);
       assert.equal(context.data.bookShareReady, true);
     });
