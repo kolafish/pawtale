@@ -1267,6 +1267,83 @@ async def test_chapter_generator_rejects_material_outside_allowlist(
     assert draft is None
 
 
+@pytest.mark.parametrize("via_voice", [False, True])
+async def test_section_rename_preserves_confirmed_prose_and_voice_undo(client, test_db, monkeypatch, via_voice):
+    from app.schemas.memoir_voice_edit import VoiceEditOperation
+    from tests.test_memoir_voice_edit import preview, apply
+
+    project_id, chapter, section, materials = await _chapter(client, test_db)
+    fake = FakeChapterAI(section_material_id=materials[0]["utterance_id"], chapter_section_id=section["id"],
+        chapter_material_id=materials[0]["utterance_id"], draft_material_ids=[m["utterance_id"] for m in materials])
+    _, initial = await chapter_generation.generate_and_save_chapter_draft(
+        test_db, project_id=project_id, chapter_id=chapter.id, ai_client=fake,
+    )
+    initial.section_snapshot_json = [{**item, "user_edited": True, "user_edited_at": "2026-01-02T00:00:00"}
+                                     for item in initial.section_snapshot_json]
+    await test_db.commit()
+    draft, _ = await chapter_generation.confirm_chapter_draft(test_db, project_id=project_id, chapter_id=chapter.id)
+    await test_db.commit()
+    original_content, original_created_at = initial.content, initial.created_at
+    original_snapshot = initial.section_snapshot_json[0]
+    new_title = "重新联系与第一次见面"
+    if via_voice:
+        story = {"pid": project_id}
+        operation = VoiceEditOperation(action="rename_section", target_ref=section["id"], new_title=new_title)
+        proposal, _ = await preview(client, monkeypatch, story, [operation.model_dump()])
+        assert proposal.status_code == 200, proposal.text
+        result = await apply(client, story, proposal.json())
+    else:
+        result = await client.patch(f"/api/memoir/projects/{project_id}/sections/{section['id']}",
+            json={"title": new_title, "expected_version": section["version"]})
+    assert result.status_code == 200, result.text
+    latest = await chapter_generation.latest_chapter_draft_version(test_db, project_id=project_id, chapter_id=chapter.id)
+    context = await chapter_generation.load_chapter_generation_context(test_db, project_id=project_id, chapter_id=chapter.id)
+    assert latest.content == original_content
+    assert latest.created_at == original_created_at
+    assert latest.section_snapshot_json[0]["title"] == new_title
+    for key in ("content", "used_material_ids", "body_digest", "user_edited", "user_edited_at"):
+        assert latest.section_snapshot_json[0].get(key) == original_snapshot.get(key)
+    assert chapter_generation.chapter_draft_is_current(context, latest)
+    assert not chapter_generation.chapter_draft_generation_plan(context, latest).target_context.sections
+    assert chapter_generation.chapter_draft_render_policy_current(context, latest)
+    snapshot = book_output_snapshots.chapter_snapshot(chapter, latest, chapter_index=1)
+    assert snapshot["sections"][0]["title"] == new_title
+    assert snapshot["sections"][0]["content"] == original_snapshot["content"]
+    await test_db.refresh(draft)
+    assert draft.status == "confirmed"
+    assert draft.metadata_json["confirmed_version_id"] == latest.id
+    if via_voice:
+        result = await client.post(f"/api/memoir/projects/{project_id}/voice-edit/undo")
+        assert result.status_code == 200, result.text
+        latest = await chapter_generation.latest_chapter_draft_version(test_db, project_id=project_id, chapter_id=chapter.id)
+        context = await chapter_generation.load_chapter_generation_context(test_db, project_id=project_id, chapter_id=chapter.id)
+        assert latest.content == original_content
+        assert latest.section_snapshot_json[0]["title"] == section["title"]
+        assert chapter_generation.chapter_draft_is_current(context, latest)
+
+
+async def test_section_rename_keeps_pending_material_update(client, test_db):
+    project_id, chapter, section, materials = await _chapter(client, test_db)
+    fake = FakeChapterAI(section_material_id=materials[0]["utterance_id"], chapter_section_id=section["id"],
+        chapter_material_id=materials[0]["utterance_id"], draft_material_ids=[m["utterance_id"] for m in materials])
+    _, initial = await chapter_generation.generate_and_save_chapter_draft(
+        test_db, project_id=project_id, chapter_id=chapter.id, ai_client=fake,
+    )
+    await test_db.commit()
+    added = await create_test_voice_transcript(client, test_db, "后来我们又去爬了一次山。", project_id=project_id)
+    await sections.assign_material_to_section(test_db, project_id=project_id, section_id=section["id"],
+        utterance_id=added["utterance_id"], assigned_by=MemoirSectionMaterialAssignedBy.USER, assignment_reason="user")
+    await test_db.commit()
+    current = await test_db.get(MemoirSection, section["id"], populate_existing=True)
+    result = await client.patch(f"/api/memoir/projects/{project_id}/sections/{section['id']}",
+        json={"title": "改名后仍有新素材", "expected_version": current.version})
+    assert result.status_code == 200, result.text
+    latest = await chapter_generation.latest_chapter_draft_version(test_db, project_id=project_id, chapter_id=chapter.id)
+    context = await chapter_generation.load_chapter_generation_context(test_db, project_id=project_id, chapter_id=chapter.id)
+    assert latest.content == initial.content
+    assert [s.section_id for s in chapter_generation.chapter_draft_generation_plan(context, latest).target_context.sections] == [section["id"]]
+
+
 async def test_chapter_confirmation_rejects_changed_material_structure(
     client,
     test_db,
@@ -1297,6 +1374,7 @@ async def test_chapter_confirmation_rejects_changed_material_structure(
         f"/api/memoir/projects/{project_id}/sections/{section['id']}",
         json={
             "title": "重新联系与第一次见面",
+            "section_type": "viewpoint_reflection",
             "expected_version": section["version"],
         },
     )

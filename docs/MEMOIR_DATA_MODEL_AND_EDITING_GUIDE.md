@@ -813,6 +813,8 @@ ChapterDraft 不直接保存正文。正文保存在不可变的 Version 中。
 | `material_snapshot_json` | Material、TranscriptVersion、文字 hash 和顺序快照 |
 | `section_snapshot_json` | 每个小节标题、类型、版本、正文、used Material；有事实更正时记录 `fact_decision_ids` 与 `fact_decision_signature` |
 
+纯小节改名（包括语音改名及撤销）复用确定性正文版本同步：更新小节标题、版本和对应输入签名，正文逐字保留，不调用 AI 重写。保留原始作者、正文时间、人工编辑标记和确认状态；只同步改名前仍与素材及事实一致的小节，已有待更新内容不会被标记为已处理。改名同时改变类型、收录或归档状态时仍按真实输入变化处理。用字纠错在完整文字替换后统一同步，避免改名阶段重复创建正文版本。
+
 ### 7.3 正文是怎么来的
 
 生成上下文只包含：
