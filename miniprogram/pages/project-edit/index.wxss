@@ -43,6 +43,31 @@
   font-size: var(--ui-font-action);
 }
 
+.sharing-setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24rpx;
+  min-height: 44px;
+}
+
+.sharing-setting-label {
+  margin-bottom: 0;
+}
+
+.sharing-setting-row switch {
+  flex-shrink: 0;
+  padding: 6px 0;
+}
+
+.sharing-setting-error {
+  display: block;
+  margin-top: 12rpx;
+  color: var(--ui-danger-text);
+  font-size: var(--ui-font-body);
+  line-height: var(--ui-line-body);
+}
+
 .segmented {
   padding: 6rpx;
   border-radius: var(--ui-radius-inner);
