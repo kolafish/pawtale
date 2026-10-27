@@ -797,3 +797,29 @@ test("shared narration generates only after play and resumes at the saved segmen
     && r.profile_key === initial.profile_key));
   assert.deepEqual(played, ["audio-2"]);
 });
+
+for (const shared of [false, true]) test(`${shared ? "shared" : "owner"} chapter shows images before, within and after unchanged text`, async () => {
+  global.wx = { getStorageSync: () => "", hideShareMenu() {}, showShareMenu() {} };
+  const downloads = [];
+  mockModule("../services/authenticated-media.ts", { downloadAuthenticatedFile: async url => { downloads.push(url); return `local:${url}`; } });
+  const content = "开头。\n\n中间。\n\n结尾。";
+  const illustrations = ["before", "middle", "after"].map(position => ({
+    image_asset_id: position, image_url: `/api/mobile/memoir/projects/p/image-assets/${position}/file?variant=reading`,
+    placement: "chapter_inline", section_id: "section-1", inline_position: position, caption: "", disclosure: "AI 插图",
+  }));
+  const output = sampleFinishedBook(content);
+  output.share_scope = "chapter";
+  output.latest_version.manuscript.chapters = [{ ...output.latest_version.manuscript.chapters[0], chapter_id: "chapter-1",
+    content, sections: [{ section_id: "section-1", title: "故事", content }], illustrations }];
+  const { page } = loadBookReaderPage({
+    readMemoirBookShare: async () => output,
+    getMemoirChapterWorkspace: async () => ({ chapter_id: "chapter-1", chapter_title: "往事", draft_content: content,
+      draft_sections: [{ section_id: "section-1", title: "故事", content }], illustrations }),
+  });
+  const context = pageContext(page);
+  await context.onLoad(shared ? { shareToken: "family" } : { projectId: "p", chapterId: "chapter-1" });
+  assert.deepEqual(context.data.bookPreviewChapters[0].sections[0].paragraphs, ["开头。", "中间。", "结尾。"]);
+  assert.deepEqual(context.data.shareImages.map(image => image.paragraphBefore), [0, 2, 3]);
+  assert.equal(context.data.shareImages.every(image => image.chapterId === "chapter-1" && image.sectionId === "section-1" && image.url), true);
+  assert.equal(downloads.length, shared ? 0 : 3);
+});

@@ -166,7 +166,7 @@ function placementText(asset: MemoirImageAsset): string {
     .slice(0, 2)
     .map((placement) => (
       placement.placement_type === "chapter_inline"
-        ? `已放在素材附近：${placement.chapter_title || "未命名章节"}`
+        ? `已放在素材${({ before: "前面", middle: "中间", after: "后面" })[placement.inline_position || "after"]}：${placement.chapter_title || "未命名章节"}`
         : `已放在章节开头：${placement.chapter_title || "未命名章节"}`
     ));
   if (appendixCount) {
@@ -672,13 +672,14 @@ definePage<ImageAssetsData>()({
     });
   },
 
-  async placeNearSource(event: DatasetEvent) {
+  async placeNearSource(event: PickerEvent) {
     const assetId = datasetString(event, "id");
     if (!assetId) {
       return;
     }
     await this.createPlacement(assetId, {
       placement_type: "chapter_inline",
+      inline_position: (["before", "middle", "after"] as const)[pickerIndex(event)] || "after",
       display_size: "full_width",
     });
   },

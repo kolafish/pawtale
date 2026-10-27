@@ -608,6 +608,7 @@ class MemoirBookManuscriptSourceRef(BaseModel):
 
 
 class MemoirBookManuscriptIllustration(BaseModel):
+    inline_position: Literal["before", "middle", "after"] = "after"
     image_url: str = ""
     image_asset_id: str
     storage_path: str

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
+from app.schemas.memoir_book import MemoirBookManuscriptIllustration
 from app.schemas.memoir_book_review import (
     MemoirBookReviewJobResponse,
     MemoirBookReviewResponse,
@@ -210,6 +211,7 @@ class MemoirBookCompletionOverviewResponse(BaseModel):
 
 
 class MemoirChapterWorkspaceResponse(BaseModel):
+    illustrations: list[MemoirBookManuscriptIllustration] = Field(default_factory=list)
     server_revision: int = Field(ge=0)
     project_id: str
     chapter_id: str

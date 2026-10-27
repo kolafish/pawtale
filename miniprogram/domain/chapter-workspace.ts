@@ -1,7 +1,8 @@
 import type { MemoirChapterCompletionSummary } from "./chapter-completion";
-import type { MemoirChapterDraftSection, MemoirChapterSectionSummary } from "./memoir-book";
+import type { MemoirChapterDraftSection, MemoirChapterSectionSummary, MemoirBookManuscriptIllustration } from "./memoir-book";
 
 export interface MemoirChapterWorkspace {
+  illustrations?: MemoirBookManuscriptIllustration[];
   input_signature?: string;
   server_revision: number;
   project_id: string;

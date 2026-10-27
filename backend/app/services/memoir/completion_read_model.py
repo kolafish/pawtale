@@ -698,7 +698,11 @@ async def chapter_workspace(
         for section in chapter_sections
         if section.requires_user_assignment
     )
+    from app.services.memoir.image_assets import manuscript_image_snapshots
+    chapter_images, _, _ = await manuscript_image_snapshots(db, project_id=project_id)
     return MemoirChapterWorkspaceResponse(
+        illustrations=[{**image, "storage_path": "", "image_url": f"/api/mobile/memoir/projects/{project_id}/image-assets/{image['image_asset_id']}/file?variant=reading"}
+                       for image in chapter_images.get(chapter_id, [])],
         server_revision=server_revision or 0,
         project_id=project_id,
         chapter_id=chapter_id,

@@ -1332,15 +1332,20 @@ def _add_chapters(builder: PDFBookBuilder, chapters: list[Any]) -> None:
                         section_content,
                         quote,
                     )
-                if section_content:
-                    builder.add_body_text(section_content, spacing_after=4)
                 section_id = _str(section.get("section_id"))
-                anchored_illustrations = [
-                    illustration
-                    for illustration in inline_illustrations
-                    if _str(illustration.get("section_id")) == section_id
-                ]
-                _add_illustrations(builder, anchored_illustrations)
+                anchored_illustrations = [image for image in inline_illustrations if _str(image.get("section_id")) == section_id]
+                _add_illustrations(builder, [image for image in anchored_illustrations if image.get("inline_position") == "before"])
+                middle_images = [image for image in anchored_illustrations if image.get("inline_position") == "middle"]
+                if middle_images:
+                    paragraphs = [line.strip() for line in section_content.splitlines() if line.strip()]
+                    midpoint = (len(paragraphs) + 1) // 2
+                    builder.add_body_text("\n\n".join(paragraphs[:midpoint]), spacing_after=4)
+                    _add_illustrations(builder, middle_images)
+                    if paragraphs[midpoint:]:
+                        builder.add_body_text("\n\n".join(paragraphs[midpoint:]), spacing_after=4)
+                elif section_content:
+                    builder.add_body_text(section_content, spacing_after=4)
+                _add_illustrations(builder, [image for image in anchored_illustrations if image.get("inline_position", "after") == "after"])
             unanchored_illustrations = [
                 illustration
                 for illustration in inline_illustrations

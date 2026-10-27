@@ -395,7 +395,7 @@ test("image assets page keeps an unsaved caption through placement and clears it
   const event = { currentTarget: { dataset: { id: "asset-1" } } };
 
   context.onCaptionInput({ ...event, detail: { value: "新说明" } });
-  await context.placeNearSource(event);
+  await context.placeNearSource({ ...event, detail: { value: "2" } });
   assert.equal(context.data.items[0].captionDraft, "新说明");
   assert.equal(context.data.items[0].captionChanged, true);
 
@@ -427,6 +427,7 @@ test("image assets page places a source-linked illustration near its material", 
 
   await page.placeNearSource.call(context, {
     currentTarget: { dataset: { id: "asset-1" } },
+    detail: { value: "1" },
   });
 
   assert.deepEqual(placementCalls, [{
@@ -434,6 +435,7 @@ test("image assets page places a source-linked illustration near its material", 
     assetId: "asset-1",
     data: {
       placement_type: "chapter_inline",
+      inline_position: "middle",
       display_size: "full_width",
     },
   }]);

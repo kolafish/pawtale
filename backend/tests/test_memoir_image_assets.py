@@ -751,6 +751,31 @@ async def test_image_asset_api_places_image_near_source_and_syncs_latest_manuscr
     assert placed["placements"][0]["placement_type"] == "chapter_inline"
     assert placed["placements"][0]["source_utterance_ids"] == [placed["source_utterance_id"]]
 
+    for position in ("before", "middle", "after"):
+        changed = await client.patch(
+            f"/api/mobile/memoir/projects/{project_id}/image-assets/{asset_id}/placements/{placed['placements'][0]['id']}",
+            json={"inline_position": position},
+        )
+        assert changed.status_code == 200, changed.text
+        assert changed.json()["placements"][0]["inline_position"] == position
+    workspace = await client.get(f"/api/memoir/projects/{project_id}/chapters/{chapter_id}/workspace")
+    assert workspace.status_code == 200, workspace.text
+    image = workspace.json()["illustrations"][0]
+    assert image["image_asset_id"] == asset_id
+    assert image["inline_position"] == "after"
+    assert image["image_url"].endswith("?variant=reading")
+    assert image["storage_path"] == ""
+    preview = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output/share/preview", params={"chapter_id": chapter_id})
+    assert preview.status_code == 200, preview.text
+    shared = preview.json()["latest_version"]["manuscript"]["chapters"][0]["illustrations"][0]
+    assert shared["image_asset_id"] == asset_id
+    assert shared["inline_position"] == "after"
+    response = await client.get(image["image_url"])
+    assert response.status_code == 200
+    with Image.open(BytesIO(response.content)) as display:
+        assert max(display.size) <= 960
+        assert display.format == "JPEG"
+
     caption_response = await client.patch(
         f"/api/mobile/memoir/projects/{project_id}/image-assets/{asset_id}",
         json={"caption": "院子里的葡萄树"},

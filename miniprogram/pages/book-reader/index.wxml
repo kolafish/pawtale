@@ -138,7 +138,7 @@
           >
             <text wx:if="{{section.title !== chapter.title}}" class="small-section-title">{{section.title}}</text>
 <view wx:for="{{shareImages}}" wx:key="id" wx:for-item="illustration" class="share-reading-image">
-          <block wx:if="{{illustration.chapterId === chapter.chapterId && illustration.sectionId === section.id}}">
+          <block wx:if="{{illustration.chapterId === chapter.chapterId && illustration.sectionId === section.id && illustration.paragraphBefore === 0}}">
             <image src="{{illustration.url}}" mode="widthFix" />
             <text wx:if="{{illustration.caption}}">{{illustration.caption}}</text>
             <text wx:if="{{illustration.disclosure && illustration.disclosure !== illustration.caption}}">{{illustration.disclosure}}</text>
@@ -158,6 +158,13 @@
                   <text selectable>{{readerHighlightAfter}}</text>
                 </block>
                 <text wx:else selectable>{{paragraph}}</text>
+                <block wx:for="{{shareImages}}" wx:key="id" wx:for-item="illustration">
+                  <view wx:if="{{illustration.chapterId === chapter.chapterId && illustration.sectionId === section.id && illustration.paragraphBefore === paragraphIndex + 1}}" class="share-reading-image">
+                    <image src="{{illustration.url}}" mode="widthFix" />
+                    <text wx:if="{{illustration.caption}}">{{illustration.caption}}</text>
+                    <text wx:if="{{illustration.disclosure && illustration.disclosure !== illustration.caption}}">{{illustration.disclosure}}</text>
+                  </view>
+                </block>
               </view>
             </view>
           </view>
