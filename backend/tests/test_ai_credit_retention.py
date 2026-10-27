@@ -30,15 +30,19 @@ def wechat_identity(monkeypatch):
 
 
 @pytest.mark.ci_smoke
+@pytest.mark.parametrize("initial_credit", [Decimal("5"), Decimal("10")])
 @pytest.mark.parametrize("spent", [Decimal("3.602339"), Decimal("40")])
 async def test_all_credit_and_usage_survive_repeated_account_deletion(
-    anonymous_client, test_db, monkeypatch, spent,
+    anonymous_client, test_db, monkeypatch, spent, initial_credit,
 ):
     wechat_identity(monkeypatch)
     user_id = await login(anonymous_client)
     await add_ai_credit(test_db, user_id=user_id, amount_rmb=Decimal("20"), kind="recharge", actor_user_id=user_id)
     await add_ai_credit(test_db, user_id=user_id, amount_rmb=Decimal("5"), kind="grant", actor_user_id=user_id)
     account = await ensure_ai_credit_account(test_db, user_id)
+    assert account.free_credit_rmb == Decimal("5")
+    # Include a wallet that received the former ten-yuan grant.
+    account.free_credit_rmb = initial_credit
     # Mix an existing debit/refund ledger with legacy priced usage.
     test_db.add_all([
         AICreditTransaction(account_id=account.id, user_id=user_id, transaction_type=USAGE_DEBIT, amount_rmb=-spent),
@@ -49,7 +53,7 @@ async def test_all_credit_and_usage_survive_repeated_account_deletion(
     ])
     await test_db.commit()
     before = await get_ai_credit_summary(test_db, user_id=user_id)
-    assert before.remaining_rmb == Decimal("35") - spent
+    assert before.remaining_rmb == initial_credit + Decimal("25") - spent
     for _ in range(2):
         deleted = await anonymous_client.request("DELETE", "/api/auth/me", json={"code": "owner"})
         assert deleted.status_code == 204, deleted.text
@@ -65,7 +69,7 @@ async def test_all_credit_and_usage_survive_repeated_account_deletion(
         details = (await anonymous_client.get("/api/billing/ai-usage")).json()
         assert sum(Decimal(day["cost_rmb"]) for day in details["days"]) == Decimal("0.25")
     other_user = await login(anonymous_client, "someone-else")
-    assert (await get_ai_credit_summary(test_db, user_id=other_user)).remaining_rmb == Decimal("10")
+    assert (await get_ai_credit_summary(test_db, user_id=other_user)).remaining_rmb == Decimal("5")
 
 
 @pytest.mark.ci_smoke
@@ -85,9 +89,9 @@ async def test_payment_delivery_and_refund_work_while_account_is_deleted(anonymo
                                          refund_id="refund-1", refund_fen=990) == expected
     new_user_id = await login(anonymous_client)
     summary = await get_ai_credit_summary(test_db, user_id=new_user_id)
-    assert summary.free_credit_rmb == Decimal("10")
+    assert summary.free_credit_rmb == Decimal("5")
     assert summary.recharged_credit_rmb == Decimal("20")
-    assert summary.remaining_rmb == Decimal("30")
+    assert summary.remaining_rmb == Decimal("25")
     order = await test_db.get(AICreditOrder, payment.order_no, populate_existing=True)
     assert order.user_id == new_user_id
     assert (await anonymous_client.get(f"/api/billing/credit-orders/{payment.order_no}")).status_code == 200
@@ -108,9 +112,9 @@ async def test_late_unionid_recovers_balance_without_losing_new_charges(anonymou
     for _ in range(2):
         assert await login(anonymous_client, "with-union", "xiaoyu") == current
         summary = await get_ai_credit_summary(test_db, user_id=current)
-        assert summary.total_credit_rmb == Decimal("30")
+        assert summary.total_credit_rmb == Decimal("25")
         assert summary.used_rmb == Decimal("2")
-        assert summary.remaining_rmb == Decimal("28")
+        assert summary.remaining_rmb == Decimal("23")
     assert len((await test_db.scalars(select(AICreditAccount))).all()) == 1
 
 

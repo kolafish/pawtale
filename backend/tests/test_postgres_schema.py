@@ -48,6 +48,15 @@ async def _assert_runtime_schema() -> None:
     engine = create_async_engine(POSTGRES_DATABASE_URL)
     try:
         await assert_postgres_runtime_schema(engine)
+        async with engine.connect() as connection:
+            # Exercise the migrated database default without ORM/service defaults.
+            credit = await connection.scalar(text(
+                "INSERT INTO ai_credit_accounts (id, created_at, updated_at) "
+                "VALUES ('credit-default-test', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) "
+                "RETURNING free_credit_rmb"
+            ))
+            assert credit == 5
+            await connection.rollback()
     finally:
         await engine.dispose()
 
