@@ -483,6 +483,11 @@
 .excerpt-selection-error { display: block; margin-top: 20rpx; color: var(--ui-accent-strong); line-height: 1.6; }
 .excerpt-actions { display: flex; gap: 16rpx; margin: 24rpx 0 0; }
 .excerpt-actions button { flex: 1; margin: 0; min-height: 48px; }
+.excerpt-selection-actions {
+  --ui-fixed-action-bottom: 32rpx;
+  --ui-fixed-action-background: linear-gradient(180deg, rgba(245, 241, 234, 0), rgba(245, 241, 234, .96) 24rpx, #f5f1ea 54rpx);
+  margin: 0;
+}
 .excerpt-card-image { display: block; width: 100%; margin-top: 28rpx; border-radius: 16rpx; box-shadow: 0 8rpx 32rpx rgba(97,75,57,.08); outline: 1px solid rgba(0,0,0,.06); }
 .excerpt-paper { padding: 0 8rpx; }
 .excerpt-eyebrow { display: block; color: #806b55; font-family: var(--ui-font-editorial); font-size: 26rpx; line-height: 1.6; }
