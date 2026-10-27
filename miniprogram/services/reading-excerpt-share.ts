@@ -49,6 +49,7 @@ export const readingExcerptMethods = methods({
       if (!result?.context || generation !== this.excerptGeneration || this.data.excerptMode !== "select") return;
       const { context } = result;
       this.excerptEditor = context;
+      this.setData({ error: "" });
       context.setContents({ delta: { ops: [{ insert: this.excerptSource + "\n" }] },
         fail: () => this.setData({ error: "正文加载失败，请返回重试。" }) });
     }).exec();
@@ -62,6 +63,11 @@ export const readingExcerptMethods = methods({
   },
   async previewExcerptSelection() {
     if (this.data.excerptBusy || this.data.excerptReloadRequired || this.data.excerptMode !== "select") return;
+    // An early tap must not invalidate the editor's pending context callback.
+    if (!this.excerptEditor) {
+      this.setData({ error: "正文尚未就绪，请稍后再试。" });
+      return;
+    }
     const generation = ++this.excerptGeneration;
     this.setData({ excerptBusy: true, error: "" });
     try {

@@ -928,6 +928,50 @@ test("excerpt editor readiness ignores missing or detached nodes after page exit
   assert.equal(context.excerptEditor, null);
 });
 
+for (const timing of ["early preview", "hidden callback", "late callback after return"]) {
+  test(`excerpt editor initialization recovers from ${timing}`, async () => {
+    const source = "奶奶坐在门口。";
+    const context = excerptContext({
+      previewMemoirBookShare: async () => ({ title: "第一章", latest_version: { id: "v1", content: source } }),
+      createMemoirExcerptShare: async (_project, _chapter, { content }) => ({ token: "x1.token", content, book_title: "回忆录", chapter_title: "第一章" }),
+    });
+    const callbacks = [];
+    const query = { select: () => query, context: callback => { callbacks.push(callback); return query; }, exec() {} };
+    context.createSelectorQuery = () => query;
+    let displayed = "";
+    const editor = {
+      setContents: ({ delta }) => { displayed = delta.ops[0].insert; },
+      getSelectionText: ({ success }) => success({ text: source }),
+    };
+    await context.onLoad({ projectId: "p", chapterId: "c", excerptSelect: "1" });
+    context.onExcerptEditorReady();
+    const originalCallback = callbacks.shift();
+    if (timing === "early preview") {
+      await context.previewExcerptSelection();
+      assert.equal(context.data.excerptMode, "select");
+      originalCallback({ context: editor });
+    } else {
+      context.onHide();
+      if (timing === "hidden callback") originalCallback({ context: editor });
+      assert.equal(displayed, "");
+      context.onShow();
+      assert.equal(callbacks.length, 1, "returning reinitializes the existing editor");
+      callbacks.shift()({ context: editor });
+      if (timing === "late callback after return") {
+        originalCallback({ context: { setContents: () => assert.fail("old hidden callback") } });
+      }
+    }
+    assert.equal(displayed, source + "\n");
+    assert.equal(context.data.error, "");
+    context.onHide();
+    context.onShow();
+    assert.equal(callbacks.length, 0, "ready editor keeps its current selection on return");
+    await context.previewExcerptSelection();
+    assert.equal(context.data.excerptMode, "preview");
+    assert.equal(context.data.excerptContent, source);
+  });
+}
+
 test("excerpt version conflict requires reloading source before another selection", async () => {
   const context = excerptContext({
     createMemoirExcerptShare: async () => { throw new ApiError(409, "正文已更新，请重新选择划线内容", {}); },
