@@ -6,6 +6,7 @@ export type MemoirCacheResource =
   | "voice_session"
   | "home"
   | "book"
+  | "book_share_pending"
   | "chapter_workspace";
 
 export interface MemoirCacheScope {

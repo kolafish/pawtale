@@ -30,6 +30,8 @@ import {
   updateMemoirBookShare,
 } from "../../services/memoir-book-api";
 import { ApiError, optionalApiResource } from "../../services/request";
+import { readPendingMemoirBookShare, writePendingMemoirBookShare, clearPendingMemoirBookShare } from "../../stores/memoir-cache";
+import type { MemoirCacheIdentity } from "../../stores/session";
 import {
   defaultNarrationSessionFields,
   memoirProjectProfile,
@@ -114,6 +116,7 @@ function ageFromText(value: string): number | null {
 
 definePage<ProjectEditData>()({
   pendingCreatedProject: null as { id: string; title: string; input: MemoirProjectInput } | null,
+  bookShareCacheIdentity: null as MemoirCacheIdentity | null,
   data: {
     pageClass: accessibilityPageClass(PAGE_CLASS),
     loading: false,
@@ -151,6 +154,7 @@ definePage<ProjectEditData>()({
 
   async onLoad(query?: PageQuery) {
     this.pendingCreatedProject = null;
+    this.bookShareCacheIdentity = null;
     const projectId = queryParam(query, "projectId");
     if (projectId) {
       this.setData({ projectId, pageTitle: "编辑回忆录" });
@@ -205,9 +209,18 @@ definePage<ProjectEditData>()({
     if (!this.data.projectId || this.data.bookShareState === "loading") return false;
     this.setData({ bookShareState: "loading", bookShareError: "" });
     try {
+      if (!this.bookShareCacheIdentity) {
+        const identity = await getMemoirIdentity();
+        this.bookShareCacheIdentity = { user_id: identity.id, storage_owner_id: identity.storage_owner_id,
+          project_id: this.data.projectId };
+      }
+      const cacheIdentity = this.bookShareCacheIdentity;
+      const pendingTarget = readPendingMemoirBookShare(cacheIdentity);
+      this.setData({ bookSharePendingTarget: pendingTarget });
       const status = await optionalApiResource(getMemoirBookShareStatus(this.data.projectId));
+      if (pendingTarget !== null && (!status || status.active === pendingTarget)) clearPendingMemoirBookShare(cacheIdentity, pendingTarget);
       this.setData({ bookShareEnabled: status?.active ?? false, bookShareState: status ? "ready" : "unavailable",
-        bookSharePendingTarget: !status || status.active === this.data.bookSharePendingTarget ? null : this.data.bookSharePendingTarget });
+        bookSharePendingTarget: readPendingMemoirBookShare(cacheIdentity) });
       return true;
     } catch (error) {
       this.setData({ bookShareState: "error", bookShareError: error instanceof Error ? error.message : "分享状态加载失败" });
@@ -219,16 +232,28 @@ definePage<ProjectEditData>()({
     const enabled = event.detail.value;
     const previous = this.data.bookShareEnabled;
     if (!this.data.projectId || this.data.bookShareState !== "ready" || this.data.bookShareBusy || this.data.saving || enabled === previous) return;
+    const cacheIdentity = this.bookShareCacheIdentity;
+    if (!cacheIdentity) return;
+    const previousPending = readPendingMemoirBookShare(cacheIdentity);
+    if (writePendingMemoirBookShare(cacheIdentity, enabled) !== "written") {
+      this.setData({ bookShareEnabled: previous, bookShareError: "无法保存分享设置的处理状态，请稍后重试" });
+      return;
+    }
     this.setData({ bookShareEnabled: enabled, bookShareBusy: true, bookShareError: "" });
     try {
       if (enabled) await updateMemoirBookShare(this.data.projectId);
       else await revokeMemoirBookShare(this.data.projectId);
-      this.setData({ bookSharePendingTarget: null });
+      clearPendingMemoirBookShare(cacheIdentity, enabled);
+      this.setData({ bookSharePendingTarget: readPendingMemoirBookShare(cacheIdentity) });
     } catch (error) {
       const message = error instanceof Error ? error.message : "分享设置失败";
       const rejected = error instanceof ApiError && error.statusCode >= 400 && error.statusCode < 500 && error.statusCode !== 408;
       if (rejected) {
-        this.setData({ bookShareEnabled: previous, bookShareError: message });
+        if (readPendingMemoirBookShare(cacheIdentity) === enabled) {
+          if (previousPending === null) clearPendingMemoirBookShare(cacheIdentity, enabled);
+          else writePendingMemoirBookShare(cacheIdentity, previousPending);
+        }
+        this.setData({ bookShareEnabled: previous, bookSharePendingTarget: readPendingMemoirBookShare(cacheIdentity), bookShareError: message });
       } else {
         // A GET is a snapshot; the timed-out write may still be pending.
         this.setData({ bookSharePendingTarget: enabled });
