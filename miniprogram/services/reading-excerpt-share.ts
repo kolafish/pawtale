@@ -10,7 +10,7 @@ import { illustrationStyleViews, readShareVideoBackgroundSettings } from "./shar
 export const INITIAL_EXCERPT_DATA = {
   excerptMode: "" as "" | "select" | "compose" | "preview" | "shared",
   ...initialTranscriptMaterialImageTaskState(),
-  excerptTitle: "", excerptSummary: "", excerptIsOwner: false, excerptTitleBusy: false, excerptTitleError: "",
+  excerptTitle: "", excerptSummary: "", excerptTitleBusy: false, excerptTitleError: "",
   excerptStyle: "text" as "text" | "image", excerptImageSource: "ai" as "ai" | "photo",
   excerptBackgroundNote: "", excerptIllustrationStyle: "watercolor", excerptStyleOptions: [] as ReturnType<typeof illustrationStyleViews>,
   excerptPhotoIds: [] as string[], excerptAiAssetIds: [] as string[], excerptPhotoBusy: false,
@@ -238,7 +238,7 @@ export const readingExcerptMethods = methods({
     try {
       const excerpt = await readMemoirExcerptShare(this.excerptToken);
       if (generation !== this.excerptGeneration) return;
-      this.setData({ excerptTitle: excerpt.title, excerptSummary: excerpt.summary, excerptIsOwner: excerpt.is_owner === true,
+      this.setData({ excerptTitle: excerpt.title, excerptSummary: excerpt.summary,
         excerptStoryImageUrl: excerpt.image_url ? `${cleanBaseUrl(readBackendConfig().httpBaseUrl)}${excerpt.image_url}` : "",
         excerptImageDisclosure: excerpt.image_disclosure || "", excerptReadingLink: excerpt.reading_link || null,
         excerptContent: excerpt.content, excerptBookTitle: excerpt.book_title,

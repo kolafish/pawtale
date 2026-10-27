@@ -54,19 +54,24 @@
       <view wx:if="{{excerptStoryImageUrl}}" class="excerpt-story-image-shell"><image class="excerpt-story-image" src="{{excerptStoryImageUrl}}" mode="aspectFill" /></view>
       <text wx:if="{{excerptStoryImageUrl && excerptImageDisclosure}}" class="excerpt-image-disclosure">AI生成插图</text>
       <view class="excerpt-quote"><text user-select="{{true}}">{{excerptContent}}</text></view>
-      <view class="excerpt-source">
-        <image class="excerpt-source-icon" src="/assets/book-reader/hero-branch.png" mode="aspectFit" aria-hidden="true" />
-        <view><text class="excerpt-attribution">选自《{{excerptBookTitle}}》</text><text class="excerpt-source-chapter">{{excerptChapterTitle}}</text></view>
+      <view class="excerpt-source-card {{excerptReadingLink && excerptReadingLink.scope === 'book' ? 'is-readable' : ''}}"
+        bindtap="openExcerptReading" aria-role="{{excerptReadingLink && excerptReadingLink.scope === 'book' ? 'link' : ''}}"
+        aria-label="选自《{{excerptBookTitle}}》，{{excerptChapterTitle}}{{excerptReadingLink && excerptReadingLink.scope === 'book' ? '，继续阅读这本回忆录' : ''}}"
+        hover-class="{{excerptReadingLink && excerptReadingLink.scope === 'book' ? 'excerpt-source-card-hover' : 'none'}}">
+        <view class="excerpt-source">
+          <image class="excerpt-source-icon" src="/assets/book-reader/hero-branch.png" mode="aspectFit" aria-hidden="true" />
+          <view class="excerpt-source-copy"><text class="excerpt-attribution">选自《{{excerptBookTitle}}》</text><text class="excerpt-source-chapter">{{excerptChapterTitle}}</text></view>
+        </view>
+        <view wx:if="{{excerptReadingLink && excerptReadingLink.scope === 'book'}}" class="excerpt-reading-link"><text class="excerpt-reading-label">继续阅读这本回忆录</text><text class="excerpt-reading-arrow" aria-hidden="true">→</text></view>
       </view>
-      <view wx:if="{{excerptReadingLink && excerptReadingLink.scope === 'book'}}" class="excerpt-reading-link" aria-role="link" aria-label="阅读《{{excerptBookTitle}}》" bindtap="openExcerptReading"><text class="excerpt-reading-label">阅读《{{excerptBookTitle}}》</text><text aria-hidden="true">→</text></view>
     </view>
     <view class="excerpt-origin">
       <image src="/assets/memoir-microphone.png" mode="aspectFit" aria-hidden="true" />
       <text>由讲述者亲口讲述 · 老余口述整理成书</text>
     </view>
-    <view class="excerpt-reader-actions {{excerptIsOwner ? 'is-owner' : ''}}">
-      <button class="excerpt-reader-button {{excerptIsOwner ? 'is-primary' : 'is-secondary'}}" open-type="share">分享给好友</button>
-      <button class="excerpt-reader-button {{excerptIsOwner ? 'is-secondary' : 'is-primary'}}" bindtap="openShareHome">我也想记录家人的故事 →</button>
+    <view class="excerpt-reader-actions">
+      <button class="excerpt-reader-button is-primary" open-type="share">分享给好友</button>
+      <button class="excerpt-reader-button is-secondary" bindtap="openShareHome">我也想记录家人的故事</button>
     </view>
     <template is="shareLikeBar" data="{{shareLikeVisible, shareLiked, shareCanLike, shareLikeBusy, shareLikeAvatars, shareLikeText, shareLikeProfileMissing}}" />
   </block>
