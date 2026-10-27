@@ -725,20 +725,24 @@ class MemoirExcerptImageRequest(MemoirExcerptSelection):
 
 class MemoirExcerptShareRequest(MemoirExcerptSelection):
     title: str = Field(default="", max_length=40)
+    summary: str = Field(default="", max_length=48)
     image_asset_id: str | None = Field(default=None, min_length=1, max_length=36)
 
 
 class MemoirExcerptTitle(BaseModel):
     title: str = Field(min_length=1, max_length=40)
+    summary: str = Field(min_length=1, max_length=48)
 
 
 class MemoirExcerptReadingLink(BaseModel):
-    scope: Literal["book", "chapter"]
+    scope: Literal["book"]
     token: str
 
 
 class MemoirExcerptShareResponse(BaseModel):
     title: str
+    summary: str = ""
+    is_owner: bool = False
     image_url: str = ""
     image_disclosure: str = ""
     reading_link: MemoirExcerptReadingLink | None = None

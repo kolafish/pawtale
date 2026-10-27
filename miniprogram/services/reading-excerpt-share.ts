@@ -10,14 +10,14 @@ import { illustrationStyleViews, readShareVideoBackgroundSettings } from "./shar
 export const INITIAL_EXCERPT_DATA = {
   excerptMode: "" as "" | "select" | "compose" | "preview" | "shared",
   ...initialTranscriptMaterialImageTaskState(),
-  excerptTitle: "", excerptTitleBusy: false, excerptTitleError: "",
+  excerptTitle: "", excerptSummary: "", excerptIsOwner: false, excerptTitleBusy: false, excerptTitleError: "",
   excerptStyle: "text" as "text" | "image", excerptImageSource: "ai" as "ai" | "photo",
   excerptIllustrationStyle: "watercolor", excerptStyleOptions: [] as ReturnType<typeof illustrationStyleViews>,
   excerptPhotoIds: [] as string[], excerptAiAssetIds: [] as string[], excerptPhotoBusy: false,
   excerptStoryImageUrl: "", excerptImageDisclosure: "", excerptReadingLink: null as MemoirExcerptShare["reading_link"],
   excerptContent: "", excerptBookTitle: "", excerptChapterTitle: "",
   excerptImageUrl: "", excerptImageReady: false, excerptBusy: false, excerptSelectionCount: 0,
-  excerptReloadRequired: false, excerptBeforeHighlight: "", excerptHighlight: "",
+  excerptReloadRequired: false,
 };
 
 interface ExcerptHost {
@@ -77,7 +77,7 @@ export const readingExcerptMethods = methods({
       if (!count) throw Error("请先长按正文，拖动选区选择要分享的文字。");
       if (count > 512) throw Error(`已选 ${count} 字，请缩短到 512 字以内。`);
       if (!this.excerptSource.includes(content)) throw Error("请选择正文中连续的一段原文。");
-      this.setData({ excerptMode: "compose", excerptContent: content, excerptSelectionCount: count, excerptTitle: "" },
+      this.setData({ excerptMode: "compose", excerptContent: content, excerptSelectionCount: count, excerptTitle: "", excerptSummary: "" },
         () => wx.pageScrollTo?.({ scrollTop: 0, duration: 0 }));
       await this.suggestExcerptTitle();
     } catch (error) {
@@ -94,10 +94,10 @@ export const readingExcerptMethods = methods({
     try {
       const result = await suggestMemoirExcerptTitle(this.data.projectId, this.data.chapterId,
         { version_id: this.excerptVersionId, content: this.data.excerptContent });
-      if (generation === this.excerptGeneration) this.setData({ excerptTitle: result.title });
+      if (generation === this.excerptGeneration) this.setData({ excerptTitle: result.title, excerptSummary: result.summary });
     } catch (error) {
       if (generation === this.excerptGeneration) this.setData({ excerptTitleError: error instanceof ApiError && error.statusCode === 409
-          ? "正文已更新，请重新选文。" : "标题推荐失败，可以自行填写标题或重试。",
+          ? "正文已更新，请重新选文。" : "推荐失败，可以自行填写标题和摘要或重试。",
         excerptReloadRequired: error instanceof ApiError && error.statusCode === 409 });
     } finally {
       if (generation === this.excerptGeneration) this.setData({ excerptTitleBusy: false });
@@ -105,6 +105,9 @@ export const readingExcerptMethods = methods({
   },
   changeExcerptTitle(event: { detail: { value: string } }) {
     this.setData({ excerptTitle: Array.from(event.detail.value).slice(0, 40).join("") });
+  },
+  changeExcerptSummary(event: { detail: { value: string } }) {
+    this.setData({ excerptSummary: Array.from(event.detail.value).slice(0, 48).join("") });
   },
   async chooseExcerptStyle(event: { currentTarget: { dataset: { style: "text" | "image" } } }) {
     this.setData({ excerptStyle: event.currentTarget.dataset.style, error: "" });
@@ -168,7 +171,9 @@ export const readingExcerptMethods = methods({
   async confirmExcerptCard() {
     if (this.data.excerptBusy || this.data.excerptTitleBusy || this.data.excerptPhotoBusy || this.data.excerptReloadRequired) return;
     const title = this.data.excerptTitle.trim();
+    const summary = this.data.excerptSummary.trim();
     if (!title) { this.setData({ error: "请确认或填写分享标题。" }); return; }
+    if (!summary) { this.setData({ error: "请确认或填写简短摘要。" }); return; }
     const assetId = this.data.excerptStyle === "image"
       ? (this.data.excerptImageSource === "ai" ? this.data.excerptAiAssetIds[0] : this.data.excerptPhotoIds[0]) : "";
     if (this.data.excerptStyle === "image" && !assetId) { this.setData({ error: "请先生成插图或选择一张照片。" }); return; }
@@ -176,10 +181,10 @@ export const readingExcerptMethods = methods({
     this.setData({ excerptBusy: true, error: "" });
     try {
       const share = await createMemoirExcerptShare(this.data.projectId, this.data.chapterId,
-        { version_id: this.excerptVersionId, content: this.data.excerptContent, title, ...(assetId ? { image_asset_id: assetId } : {}) });
+        { version_id: this.excerptVersionId, content: this.data.excerptContent, title, summary, ...(assetId ? { image_asset_id: assetId } : {}) });
       if (generation !== this.excerptGeneration) return;
       this.excerptToken = share.token;
-      this.setData({ excerptMode: "preview", excerptTitle: share.title, excerptContent: share.content,
+      this.setData({ excerptMode: "preview", excerptTitle: share.title, excerptSummary: share.summary, excerptContent: share.content,
         excerptBookTitle: share.book_title, excerptChapterTitle: share.chapter_title,
         excerptImageUrl: excerptShareMessage(share.token, share.title).imageUrl || "", excerptImageReady: false },
         () => wx.pageScrollTo?.({ scrollTop: 0, duration: 0 }));
@@ -198,7 +203,7 @@ export const readingExcerptMethods = methods({
   },
   openExcerptReading() {
     const link = this.data.excerptReadingLink;
-    if (link) wx.navigateTo({ url: `/pages/book-reader/index?shareToken=${encodeURIComponent(link.token)}` });
+    if (link?.scope === "book") wx.navigateTo({ url: `/pages/book-reader/index?shareToken=${encodeURIComponent(link.token)}` });
   },
   onExcerptImageLoad(event: { currentTarget: { dataset: { url?: string } } }) {
     if (this.data.excerptMode === "preview" && event.currentTarget.dataset.url === this.data.excerptImageUrl) this.setData({ excerptImageReady: true, error: "" });
@@ -223,11 +228,7 @@ export const readingExcerptMethods = methods({
     try {
       const excerpt = await readMemoirExcerptShare(this.excerptToken);
       if (generation !== this.excerptGeneration) return;
-      const chars = Array.from(excerpt.content);
-      const lastClause = excerpt.content.match(/[^。！？!?，,；;\n]+[。！？!?]?$/)?.[0] || excerpt.content;
-      const highlightLength = Math.min(Array.from(lastClause).length, 24);
-      this.setData({ excerptBeforeHighlight: chars.slice(0, -highlightLength).join(""), excerptHighlight: chars.slice(-highlightLength).join(""),
-        excerptTitle: excerpt.title,
+      this.setData({ excerptTitle: excerpt.title, excerptSummary: excerpt.summary, excerptIsOwner: excerpt.is_owner === true,
         excerptStoryImageUrl: excerpt.image_url ? `${cleanBaseUrl(readBackendConfig().httpBaseUrl)}${excerpt.image_url}` : "",
         excerptImageDisclosure: excerpt.image_disclosure || "", excerptReadingLink: excerpt.reading_link || null,
         excerptContent: excerpt.content, excerptBookTitle: excerpt.book_title,

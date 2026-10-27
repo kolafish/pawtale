@@ -837,7 +837,7 @@ for (const shared of [false, true]) test(`${shared ? "shared" : "owner"} chapter
 
 function excerptContext(api = {}) {
   global.wx = { getStorageSync: () => "", setStorageSync() {}, hideShareMenu() {}, showShareMenu() {}, setNavigationBarTitle() {} };
-  const { page } = loadBookReaderPage({ suggestMemoirExcerptTitle: async () => ({ title: "门口的那段往事" }), ...api });
+  const { page } = loadBookReaderPage({ suggestMemoirExcerptTitle: async () => ({ title: "门口的那段往事", summary: "奶奶坐在门口等我回家。" }), ...api });
   const context = pageContext(page);
   context.loadShareLikes = async (target) => { context.likeTarget = target; };
   return context;
@@ -848,7 +848,7 @@ test("excerpt selection previews only the chosen text and forwards the same immu
   const source = "一段开头。\n奶奶坐在门口。\n不想分享的正文。";
   const context = excerptContext({
     getMemoirChapterWorkspace: async () => ({ chapter_id: "c", chapter_title: "第一章", draft_version_id: "v1", draft_content: source, draft_sections: [] }),
-    createMemoirExcerptShare: async (...args) => { request = args; return { token: "x1.token", title: args[2].title, content: args[2].content, book_title: "回忆录", chapter_title: "第一章" }; },
+    createMemoirExcerptShare: async (...args) => { request = args; return { token: "x1.token", title: args[2].title, summary: args[2].summary, content: args[2].content, book_title: "回忆录", chapter_title: "第一章" }; },
   });
   await context.onLoad({ projectId: "p", chapterId: "c", excerptSelect: "1" });
   assert.equal(context.data.excerptMode, "select");
@@ -861,8 +861,9 @@ test("excerpt selection previews only the chosen text and forwards the same immu
   assert.equal(request, undefined, "recommendation does not publish a share");
   assert.equal(scrolls.at(-1), 0, "configuration starts at its title even after selecting deep in a chapter");
   context.changeExcerptTitle({ detail: { value: "奶奶等我回家" } });
+  context.changeExcerptSummary({ detail: { value: "熟悉的门口，总有人等我回家。" } });
   await context.confirmExcerptCard();
-  assert.deepEqual(request, ["p", "c", { version_id: "v1", content: "奶奶坐在门口。", title: "奶奶等我回家" }]);
+  assert.deepEqual(request, ["p", "c", { version_id: "v1", content: "奶奶坐在门口。", title: "奶奶等我回家", summary: "熟悉的门口，总有人等我回家。" }]);
   assert.equal(context.data.excerptMode, "preview");
   assert.equal(context.data.excerptContent, "奶奶坐在门口。");
   assert.equal(context.data.excerptImageReady, false);
@@ -1024,10 +1025,10 @@ test("a saved chapter awaiting rewrite remains available for selected-text shari
       assert.equal(projectId, "p");
       assert.equal(chapterId, "c");
       assert.deepEqual(value, selection);
-      return { title: "那条长长的回家路" };
+      return { title: "那条长长的回家路", summary: "回家的路很长。" };
     },
     createMemoirExcerptShare: async (_p, _c, value) => {
-      assert.deepEqual(value, { ...selection, title: "那条长长的回家路" });
+      assert.deepEqual(value, { ...selection, title: "那条长长的回家路", summary: "回家的路很长。" });
       return { ...value, token: "x1.saved", book_title: "回忆录", chapter_title: "放学的路" };
     },
   });
@@ -1063,9 +1064,9 @@ test("selected-text entry reuses the chapter preview loader and presentation", a
 test("512 Unicode characters reach title recommendation and remain complete behind an independent sharing title", async () => {
   const content = "回忆🌿。".repeat(128);
   let posted;
-  const snapshot = { token: "x1.long", title: "小时候的回忆", content, book_title: "回忆录", chapter_title: "童年" };
+  const snapshot = { token: "x1.long", title: "小时候的回忆", summary: "那些难忘的童年回忆。", content, book_title: "回忆录", chapter_title: "童年" };
   const context = excerptContext({
-    suggestMemoirExcerptTitle: async (_p, _c, selection) => { assert.equal(selection.content, content); return { title: snapshot.title }; },
+    suggestMemoirExcerptTitle: async (_p, _c, selection) => { assert.equal(selection.content, content); return { title: snapshot.title, summary: snapshot.summary }; },
     createMemoirExcerptShare: async (_p, _c, selection) => { posted = selection.content; return snapshot; },
     readMemoirExcerptShare: async () => snapshot,
   });
@@ -1081,7 +1082,6 @@ test("512 Unicode characters reach title recommendation and remain complete behi
   assert.equal(context.onShareAppMessage().title, snapshot.title);
   await context.onLoad({ excerptToken: snapshot.token });
   assert.equal(context.data.excerptContent, content);
-  assert.equal(context.data.excerptBeforeHighlight + context.data.excerptHighlight, content);
   assert.deepEqual(context.likeTarget, { reading_token: snapshot.token });
 });
 
@@ -1115,6 +1115,7 @@ test("selected-text cards only publish an explicitly chosen image and preserve m
   await context.previewExcerptSelection();
   assert.ok(context.data.excerptTitleError);
   context.changeExcerptTitle({ detail: { value: "讲一场课，四百块钱" } });
+  context.changeExcerptSummary({ detail: { value: "那时，我靠讲课挣生活费。" } });
   context.setData({ excerptStyle: "image", excerptImageSource: "photo" });
   await context.confirmExcerptCard();
   assert.equal(posts.length, 0);
@@ -1133,14 +1134,24 @@ test("selected-text cards only publish an explicitly chosen image and preserve m
 
 test("recipient continuation uses only server-authorized links and updates after revocation", async () => {
   let link = { scope: "book", token: "v1.authorized" };
-  const context = excerptContext({ readMemoirExcerptShare: async () => ({ title: "标题", content: "选文", book_title: "书", chapter_title: "章", reading_link: link }) });
+  let isOwner = false;
+  const context = excerptContext({ readMemoirExcerptShare: async () => ({ title: "标题", content: "选文", book_title: "书", chapter_title: "章", reading_link: link, is_owner: isOwner }) });
   const navigations = [];
   global.wx.navigateTo = ({ url }) => navigations.push(url);
   await context.onLoad({ excerptToken: "x1.card" });
+  assert.equal(context.data.excerptIsOwner, false);
   context.openExcerptReading();
   assert.equal(navigations[0], "/pages/book-reader/index?shareToken=v1.authorized");
-  link = null;
+  isOwner = true;
+  link = { scope: "chapter", token: "v1.chapter-only" };
   await context.loadExcerptSnapshot();
+  assert.equal(context.data.excerptIsOwner, true);
+  context.openExcerptReading();
+  assert.equal(navigations.length, 1);
+  link = null;
+  isOwner = false;
+  await context.loadExcerptSnapshot();
+  assert.equal(context.data.excerptIsOwner, false);
   context.openExcerptReading();
   assert.equal(navigations.length, 1);
 });
