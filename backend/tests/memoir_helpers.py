@@ -440,3 +440,37 @@ async def create_test_chapter_draft(
     await test_db.flush()
     await test_db.commit()
     return draft
+
+
+async def save_test_body_summaries(db, project_id):
+    """Seed completed AI bodies, with per-point provenance, for structure writer tests."""
+    from app.services.memoir.story_tree_growth import _load_tree
+    from app.schemas.memoir_section_digests import MemoirBodyDigest, MemoirBodyDigestPoint
+    from app.services.memoir.section_digests import digest_snapshot
+    from app.services.memoir.transcript_projection import current_material_text
+    _, chapters, sections = await _load_tree(db, project_id=project_id)
+    for chapter in chapters:
+        snapshots = []
+        for section in sections:
+            if section.chapter_id != chapter.id:
+                continue
+            points = [MemoirBodyDigestPoint(text=current_material_text(m), material_ids=[m.utterance_id])
+                for m in section.materials if m.include_in_book and current_material_text(m)]
+            body = "\n".join(p.text for p in points) or "待补充"
+            snapshots.append({"section_id": section.id, "title": section.title,
+                "section_version": section.version, "section_type": section.section_type,
+                "sort_order": section.sort_order, "content": body,
+                "used_material_ids": [mid for p in points for mid in p.material_ids],
+                **digest_snapshot(body, MemoirBodyDigest(summary=body, points=points))})
+        draft = await db.scalar(select(MemoirBookChapterDraft).where(MemoirBookChapterDraft.chapter_id == chapter.id))
+        if draft is None:
+            draft = MemoirBookChapterDraft(project_id=project_id, chapter_id=chapter.id, status="draft")
+            db.add(draft)
+            await db.flush()
+        versions = list((await db.scalars(select(MemoirBookChapterDraftVersion).where(
+            MemoirBookChapterDraftVersion.draft_id == draft.id))).all())
+        db.add(MemoirBookChapterDraftVersion(draft_id=draft.id, project_id=project_id, chapter_id=chapter.id,
+            version=max((v.version for v in versions), default=0) + 1,
+            content="\n\n".join(s["content"] for s in snapshots), created_by="ai",
+            section_snapshot_json=snapshots, used_material_ids_json=[mid for s in snapshots for mid in s["used_material_ids"]]))
+    await db.commit()

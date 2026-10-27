@@ -25,11 +25,11 @@ from app.schemas.memoir_book_review import (
     MemoirBookRevisionPreviewVersion,
     MemoirBookRevisionProposalResponse,
 )
+from app.schemas.memoir_section_digests import MemoirBodyDigest
 from app.services.memoir.material_roles import ANSWER_CONTEXT_GUIDANCE
 from app.services.memoir import (
     book_revision_generation,
     book_revision_proposals,
-    chapter_digests,
     chapter_generation,
     editing_jobs,
     revision_job_workflow,
@@ -248,16 +248,9 @@ async def _generate_candidate(
         else ""
     )
     continuity = await chapter_generation.load_section_continuity(db, context=target.context)
-    digest = await chapter_digests.get_current_chapter_digest(
-        db,
-        project_id=target.context.project_id,
-        chapter_id=target.context.chapter_id,
-    )
-    guidance = chapter_digests.writing_guidance(digest)
     return await chapter_generation.generate_chapter_section(
         target.context,
         section=replace(target.section, title=current_title or target.section.title),
-        editorial_guidance=guidance,
         chapter_sections=target.context.sections,
         previous_section_content=previous_content,
         preceding_section_context=chapter_generation.previous_section_context(
@@ -440,6 +433,7 @@ async def run_section_revision_job(
                 "revision_instructions": [*prior_instructions, feedback],
                 "candidate_title": candidate.title,
                 "candidate_content": candidate.content,
+                "candidate_body_digest": candidate.body_digest.model_dump(mode="json"),
                 "summary": f"已按要求生成修改预览：{feedback}",
                 "requested_ai_model": ai_model,
                 "resolved_ai_model": generated.model,
@@ -528,6 +522,7 @@ async def run_section_revision_job(
                     "proposal_phase": "draft_ready",
                     "candidate_title": candidate.title,
                     "candidate_content": candidate.content,
+                    "candidate_body_digest": candidate.body_digest.model_dump(mode="json"),
                     "summary": "修改稿已按确认思路生成，请对照修改前后内容。",
                     "resolved_ai_model": generated.model,
                     "generation": {
@@ -694,6 +689,7 @@ async def finalize_section_revision(
             expected_input_signature=target.context.input_signature,
             candidate_title=str(values.get("candidate_title") or target.section.title),
             candidate_content=str(values.get("candidate_content") or ""),
+            candidate_body_digest=MemoirBodyDigest.model_validate(values["candidate_body_digest"]) if values.get("candidate_body_digest") else None,
             feedback=str(values.get("summary") or ""),
             requested_ai_model=requested_model,
             resolved_ai_model=resolved_model,

@@ -52,8 +52,7 @@ from app.services.memoir import automation_events, completion_interviews, editin
 from app.services.memoir.book_plan_ai import NO_STORY_YET
 from app.services.memoir.book_plan_sources import SourceSegment, load_plan_with_chapters, renumber_chapters, set_temporary_chapter_orders
 from app.services.memoir.book_plan_write_workflow import generate_book_plan
-from app.services.memoir.chapter_structure import load_structure_summaries, review_story_structure
-from app.services.memoir.chapter_digests import generate_or_reuse_chapter_digest
+from app.services.memoir.chapter_structure import load_structure_summaries
 from app.services.memoir.editing_jobs import EditingJobResult
 from app.services.memoir.material_organization import material_organization_candidates
 from app.services.memoir.material_roles import STORY_CONTENT_POLICY_VERSION, STORY_CONTENT_GUIDANCE, STORY_THEME_GUIDANCE, interviewer_lines, is_ready_story_material, interviewer_messages
@@ -935,11 +934,11 @@ async def grow_story_tree(
     job: MemoirEditingJob,
     session: MemoirVoiceSession,
     source_ids: set[str] | None = None,
-) -> tuple[EditingJobResult, bool]:
-    """Return progress and whether structure review already scheduled the book."""
+) -> EditingJobResult:
+    """Place new sources; body generation and structure review follow in the book job."""
     project = await db.scalar(select(Project).where(Project.id == job.project_id))
     if project is None:
-        return EditingJobResult(status=MemoirEditingJobStatus.SKIPPED, error_message="回忆录不存在"), False
+        return EditingJobResult(status=MemoirEditingJobStatus.SKIPPED, error_message="回忆录不存在")
     before_plan, before_chapters, before_sections = await _load_tree(
         db,
         project_id=job.project_id,
@@ -974,7 +973,7 @@ async def grow_story_tree(
                 status=MemoirEditingJobStatus.SKIPPED,
                 result_json={"voice_session_id": session.id, "growth": progress.model_dump(mode="json")},
                 error_message=NO_STORY_YET,
-            ), False
+            )
     await _finish_initial_sections(db, user_id=project.user_id, job=job, progress=progress)
     recovery_materials = await _recovery_materials(db, job=job, sections=before_sections)
 
@@ -1111,7 +1110,7 @@ async def grow_story_tree(
             progress.batch = None
             await _save_progress(db, job, progress)
             return EditingJobResult(status=MemoirEditingJobStatus.PENDING,
-                result_json={**(job.result_json or {}), "stage": "question_context_changed"}), False
+                result_json={**(job.result_json or {}), "stage": "question_context_changed"})
         answer_ids = {item.id for item in project_sources if item.chat_message_id in person_answers}
         batch.groups = [replace(group, utterance_ids=[value for value in group.utterance_ids if value not in answer_ids])
                         for group in batch.groups]
@@ -1227,41 +1226,8 @@ async def grow_story_tree(
             question_context=_question_context(answer.chat_message, lines),
         )
         await _save_progress(db, job, progress)
-    # Preserve placement checkpoints before reviewing; report only the final
-    # directory, not a transient chapter that the same review absorbed.
+    # Preserve completed placement before scheduling body generation.
     await _save_progress(db, job, progress)
-    structure_changed = False
-    if source_ids is not None:
-        # Reuse the same digest caches as the final directory review, without
-        # rebuilding prose or changing the whole directory during a live call.
-        chapter_ids = set((await db.scalars(select(MemoirSection.chapter_id).join(MemoirSectionMaterial).where(
-            MemoirSectionMaterial.utterance_id.in_(progress.placed_ids),
-            MemoirSection.project_id == job.project_id,
-        ))).all())
-        ai_model = await load_project_ai_model(db, job.project_id, None)
-        for chapter_id in sorted(chapter_ids):
-            await generate_or_reuse_chapter_digest(db, project_id=job.project_id, chapter_id=chapter_id, ai_model=ai_model)
-    elif session.status == MemoirVoiceSessionStatus.STOPPED.value:
-        # Live checkpoints may already have cleared placed_ids. The narration's
-        # persisted sources still identify every chapter affected by this session.
-        review_chapter_ids = set((await db.scalars(select(MemoirSection.chapter_id).join(MemoirSectionMaterial)
-            .join(MemoirVoiceUtterance, MemoirVoiceUtterance.id == MemoirSectionMaterial.utterance_id).where(
-                MemoirSection.project_id == job.project_id,
-                (MemoirVoiceUtterance.voice_session_id == session.id)
-                | MemoirSectionMaterial.utterance_id.in_(progress.placed_ids),
-            ))).all())
-        lease_token = job.lease_token
-        structure_changed = await review_story_structure(
-            db, user_id=project.user_id, project_id=job.project_id,
-            source="retry" if (job.payload_json or {}).get("source") == "retry" else "organized",
-            chapter_ids=review_chapter_ids,
-        )
-        # The review crosses provider/checkpoint boundaries. Re-read task and
-        # session state before accepting ownership of the final progress write.
-        await db.refresh(job)
-        await db.refresh(session)
-        if job.status != MemoirEditingJobStatus.RUNNING.value or job.lease_token != lease_token:
-            raise editing_jobs.EditingJobProgressLost
     placed_ids = list(dict.fromkeys(progress.placed_ids))
     progress.placed_ids = []
     progress.live_source_ids = None
@@ -1309,7 +1275,7 @@ async def grow_story_tree(
             "new_section_ids": new_section_ids,
             "organized_utterance_ids": placed_ids,
         }
-    ), structure_changed
+    )
 
 
 async def run_story_tree_growth_job(
@@ -1386,7 +1352,7 @@ async def run_story_tree_growth_job(
             status=MemoirEditingJobStatus.PENDING,
             result_json={**(job.result_json or {}), "voice_session_id": session.id, "stage": "waiting_for_transcripts"},
         )
-    result, structure_changed = await grow_story_tree(db, job=job, session=session, source_ids=source_ids)
+    result = await grow_story_tree(db, job=job, session=session, source_ids=source_ids)
     if source_ids is not None:
         progress = _progress(job)
         if progress.live_source_ids is not None:
@@ -1398,8 +1364,7 @@ async def run_story_tree_growth_job(
         job.first_started_at = None
         return EditingJobResult(status=MemoirEditingJobStatus.PENDING,
             result_json={**(job.result_json or {}), "stage": "waiting_for_batch"})
-    if not structure_changed:
-        from app.services.memoir.automatic_book_draft import schedule_book_draft
-        await schedule_book_draft(db, project_id=job.project_id,
-            source="retry" if (job.payload_json or {}).get("source") == "retry" else "organized", settled=True)
+    from app.services.memoir.automatic_book_draft import schedule_book_draft
+    await schedule_book_draft(db, project_id=job.project_id,
+        source="retry" if (job.payload_json or {}).get("source") == "retry" else "organized", settled=True)
     return result

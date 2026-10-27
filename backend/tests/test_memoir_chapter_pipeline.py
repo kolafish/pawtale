@@ -20,10 +20,9 @@ from app.models.memoir import (
     MemoirChapterDigest,
     MemoirCompletionIssue,
     MemoirSection,
-    MemoirSectionDigest,
     MemoirSectionMaterial,
 )
-from app.schemas.memoir_editorial import WritingGuidance
+from app.schemas.memoir_section_digests import MemoirBodyDigest
 from app.services.ai_references import ModelReferenceMap
 from app.services.memoir import (
     book_output_snapshots,
@@ -88,27 +87,17 @@ class FakeChapterAI(AITextServiceBase):
             for line in user_prompt.splitlines()
             if line.startswith("material_id: ")
         ]
-        if "请审阅下面这个回忆录小章节" in user_prompt:
-            payload = {
-                "summary": "朋友发来山桃花照片，随后一起参加爬山。",
-                "focus": "一段疏远的关系重新搭上线。",
-                "covered_points": ["重新联系", "第一次共同活动"],
-                "editorial_guidance": ["删掉重复的爬山经过。"],
-                "candidate_issues": [
-                    {
-                        "issue_type": "meaning",
-                        "question": "这次重新联系为什么重要？",
-                        "reason": "有助于理解这段关系。",
-                        "priority": "medium",
-                        "material_ids": prompt_material_ids[:1],
-                    }
-                ],
-            }
+        source_line = next((line for line in user_prompt.splitlines() if line.startswith("全部已归属素材编号")), "")
+        if source_line:
+            prompt_material_ids = source_line.split("：", 1)[1].split("、")
+        if "审阅现有回忆录目录" in user_prompt:
+            payload = {"findings": []}
+        elif "你只概括当前已保存的小节正文" in system_prompt:
+            payload = {"summary": "当前正文的经历", "focus": "经历", "points": []}
         elif "请通读回忆录章节" in user_prompt:
             payload = {
                 "summary": "这一章讲重新联系和共同爬山。",
                 "focus": "重新建立联系。",
-                "writing_guidance": [{"section_ids": [], "instruction": "把照片邀请作为开头。"}],
                 "candidate_issues": [
                     {
                         "issue_type": "meaning",
@@ -134,6 +123,9 @@ class FakeChapterAI(AITextServiceBase):
                 "missing_source_candidates": [],
                 "editor_notes": ["合并了重复描述。"],
             }
+        if "content" in payload:
+            payload["body_digest"] = {"summary": payload["content"], "focus": "经历", "points": [
+                {"text": payload["content"], "material_ids": payload["used_material_ids"]}]}
         return json.dumps(payload, ensure_ascii=False)
 
 
@@ -229,7 +221,7 @@ async def test_chapter_generation_binds_third_section_without_model_identifier()
         model_name = "test-bound-section"
 
         async def _call_llm(self, *args, **kwargs):
-            return json.dumps({
+            return json.dumps({"body_digest": {"summary": "Saved body summary", "points": []},
                 "content": "后来我又继续出发了。",
                 "used_material_ids": ["M1"],
             }, ensure_ascii=False)
@@ -246,7 +238,7 @@ async def test_chapter_generation_binds_third_section_without_model_identifier()
     ) for section in context.sections)
     generated = await chapter_generation.generate_chapter(
         chapter_generation._single_section_context(context, third),
-        editorial_guidance=[], chapter_sections=full_sections,
+        chapter_sections=full_sections,
         preserved_sections=preserved, ai_client=SectionAI(),
     )
 
@@ -254,6 +246,7 @@ async def test_chapter_generation_binds_third_section_without_model_identifier()
     assert generated.sections[2] == chapter_generation.GeneratedChapterSection(
         section_id=third.section_id, title=third.title, content="后来我又继续出发了。",
         used_material_ids=(material.material_id,),
+        body_digest=MemoirBodyDigest(summary="Saved body summary"),
     )
     assert generated.used_material_ids == ("material-1", "material-2", "material-3")
 
@@ -265,7 +258,6 @@ def test_chapter_generation_prompt_requests_natural_paragraphs():
     )
     prompt = chapter_generation.build_chapter_generation_prompt(
         chapter_generation._single_section_context(context, context.sections[0]),
-        editorial_guidance=[],
     )
 
     assert "正文根据内容自然分段，段落之间用换行分隔" in prompt
@@ -309,7 +301,7 @@ async def test_chapter_generation_retries_only_the_invalid_section():
             if target == "section-2" and attempt == 1:
                 used_material_ids = []
             return json.dumps(
-                {
+                {"body_digest": {"summary": "Saved body summary", "points": []},
                     "content": (
                         "第一小节的正文"
                         if target == "section-1"
@@ -327,7 +319,6 @@ async def test_chapter_generation_retries_only_the_invalid_section():
 
     generated = await chapter_generation.generate_chapter(
         context,
-        editorial_guidance=[],
         ai_client=fake,
     )
 
@@ -360,7 +351,7 @@ async def test_chapter_generation_resumes_from_completed_section_checkpoint():
                 if line.startswith("material_id: ")
             )
             return json.dumps(
-                {
+                {"body_digest": {"summary": "Saved body summary", "points": []},
                     "content": (
                         "那天我从家里出发。"
                         if "小节标题: 出发" in user_prompt
@@ -384,7 +375,6 @@ async def test_chapter_generation_resumes_from_completed_section_checkpoint():
     with pytest.raises(RuntimeError, match="模拟任务"):
         await chapter_generation.generate_chapter(
             _two_section_context(),
-            editorial_guidance=[],
             ai_client=first,
             progress_callback=fail_after_first_section,
         )
@@ -399,7 +389,6 @@ async def test_chapter_generation_resumes_from_completed_section_checkpoint():
     second = SectionAI()
     completed = await chapter_generation.generate_chapter(
         _two_section_context(),
-        editorial_guidance=[],
         ai_client=second,
         checkpoint=checkpoint,
     )
@@ -429,7 +418,7 @@ async def test_chapter_generation_reuses_unchanged_draft_sections():
                 if line.startswith("material_id: ")
             ]
             return json.dumps(
-                {
+                {"body_digest": {"summary": "Saved body summary", "points": []},
                     "content": "这是补充素材整理后的第二小节正文。",
                     "used_material_ids": material_ids,
                     "missing_source_candidates": [],
@@ -528,7 +517,6 @@ async def test_chapter_generation_reuses_unchanged_draft_sections():
     fake = ChangedSectionAI()
     generated = await chapter_generation.generate_chapter(
         plan.target_context,
-        editorial_guidance=[],
         ai_client=fake,
         chapter_sections=context.sections,
         preserved_sections=plan.preserved_sections,
@@ -664,7 +652,7 @@ async def test_chapter_generation_does_not_copy_previous_section_boundary():
                 + "退休了以后，好多人到处聘我去。"
             )
             return json.dumps(
-                {
+                {"body_digest": {"summary": "Saved body summary", "points": []},
                     "content": content,
                     "used_material_ids": [material_id],
                     "missing_source_candidates": [],
@@ -676,7 +664,6 @@ async def test_chapter_generation_does_not_copy_previous_section_boundary():
     fake = BoundaryCopyingAI()
     generated = await chapter_generation.generate_chapter(
         _two_section_context(),
-        editorial_guidance=[],
         ai_client=fake,
     )
 
@@ -742,10 +729,6 @@ async def _chapter(client, test_db):
     )
 
 
-
-
-
-
 async def test_chapter_digest_uses_section_digests_and_allowlists(client, test_db):
     project_id, chapter, section, materials = await _chapter(client, test_db)
     fake = FakeChapterAI(
@@ -755,6 +738,7 @@ async def test_chapter_digest_uses_section_digests_and_allowlists(client, test_d
         draft_material_ids=[materials[0]["utterance_id"]],
     )
 
+    await chapter_generation.generate_and_save_chapter_draft(test_db, project_id=project_id, chapter_id=chapter.id, ai_client=fake)
     digest = await chapter_digests.generate_or_reuse_chapter_digest(
         test_db,
         project_id=project_id,
@@ -774,8 +758,8 @@ async def test_chapter_digest_uses_section_digests_and_allowlists(client, test_d
     assert len(fake.prompts) == 2
     assert "朋友发来一张山桃花照片，后来邀请我一起爬山" in fake.prompts[0]
     assert "摘要:" in fake.prompts[1]
-    assert "删掉重复的爬山经过" in fake.prompts[1]
-    assert "这次重新联系为什么重要" in fake.prompts[1]
+    assert "删掉重复的爬山经过" not in fake.prompts[1]
+    assert "这次重新联系为什么重要" not in fake.prompts[1]
     assert section["id"] not in fake.prompts[1]
     assert "section_id: S1" in fake.prompts[1]
     assert digest.digest_json["candidate_issues"][0]["section_ids"] == [
@@ -927,6 +911,7 @@ async def test_prepare_chapter_preserves_section_digest_when_chapter_json_is_tru
         chapter_material_id=materials[0]["utterance_id"],
         draft_material_ids=[materials[0]["utterance_id"]],
     )
+    monkeypatch.setattr(chapter_generation, "get_ai_service", lambda _model: fake)
     monkeypatch.setattr(section_digests, "get_ai_service", lambda _model: fake)
     monkeypatch.setattr(chapter_digests, "get_ai_service", lambda _model: fake)
 
@@ -961,12 +946,8 @@ async def test_prepare_chapter_preserves_section_digest_when_chapter_json_is_tru
     ]
     assert fake.chapter_max_tokens[0] == 8000
 
-    section_digest = await test_db.scalar(
-        select(MemoirSectionDigest).where(
-            MemoirSectionDigest.section_id == section["id"],
-            MemoirSectionDigest.status == MemoirSemanticCacheStatus.READY.value,
-        )
-    )
+    section_digest = await section_digests.get_current_section_digest(test_db,
+        project_id=project_id, section_id=section["id"])
     assert section_digest is not None
     chapter_digest = await test_db.scalar(
         select(MemoirChapterDigest).where(
@@ -1000,7 +981,6 @@ async def test_chapter_generation_saves_material_allowlist_snapshot(client, test
         test_db,
         project_id=project_id,
         chapter_id=chapter.id,
-        editorial_guidance=[WritingGuidance(instruction="把照片邀请作为开头。")],
         ai_client=fake,
     )
     await test_db.commit()
@@ -1033,6 +1013,8 @@ async def test_chapter_generation_saves_material_allowlist_snapshot(client, test
                 "这次见面让一段疏远的关系重新有了联系。"
             ),
             "used_material_ids": [material["utterance_id"] for material in materials],
+            **section_digests.digest_snapshot(version.section_snapshot_json[0]["content"],
+                section_digests.snapshot_digest(version.section_snapshot_json[0])),
         }
     ]
     assert version.input_signature
@@ -1066,8 +1048,9 @@ async def test_chapter_draft_update_generates_only_section_with_new_material(
                 for line in user_prompt.splitlines()
                 if line.startswith("material_id: ")
             ]
+            material_ids = next(line for line in user_prompt.splitlines() if line.startswith("全部已归属素材编号")).split("：", 1)[1].split("、")
             return json.dumps(
-                {
+                {"body_digest": {"summary": "Saved body summary", "points": []},
                     "content": (
                         f"这一小节使用了 {len(material_ids)} 条素材。"
                     ),
@@ -1112,7 +1095,6 @@ async def test_chapter_draft_update_generates_only_section_with_new_material(
         test_db,
         project_id=project_id,
         chapter_id=chapter.id,
-        editorial_guidance=[],
         ai_client=initial_ai,
     )
     await test_db.commit()
@@ -1149,7 +1131,6 @@ async def test_chapter_draft_update_generates_only_section_with_new_material(
         test_db,
         project_id=project_id,
         chapter_id=chapter.id,
-        editorial_guidance=[],
         ai_client=update_ai,
         progress_callback=record_progress,
     )
@@ -1193,7 +1174,6 @@ async def test_excluded_material_is_not_sent_to_chapter_generator(client, test_d
         test_db,
         project_id=project_id,
         chapter_id=chapter.id,
-        editorial_guidance=[],
         ai_client=fake,
     )
 
@@ -1242,7 +1222,6 @@ async def test_pending_assignment_material_is_excluded_without_blocking_draft(
         test_db,
         project_id=project_id,
         chapter_id=chapter.id,
-        editorial_guidance=[],
         ai_client=fake,
     )
     await test_db.commit()
@@ -1277,7 +1256,6 @@ async def test_chapter_generator_rejects_material_outside_allowlist(
             test_db,
             project_id=project_id,
             chapter_id=chapter.id,
-            editorial_guidance=[],
             ai_client=fake,
         )
     draft = await test_db.scalar(
@@ -1304,7 +1282,6 @@ async def test_chapter_confirmation_rejects_changed_material_structure(
         test_db,
         project_id=project_id,
         chapter_id=chapter.id,
-        editorial_guidance=[],
         ai_client=fake,
     )
     await test_db.commit()
@@ -1350,8 +1327,7 @@ def test_confirmed_body_only_accepts_later_source_edits_and_new_narration(sectio
     section = replace(context.sections[0], materials=(material, new), decisions=(old, recent))
     context = replace(context, sections=(section,), materials=(material, new),
                       previous_draft_at=datetime(2026, 1, 4) if section_edit_at else datetime(2026, 1, 2))
-    prompt = chapter_generation.build_chapter_generation_prompt(context, editorial_guidance=[],
-        current_section_content="我五岁那年家里发洪水。", current_section_user_edited=True,
+    prompt = chapter_generation.build_chapter_generation_prompt(context,         current_section_content="我五岁那年家里发洪水。", current_section_user_edited=True,
         current_section_user_edited_at=section_edit_at,
         previous_material_ids={material.material_id}, changed_material_ids={material.material_id, new.material_id})
     assert "我五岁那年家里发洪水。" in prompt
@@ -1370,8 +1346,7 @@ def test_confirmed_body_receives_only_recognition_delta():
         text="我十五岁时搬到绵阳。师傅叫王明。")
     section = replace(context.sections[0], materials=(material,))
     context = replace(context, sections=(section,), materials=(material,))
-    prompt = chapter_generation.build_chapter_generation_prompt(context, editorial_guidance=[],
-        current_section_content="我五岁时搬到成都。师傅叫李明。", current_section_user_edited=True,
+    prompt = chapter_generation.build_chapter_generation_prompt(context,         current_section_content="我五岁时搬到成都。师傅叫李明。", current_section_user_edited=True,
         previous_material_ids={material.material_id}, changed_material_ids={material.material_id})
     assert "绵阳" in prompt
     assert "我五岁时搬到成都。师傅叫李明。" in prompt
@@ -1385,8 +1360,7 @@ def test_changed_confirmed_material_without_previous_text_is_not_silently_applie
     context = _two_section_context()
     material = context.materials[0]
     context = replace(context, sections=(context.sections[0],), materials=(material,))
-    prompt = chapter_generation.build_chapter_generation_prompt(context, editorial_guidance=[],
-        current_section_content="我五岁那年离开家。", current_section_user_edited=True,
+    prompt = chapter_generation.build_chapter_generation_prompt(context,         current_section_content="我五岁那年离开家。", current_section_user_edited=True,
         previous_material_ids={material.material_id}, changed_material_ids={material.material_id})
     assert "历史转写版本不可用" in prompt
     assert material.text not in prompt
@@ -1406,7 +1380,7 @@ async def test_recognition_delta_uses_version_pinned_by_previous_draft(client, t
         chapter_section_id=section["id"], chapter_material_id=materials[0]["utterance_id"],
         draft_material_ids=[materials[0]["utterance_id"]])
     _, version = await chapter_generation.generate_and_save_chapter_draft(test_db,
-        project_id=project_id, chapter_id=chapter.id, editorial_guidance=[], ai_client=fake)
+        project_id=project_id, chapter_id=chapter.id, ai_client=fake)
     context = await chapter_generation.load_chapter_generation_context(test_db,
         project_id=project_id, chapter_id=chapter.id)
     original = context.materials[0].text
@@ -1440,8 +1414,7 @@ async def test_missing_history_is_visible_even_when_model_omits_warning():
     fake = FakeChapterAI(section_material_id=material.material_id,
         chapter_section_id=material.section_id, chapter_material_id=material.material_id,
         draft_material_ids=[material.material_id])
-    result = await chapter_generation.generate_chapter(context, editorial_guidance=[],
-        previous_sections=(previous,), changed_material_ids={material.material_id}, ai_client=fake)
+    result = await chapter_generation.generate_chapter(context,         previous_sections=(previous,), changed_material_ids={material.material_id}, ai_client=fake)
     assert any("机器更新未合并" in item for item in result.missing_source_candidates)
     assert result.sections[0].user_edited
 
@@ -1464,7 +1437,7 @@ async def test_changed_interview_question_invalidates_generated_body(client, tes
     fake = FakeChapterAI(section_material_id=source.id, chapter_section_id=section["id"],
         chapter_material_id=source.id, draft_material_ids=[source.id])
     _, version = await chapter_generation.generate_and_save_chapter_draft(test_db,
-        project_id=project_id, chapter_id=chapter.id, editorial_guidance=[], ai_client=fake)
+        project_id=project_id, chapter_id=chapter.id, ai_client=fake)
     before = await chapter_generation.load_chapter_generation_context(test_db, project_id=project_id, chapter_id=chapter.id)
     assert question.content_text in fake.prompts[-1]
     assert not chapter_generation.chapter_draft_generation_plan(before, version).target_context.sections
@@ -1492,7 +1465,7 @@ async def test_question_change_preserves_manual_body_and_prior_evidence_until_re
     fake = FakeChapterAI(section_material_id=source.id, chapter_section_id=section["id"],
         chapter_material_id=source.id, draft_material_ids=[source.id])
     _, version = await chapter_generation.generate_and_save_chapter_draft(test_db,
-        project_id=project_id, chapter_id=chapter.id, editorial_guidance=[], ai_client=fake)
+        project_id=project_id, chapter_id=chapter.id, ai_client=fake)
     version.section_snapshot_json = [{**item, **({} if legacy else {"user_edited": True}), "content": "父亲没有当过老师。"}
         for item in version.section_snapshot_json]
     if legacy:
@@ -1506,7 +1479,7 @@ async def test_question_change_preserves_manual_body_and_prior_evidence_until_re
     request_count = len(fake.prompts)
     with pytest.raises(HTTPException) as error:
         await chapter_generation.generate_and_save_chapter_draft(test_db,
-            project_id=project_id, chapter_id=chapter.id, editorial_guidance=[], ai_client=fake)
+            project_id=project_id, chapter_id=chapter.id, ai_client=fake)
     assert error.value.status_code == 409
     assert "人工正文尚待核对" in error.value.detail
     assert len(fake.prompts) == request_count
@@ -1521,7 +1494,7 @@ async def test_question_change_preserves_manual_body_and_prior_evidence_until_re
     if not legacy:
         # Explicitly requesting a fresh chapter remains an available recovery.
         await chapter_generation.generate_and_save_chapter_draft(test_db,
-            project_id=project_id, chapter_id=chapter.id, editorial_guidance=[], ai_client=fake,
+            project_id=project_id, chapter_id=chapter.id, ai_client=fake,
             force_refresh=True)
         assert len(fake.prompts) > request_count
         return
@@ -1573,7 +1546,7 @@ async def test_manual_review_acknowledges_only_the_edited_sections_question(clie
         chapter_section_id=first["id"], chapter_material_id=materials[0]["utterance_id"],
         draft_material_ids=[material["utterance_id"] for material in materials])
     _, version = await chapter_generation.generate_and_save_chapter_draft(test_db,
-        project_id=project_id, chapter_id=chapter.id, editorial_guidance=[], ai_client=fake)
+        project_id=project_id, chapter_id=chapter.id, ai_client=fake)
     if legacy:
         version.created_by = "user"
     else:
@@ -1612,7 +1585,7 @@ async def test_manual_review_acknowledges_only_the_edited_sections_question(clie
             request_count = len(fake.prompts)
             with pytest.raises(HTTPException) as error:
                 await chapter_generation.generate_and_save_chapter_draft(test_db,
-                    project_id=project_id, chapter_id=chapter.id, editorial_guidance=[], ai_client=fake, automatic=True)
+                    project_id=project_id, chapter_id=chapter.id, ai_client=fake, automatic=True)
             assert error.value.status_code == 409
             assert len(fake.prompts) == request_count
             # An unrelated text update must not be accepted as question-only.
@@ -1632,11 +1605,44 @@ async def test_chapter_retry_receives_specific_structured_field_failure():
             self.prompts = []
         async def _call_llm(self, system_prompt, user_prompt, **kwargs):
             self.prompts.append(user_prompt)
-            return json.dumps({"used_material_ids": ["M1"], **({"content": "那天我从家里出发。"} if len(self.prompts) > 1 else {})})
+            return json.dumps({"body_digest": {"summary": "Saved body summary", "points": []}, "used_material_ids": ["M1"], **({"content": "那天我从家里出发。"} if len(self.prompts) > 1 else {})})
     context = _two_section_context()
     ai = MissingContentAI()
     generated = await chapter_generation.generate_chapter_section(context, section=context.sections[0],
-        editorial_guidance=[], chapter_sections=context.sections, ai_client=ai)
+        chapter_sections=context.sections, ai_client=ai)
     assert generated.sections[0].content == "那天我从家里出发。"
     assert len(ai.prompts) == 2
     assert "content: 缺少必填字段 (missing)" in ai.prompts[1]
+
+
+def test_incremental_prompt_uses_only_new_source_and_its_question():
+    context = _two_section_context()
+    old = context.materials[0]
+    new = replace(old, material_id="new-material", text="后来又到了成都。", interviewer_line="后来去了哪里？")
+    section = replace(context.sections[0], materials=(old, new))
+    context = replace(context, sections=(section,), materials=(old, new))
+    prompt = chapter_generation.build_chapter_generation_prompt(context,
+        current_section_content="十八岁时我第一次离家。", previous_material_ids={old.material_id},
+        changed_material_ids={new.material_id})
+    assert new.text in prompt and new.interviewer_line in prompt
+    assert old.text not in prompt
+    assert "material_id: M1" not in prompt
+    assert "material_id: M2" in prompt
+    assert "十八岁时我第一次离家。" in prompt
+    assert "M1、M2" in prompt
+
+
+def test_generated_body_requires_summary_and_checkpoint_binds_it_to_text():
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        chapter_generation._GeneratedChapterSectionOutput.model_validate({"content": "正文", "used_material_ids": ["M1"]})
+    context = _two_section_context()
+    section = context.sections[0]
+    generated = chapter_generation.GeneratedChapterSection(section_id=section.section_id, title=section.title,
+        content="正文", used_material_ids=(section.materials[0].material_id,), body_digest=MemoirBodyDigest(summary="正文摘要"))
+    partial = chapter_generation._partial_generated_chapter([generated], missing_source_candidates=[], editor_notes=[], model="test")
+    checkpoint = chapter_generation._generated_chapter_checkpoint(context, partial, current_section=None)
+    restored = chapter_generation._generated_chapter_from_checkpoint(context, checkpoint)
+    assert restored.sections[0].body_digest.summary == "正文摘要"
+    checkpoint["checkpoint_sections"][0]["content"] = "其他正文"
+    assert chapter_generation._generated_chapter_from_checkpoint(context, checkpoint) is None

@@ -117,24 +117,13 @@ class LayeredBookAI(AITextServiceBase):
         material_ids = _prompt_ids(user_prompt, "material_id")
         section_ids = _prompt_ids(user_prompt, "section_id")
         chapter_ids = _prompt_ids(user_prompt, "chapter_id")
-        if "请审阅下面这个回忆录小章节" in user_prompt:
-            candidates = []
-            if self.section_issue:
-                candidates = [
-                    {
-                        "issue_type": "meaning",
-                        "question": "这件事后来对你有什么影响？",
-                        "reason": "个人影响会让这一段的重点更清楚。",
-                        "priority": "high",
-                        "material_ids": material_ids[:1],
-                    }
-                ]
-            payload = {
-                "summary": "讲述者回忆了一次学校比赛。",
-                "focus": "这次比赛留下的记忆。",
-                "covered_points": ["事情经过"],
-                "candidate_issues": candidates,
-            }
+        source_line = next((line for line in user_prompt.splitlines() if line.startswith("全部已归属素材编号")), "")
+        if source_line:
+            material_ids = source_line.split("：", 1)[1].split("、")
+        if "审阅现有回忆录目录" in user_prompt:
+            payload = {"findings": []}
+        elif "你只概括当前已保存的小节正文" in system_prompt:
+            payload = {"summary": "当前正文的经历", "focus": "经历", "points": []}
         elif "请通读回忆录章节" in user_prompt:
             candidates = []
             if self.chapter_interview_issue:
@@ -162,7 +151,6 @@ class LayeredBookAI(AITextServiceBase):
             payload = {
                 "summary": "本章围绕一次学校比赛展开。",
                 "focus": "比赛经历和它留下的记忆。",
-                "writing_guidance": [{"section_ids": [], "instruction": "从比赛现场开始。"}],
                 "candidate_issues": candidates,
             }
         elif "请通读下面这本回忆录" in user_prompt:
@@ -315,6 +303,11 @@ class LayeredBookAI(AITextServiceBase):
             }
             if is_revision:
                 payload["title"] = self.section_revision_title or current_title
+        if "content" in payload:
+            payload["body_digest"] = {"summary": payload["content"], "focus": "经历", "points": [
+                {"text": payload["content"], "material_ids": payload["used_material_ids"]}]}
+        for revision in payload.get("section_revisions", []):
+            revision["body_digest"] = {"summary": revision["content"], "focus": "经历", "points": []}
         return json.dumps(payload, ensure_ascii=False)
 
 
@@ -328,9 +321,8 @@ def test_book_review_rejects_prompt_that_cannot_be_read_in_full():
                 chapter_id="chapter-1",
                 title="童年",
                 sort_order=0,
-                digest_id="digest-1",
-                digest_signature="digest-signature-1",
-                digest={"summary": "童年回忆"},
+
+
                 draft_version_id="version-1",
                 draft_hash="hash-1",
                 material_ids=frozenset(),
@@ -354,9 +346,8 @@ def test_book_review_restores_chapter_titles_and_promotes_editorial_changes():
                 chapter_id="chapter-1",
                 title="故园旧忆与 C2 家人琐记",
                 sort_order=1,
-                digest_id="digest-1",
-                digest_signature="digest-signature-1",
-                digest={},
+
+
                 draft_version_id="version-1",
                 draft_hash="hash-1",
                 material_ids=frozenset({"material-1"}),
@@ -365,9 +356,8 @@ def test_book_review_restores_chapter_titles_and_promotes_editorial_changes():
                 chapter_id="chapter-2",
                 title="工作与选择",
                 sort_order=2,
-                digest_id="digest-2",
-                digest_signature="digest-signature-2",
-                digest={},
+
+
                 draft_version_id="version-2",
                 draft_hash="hash-2",
                 material_ids=frozenset({"material-2"}),
@@ -419,10 +409,6 @@ def test_private_review_rejects_privacy_questions_at_every_level(question):
         "question": question, "reason": "模型按公开出版标准提出确认。",
         "material_ids": ["M1"], "section_ids": ["S1"], "chapter_ids": ["C1"],
     }
-    section = section_digests.normalize_section_digest_payload(
-        {"summary": "讲述者回忆亲友生活。", "candidate_issues": [candidate]},
-        material_references=ModelReferenceMap("M", ["material-1"]),
-    )
     chapter = chapter_digests.normalize_chapter_digest(
         {"summary": "讲述者回忆亲友生活。", "candidate_issues": [candidate]},
         section_references=ModelReferenceMap("S", ["section-1"]),
@@ -431,7 +417,7 @@ def test_private_review_rejects_privacy_questions_at_every_level(question):
         project_id="project-1", plan_id="plan-1", book_metadata={"title": "回忆"},
         chapters=(BookReviewChapter(
             chapter_id="chapter-1", title="亲友生活", sort_order=0,
-            digest_id="digest-1", digest_signature="digest-signature", digest={},
+
             draft_version_id="version-1", draft_hash="draft-hash",
             material_ids=frozenset(),
         ),),
@@ -441,7 +427,7 @@ def test_private_review_rejects_privacy_questions_at_every_level(question):
         {"summary": "讲述者回忆亲友生活。", "candidate_issues": [candidate]},
         context=context,
     )
-    assert section["candidate_issues"] == chapter["candidate_issues"] == book["candidate_issues"] == []
+    assert chapter["candidate_issues"] == book["candidate_issues"] == []
     assert completion_issues.book_review_candidate_fingerprints([candidate]) == []
 
 
@@ -481,9 +467,8 @@ def test_book_review_anchors_only_verified_distinct_quoted_facts():
                 chapter_id=f"chapter-{index}",
                 title=f"第{index}章",
                 sort_order=index,
-                digest_id=f"digest-{index}",
-                digest_signature=f"signature-{index}",
-                digest={},
+
+
                 draft_version_id=f"version-{index}",
                 draft_hash=f"hash-{index}",
                 material_ids=frozenset(),
@@ -773,9 +758,8 @@ def test_book_review_does_not_invent_material_provenance():
                 chapter_id="chapter-1",
                 title="第一章",
                 sort_order=1,
-                digest_id="digest-1",
-                digest_signature="signature-1",
-                digest={},
+
+
                 draft_version_id="version-1",
                 draft_hash="hash-1",
                 material_ids=frozenset({"unrelated-material", "another-material"}),
@@ -1032,12 +1016,6 @@ def test_section_revision_job_validates_each_operation_input():
         )
 
 
-
-
-
-
-
-
 def _prompt_ids(prompt: str, key: str) -> list[str]:
     prefix = f"{key}: "
     return [line.removeprefix(prefix).strip() for line in prompt.splitlines() if line.startswith(prefix)]
@@ -1137,6 +1115,7 @@ def test_book_review_answer_output_rejects_structure_changes():
             {
                 "section_id": "S1",
                 "content": "修改后的完整小节正文。",
+                "body_digest": {"summary": "修改后的完整小节正文。", "focus": "", "points": []},
             }
         ],
     }
@@ -1835,7 +1814,7 @@ async def test_chapter_review_filters_section_findings_before_rewrite(
         )
     )
     assert issue is None
-    assert any("这件事后来对你有什么影响" in prompt for prompt in fake.prompts if "请通读回忆录章节" in prompt)
+    assert not any("这件事后来对你有什么影响" in prompt for prompt in fake.prompts if "请通读回忆录章节" in prompt)
 
 
 async def test_explicit_rewrite_refreshes_all_sections_once(
@@ -3433,7 +3412,6 @@ async def test_review1470_book_metadata_invalidates_cached_and_inflight_review(c
     _install_ai(monkeypatch, fake)
     await _create_current_draft(test_db, project_id=project_id, chapter_id=chapters[0].id,
         status=MemoirBookChapterDraftStatus.CONFIRMED)
-    await book_reviews.ensure_chapter_digests(test_db, project_id=project_id, ai_model=None, ai_client=fake)
     assembled = await client.post(f'/api/memoir/projects/{project_id}/book-output/assemble')
     assert assembled.status_code == 200, assembled.text
     old = await book_reviews.generate_or_reuse_book_review(test_db, project_id=project_id, ai_client=fake)
@@ -3542,7 +3520,7 @@ async def test_confirmed_fact_invalidates_chapter_and_blocks_old_book_assembly(c
         test_db, project_id=project_id, chapter_id=chapter_id,
     )
     assert chapter_generation.chapter_draft_generation_plan(context, version).target_context.sections
-    prompt = chapter_generation.build_chapter_generation_prompt(context, editorial_guidance=[])
+    prompt = chapter_generation.build_chapter_generation_prompt(context)
     assert "是1978年，之前记错了。" in prompt
     assert "学校比赛" in prompt
     assembled = await assemble_book_output(test_db, project_id=project_id, automatic=True)

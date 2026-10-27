@@ -47,7 +47,6 @@ from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir import (
     book_editorial_actions,
     book_output_versions,
-    chapter_digests,
     completion_issues,
     fact_decisions,
 )
@@ -67,7 +66,7 @@ from app.services.memoir.semantic_state import (
 )
 
 
-BOOK_REVIEW_ENGINE = "llm_book_review_v8"
+BOOK_REVIEW_ENGINE = "llm_book_review_body_v9"
 BOOK_REVIEW_SYSTEM_PROMPT = (
     "你是一位克制的中文回忆录总编辑。"
     "你根据当前章节正文通读全书并判断阅读体验，不创造人生经历。"
@@ -98,9 +97,6 @@ class BookReviewChapter:
     chapter_id: str
     title: str
     sort_order: int
-    digest_id: str
-    digest_signature: str
-    digest: dict
     draft_version_id: str
     draft_hash: str
     material_ids: frozenset[str]
@@ -237,51 +233,6 @@ async def require_readable_chapter_drafts(db: AsyncSession, *, project_id: str) 
     return len(readable_chapter_versions(plan))
 
 
-async def ensure_chapter_digests(
-    db: AsyncSession,
-    *,
-    project_id: str,
-    ai_model: str | None,
-    ai_client: AITextClient | None,
-    progress_callback: BookReviewProgressCallback | None = None,
-) -> None:
-    _, chapters = await _plan(db, project_id=project_id)
-    chapter_refs = tuple(
-        (chapter.id, chapter.title)
-        for chapter in chapters
-    )
-    total_chapter_count = len(chapter_refs)
-    async def request_progress(patch: dict[str, object]) -> None:
-        if progress_callback is not None:
-            await progress_callback({key: patch[key] for key in ("provider_request_pending", "provider", "resolved_ai_model") if key in patch})
-    for index, (chapter_id, chapter_title) in enumerate(chapter_refs):
-        if progress_callback is not None:
-            await progress_callback(
-                {
-                    "stage": "preparing_chapters",
-                    "total_chapter_count": total_chapter_count,
-                    "processed_chapter_count": index,
-                    "current_chapter_title": chapter_title,
-                }
-            )
-        digest = await chapter_digests.generate_or_reuse_chapter_digest(
-            db,
-            project_id=project_id,
-            chapter_id=chapter_id,
-            ai_model=ai_model,
-            ai_client=ai_client,
-            progress_callback=request_progress,
-        )
-        if digest.status != MemoirSemanticCacheStatus.READY.value:
-            raise HTTPException(
-                status_code=422,
-                detail=digest.error_message or f"章节“{chapter_title}”审阅失败",
-            )
-        # Persist each chapter checkpoint before reading through a new Session.
-        # Progress reporting must not own the digest transaction.
-        await db.commit()
-
-
 async def load_book_review_metadata(
     db: AsyncSession,
     *,
@@ -319,7 +270,6 @@ async def load_book_review_context(
     db: AsyncSession,
     *,
     project_id: str,
-    require_digests: bool = True,
 ) -> BookReviewContext:
     plan, plan_chapters = await _plan(db, project_id=project_id)
     book_metadata = await load_book_review_metadata(db, project_id=project_id, fallback_title=plan.title or "")
@@ -344,16 +294,6 @@ async def load_book_review_context(
             if current_material_text(material):
                 edits_by_chapter.setdefault(chapter_id, []).extend(edits.get(material.transcript_version_id, ()))
     for chapter in plan_chapters:
-        digest = await chapter_digests.get_current_chapter_digest(db, project_id=project_id, chapter_id=chapter.id)
-        if digest is not None and digest.status != MemoirSemanticCacheStatus.READY.value:
-            digest = None
-        if digest is None and require_digests:
-            raise HTTPException(status_code=409, detail=f"章节“{chapter.title}”摘要缺失或已过期")
-        material_ids = frozenset()
-        if digest is not None:
-            material_ids = (await chapter_digests.load_chapter_digest_context(
-                db, project_id=project_id, chapter_id=chapter.id,
-            )).allowed_material_ids
         confirmed = await latest_chapter_draft_version(
             db,
             project_id=project_id,
@@ -364,14 +304,12 @@ async def load_book_review_context(
                 status_code=409,
                 detail=f"章节“{chapter.title}”还没有可读正文",
             )
+        material_ids = frozenset(confirmed.used_material_ids_json or [])
         chapters.append(
             BookReviewChapter(
                 chapter_id=chapter.id,
                 title=chapter.title,
                 sort_order=chapter.sort_order,
-                digest_id=digest.id if digest else "",
-                digest_signature=digest.input_signature if digest else "",
-                digest=digest.digest_json if digest else {},
                 draft_version_id=confirmed.id,
                 draft_hash=semantic_text_hash(confirmed.content),
                 draft_content=confirmed.content,
@@ -394,8 +332,6 @@ async def load_book_review_context(
                     "sort_order": chapter.sort_order,
                     "draft_hash": chapter.draft_hash,
                     "sections": [section.model_dump(include={"section_id", "title", "index", "content"}) for section in chapter.draft_sections],
-                    "digest_signature": chapter.digest_signature,
-                    "structure_findings": chapter.digest.get("structure_findings", []),
                     **({"fact_decisions": fact_decisions.signature(chapter.decisions)} if chapter.decisions else {}),
                     **({"transcript_edits": [
                         [edit.edited_at, edit.before, edit.after] for edit in chapter.edits
@@ -440,12 +376,6 @@ def _review_chapter_text(chapter: BookReviewChapter, sections: ModelReferenceMap
         for section in chapter.draft_sections)
 
 
-def _chapter_structure_findings(chapter: BookReviewChapter, sections: ModelReferenceMap) -> list[dict]:
-    allowed = {section.section_id for section in chapter.draft_sections}
-    return [{**raw, "section_ids": [sections.encode(sid) for sid in raw.get("section_ids", []) if sid in allowed]}
-        for raw in chapter.digest.get("structure_findings", [])]
-
-
 def build_book_review_prompt(context: BookReviewContext) -> str:
     references = _chapter_references(context)
     sections = _section_references(context)
@@ -454,7 +384,6 @@ def build_book_review_prompt(context: BookReviewContext) -> str:
             f"chapter_id: {references.encode(chapter.chapter_id)}\n"
             f"章节: {chapter.title}\n"
             f"当前正文:\n{_review_chapter_text(chapter, sections)}\n"
-            f"章节摘要待复核的目录问题: {_chapter_structure_findings(chapter, sections)}\n"
             f"{fact_decisions.prompt(chapter.decisions, edits=chapter.edits)}"
         )
         for chapter in context.chapters
@@ -510,7 +439,7 @@ def build_book_review_prompt(context: BookReviewContext) -> str:
 - editorial_actions 只放基于现有内容、能够直接执行的可选建议。
 - revise_book_profile 用于书名、副标题、口述人、整理人、前言、后记或封底文案，chapter_ids 返回空数组，并在 metadata_fields 精确列出需要修改的字段；其他类型的 metadata_fields 返回空数组。
 - 除目录问题外，不能直接执行的其他编辑建议写入 structure_guidance，不要求用户补讲；目录问题必须写入 structure_findings。
-- 根据当前小节标题、边界和正文复核章节摘要中的目录问题；已处理的问题不重复提出，仍成立的问题写入 structure_findings。
+- 每项建议必须在当前正文中仍然成立。不得把原始讲述的重复当成正文重复；已合并或已更正的内容不再提出。
 - 允许发现并提出章节过碎、主题混杂、章或小节需要拆合、标题范围不符、归属不合适等结构问题，填入 structure_findings，并关联涉及的已有 chapter_id。
 - structure_findings 的 kind：chapter_structure 表示章的划分或归属问题；section_structure 表示小节的划分或归属问题；title_scope 表示章名或小节名与内容范围不符。只描述有正文依据的问题，不强求每次都有发现。
 - 目录调整由统一的目录写入流程核对素材后执行，保留原始讲述关联并保护人工修改，再更新正文。不要通过正文改写制造另一份目录，不把结构问题变成要求用户补讲的事项。
@@ -774,13 +703,6 @@ async def generate_or_reuse_book_review(
     force_regenerate: bool = False,
     progress_callback: BookReviewProgressCallback | None = None,
 ) -> MemoirBookReview:
-    await ensure_chapter_digests(
-        db,
-        project_id=project_id,
-        ai_model=ai_model,
-        ai_client=ai_client,
-        progress_callback=progress_callback,
-    )
     async with AsyncSession(bind=db.bind, expire_on_commit=False) as inputs_db:
         context = await load_book_review_context(inputs_db, project_id=project_id)
     if progress_callback is not None:

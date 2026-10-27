@@ -96,7 +96,7 @@ async def test_legacy_confirmation_is_not_an_answer_or_fact(client, test_db, sco
     assert not (await book_review_answer_state.load_answer_context(test_db, review=review)).answers
     ctx = await cg.load_chapter_generation_context(test_db, project_id=project_id, chapter_id=chapter_id)
     assert cg.chapter_draft_is_current(ctx, version)
-    assert LEGACY_NOTE not in cg.build_chapter_generation_prompt(ctx, editorial_guidance=[])
+    assert LEGACY_NOTE not in cg.build_chapter_generation_prompt(ctx)
     assembled = await assemble_book_output(test_db, project_id=project_id, automatic=True)
     assert not assembled.omitted_chapter_ids
     issue.status, issue.outcome, issue.outcome_note, issue.closed_at = "open", "", "", None
@@ -150,7 +150,6 @@ async def test_book_fact_projection_uses_bounded_queries(client, test_db):
 async def test_book_review_batch_keeps_the_same_fact_and_manual_edit_history(client, test_db):
     from app.models.memoir import MemoirTranscriptVersion
     from app.services.memoir import book_reviews
-    from tests.test_memoir_book_completion import LayeredBookAI
 
     project_id, chapters, sources = await _book(client, test_db, chapter_count=2)
     expected = {}
@@ -171,7 +170,6 @@ async def test_book_review_batch_keeps_the_same_fact_and_manual_edit_history(cli
                                     status=MemoirBookChapterDraftStatus.CONFIRMED)
         ctx = await cg.load_chapter_generation_context(test_db, project_id=project_id, chapter_id=chapter.id)
         expected[chapter.id] = (ctx.sections[0].decisions, tuple(edit for m in ctx.materials for edit in m.edits))
-    await book_reviews.ensure_chapter_digests(test_db, project_id=project_id, ai_model=None, ai_client=LayeredBookAI())
     context = await book_reviews.load_book_review_context(test_db, project_id=project_id)
     for chapter in context.chapters:
         assert (chapter.decisions, chapter.edits) == expected[chapter.chapter_id]

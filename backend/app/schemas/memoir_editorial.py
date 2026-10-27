@@ -13,10 +13,3 @@ class StructureFinding(BaseModel):
 
 class BookStructureFinding(StructureFinding):
     chapter_ids: list[str] = Field(min_length=1)
-
-
-class WritingGuidance(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    section_ids: list[str] = Field(default_factory=list)
-    instruction: str = Field(min_length=1, max_length=500)

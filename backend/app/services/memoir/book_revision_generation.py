@@ -53,6 +53,8 @@ from app.services.memoir.book_output_manuscript import (
 from app.services.memoir.narrative.book_output_assembly import assemble_book_output
 from app.services.memoir.material_roles import ANSWER_CONTEXT_GUIDANCE
 from app.services.memoir.prompt_budget import checked_review_prompt
+from app.schemas.memoir_section_digests import MemoirBodyDigest
+from app.services.memoir.section_digests import digest_snapshot, BODY_DIGEST_INSTRUCTION
 
 
 PLAN_ENGINE = "llm_book_revision_plan_v1"
@@ -86,6 +88,7 @@ class _SectionRevision(BaseModel):
 
     section_id: str
     content: str
+    body_digest: MemoirBodyDigest
 
 
 class _RevisionOutput(BaseModel):
@@ -287,6 +290,9 @@ def _apply_section_revisions(
             raise ValueError("模型返回了空的小节正文")
         chapter_id, section = owner
         if content != _text(section.get("content")):
+            if any(point.material_ids for point in revision.body_digest.points):
+                raise ValueError("全书正文改稿未提供素材编号，摘要不能猜测来源")
+            section.update(digest_snapshot(content, revision.body_digest))
             section["content"] = content
             section["content_char_count"] = len(content)
             changed_chapter_ids.add(chapter_id)
@@ -622,12 +628,14 @@ def _plan_draft_prompt(
   "section_revisions": [
     {{
       "section_id": "需要修改的小节短编号",
-      "content": "修改后的完整小节正文"
+      "content": "修改后的完整小节正文",
+      "body_digest": {{"summary":"最终正文概括","focus":"叙事重点","points":[{{"text":"正文要点","material_ids":[]}}]}}
     }}
   ]
 }}
 
 要求：
+- {BODY_DIGEST_INSTRUCTION} 本次输入没有素材编号，摘要 material_ids 必须为空。
 - 只执行已确认修改思路中明确列出的调整。
 - section_id 只能使用输入中的短编号。
 - 修改小节时返回修改后的完整正文；不需要修改的小节不要返回。

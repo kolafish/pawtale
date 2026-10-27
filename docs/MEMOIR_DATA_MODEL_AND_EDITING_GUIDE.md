@@ -877,27 +877,11 @@ ChapterDraft 不直接保存正文。正文保存在不可变的 Version 中。
 
 ### 8.1 SectionDigest
 
-物理表：`memoir_section_digests`
+小节正文快照 `section_snapshot_json` 内保存 `body_digest` 和 `body_digest_hash`。正文与摘要同次生成、共同保存；hash 不匹配时不使用摘要。`digest_json` 的语义字段为 `summary`、`focus`、`points`，每个 point 含正文要点 `text` 和可追溯的 `material_ids`。
 
-输入：
+`memoir_section_digests` 作为历史正文/人工正文的摘要补全缓存，输入仅为小节 ID、标题和已保存正文 hash，使用 `section_body_digest_v1`。已有内嵌摘要直接复用，不再额外调用模型或复制一份缓存。旧素材摘要引擎的数据不会作为当前摘要返回；缺少来源映射时 points 的 material_ids 为空，不能凭正文猜测来源。
 
-- Section 标题、类型、version、收录状态；
-- 有序 SectionMaterial；
-- 采用的 TranscriptVersion；
-- 允许收录的素材文字 hash。
-
-输出 `digest_json` 当前包含：
-
-- `summary`
-- `focus`
-- `covered_points`
-- 最多三个 `candidate_issues`
-
-用途：
-
-- 判断一个小节是否易于理解；
-- 为章节审阅提供压缩语义；
-- 产生值得进入成书补全流程的问题。
+小节摘要只为结构判断和上下文压缩提供正文信息，不生成 `candidate_issues` 或 `editorial_guidance`。人工保存正文时移除旧摘要；AI 修改预览、采纳、全书改稿和任务恢复携带对应摘要，保留历史正文和原始音频追溯关系。
 
 ### 8.2 ChapterDigest
 
@@ -906,7 +890,7 @@ ChapterDraft 不直接保存正文。正文保存在不可变的 Version 中。
 主要输入为有序的当前 SectionDigest，输出包括：
 
 - 整章 summary 和 focus；
-- 只需要编辑解决的 `structure_guidance`；
+- 目录、拆合、归属或标题范围的 `structure_findings`，只根据小节正文摘要判断；
 - 确实需要用户补讲或确认的少量候选问题。
 
 ### 8.3 BookReview
@@ -915,7 +899,7 @@ ChapterDraft 不直接保存正文。正文保存在不可变的 Version 中。
 
 主要输入：
 
-- 有序的当前章节正文，ChapterDigest 作为辅助；
+- 有序的当前章节正文及小节快照，不读取 ChapterDigest 的旧编辑建议；
 - 正文版本及 hash，变更后使旧检查失效。
 
 关注：

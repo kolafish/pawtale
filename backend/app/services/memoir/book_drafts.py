@@ -294,6 +294,8 @@ async def revise_chapter_draft(
         if revision.content != previous.get("content"):
             # A user version copies every section. Record the actual edited
             # section so later automatic updates can retain the other prose.
+            revised.pop("body_digest", None)
+            revised.pop("body_digest_hash", None)
             revised["user_edited"] = True
             revised["user_edited_at"] = datetime.now(UTC).replace(tzinfo=None).isoformat()
         revised["content"] = revision.content
