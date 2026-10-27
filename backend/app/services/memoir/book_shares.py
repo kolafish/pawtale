@@ -281,6 +281,8 @@ async def save_card_selection(
         from app.services.memoir.sections import lock_project_chapters
         await lock_project_chapters(db, project_id=project_id)
     await db.execute(select(type(resource)).where(type(resource).id == resource.id).with_for_update())
+    resource = await _owned_resource(db, user_id, project_id, chapter_id, section_id)
+    await db.refresh(resource)
     model, _ = _share_table(share_scope(resource))
     share = await db.get(model, resource.id, populate_existing=True)
     if not _active(share) or not hmac.compare_digest(selection.token, _stable_token(resource.id, share.token_hash, scope=share_scope(resource))):

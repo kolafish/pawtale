@@ -2127,3 +2127,67 @@ test("an excerpt confirmed after switching chapters cannot affect the new share"
   assert.equal(context.data.bookShareReady, false);
   assert.equal(context.data.bookShareImageUrl, "");
 });
+
+test("hiding a prepared share preserves its payload and ignores late workspace sharing refresh", async () => {
+  installWx();
+  let statusReads = 0;
+  const { page } = loadWorkspacePage({ voiceApiExports: {
+    getMemoirBookShareStatus: async () => { statusReads++; return { active: false, current: false, stale: false }; },
+  } });
+  const context = pageContext(page, { projectId: "p", chapterId: "c", workspace: workspace(),
+    chapterHasReadableDraft: true, bookShareReady: true, bookShareImageUrl: "https://example.test/card.jpg" });
+  context.bookShareToken = "c1.token";
+  context.pageVisible = true;
+  const payload = context.onShareAppMessage();
+  context.onHide();
+  context.applyWorkspace(workspace());
+  await flushAsyncWork();
+  assert.equal(statusReads, 0);
+  assert.deepEqual(context.onShareAppMessage(), payload);
+});
+
+for (const exitPage of ["onHide", "onUnload"]) {
+  for (const pendingStage of ["reading", "confirmation"]) {
+    test(`${exitPage} invalidates pending excerpt ${pendingStage} even after returning to the same chapter`, async () => {
+      installWx();
+      let finishRead;
+      let finishConfirmation;
+      let prompts = 0;
+      let saves = 0;
+      let reads = 0;
+      let resumed = false;
+      const output = { latest_version: { id: "v1", content: "奶奶坐在门口。" } };
+      global.wx.showModal = ({ success }) => {
+        prompts++;
+        if (pendingStage === "confirmation" && !resumed) finishConfirmation = success;
+        else success({ confirm: true });
+      };
+      const { page } = loadWorkspacePage({ voiceApiExports: {
+        updateMemoirBookShare: async () => ({ token: "c1.token" }),
+        getMemoirBookShareStatus: async () => ({ active: true, current: true, stale: false, token: "c1.token" }),
+        readMemoirBookShare: async () => ++reads === 1 && pendingStage === "reading"
+          ? new Promise(resolve => { finishRead = resolve; }) : output,
+        saveMemoirShareCardSelection: async (_projectId, selection) => { saves++; return selection; },
+      } });
+      const context = pageContext(page, { projectId: "p", chapterId: "c", workspace: workspace(), chapterHasReadableDraft: true });
+      context.pageVisible = true;
+      const pending = context.prepareReadingShare();
+      await flushAsyncWork();
+      context[exitPage]();
+      // A quick return must not revive callbacks from before leaving.
+      context.pageVisible = true;
+      if (pendingStage === "reading") finishRead(output);
+      else finishConfirmation({ confirm: true });
+      await pending;
+      assert.equal(prompts, pendingStage === "reading" ? 0 : 1);
+      assert.equal(saves, 0);
+      assert.equal(context.data.bookShareBusy, false);
+      assert.equal(context.data.bookShareReady, false);
+      resumed = true;
+      await context.refreshBookShareStatus();
+      await context.configureReadingShareCard();
+      assert.equal(saves, 1);
+      assert.equal(context.data.bookShareReady, true);
+    });
+  }
+}
