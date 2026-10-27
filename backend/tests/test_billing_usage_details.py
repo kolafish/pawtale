@@ -32,7 +32,7 @@ async def test_deepseek_holiday_or_unknown_calendar_charges_no_peak_price(client
     )
     summary = await get_ai_credit_summary(test_db, user_id=user_id)
     assert summary.used_rmb == expected_used
-    assert summary.remaining_rmb == Decimal("10") - expected_used
+    assert summary.remaining_rmb == Decimal("5") - expected_used
     assert summary.unpriced_success_count == unpriced
     [record] = (await test_db.scalars(select(AIUsageRecord).where(AIUsageRecord.user_id == user_id))).all()
     assert record.input_tokens == 1_000
@@ -117,9 +117,9 @@ async def test_usage_refund_and_recharge_correct_balance_and_billing_details(cli
 
     summary = await get_ai_credit_summary(test_db, user_id=user_id)
     assert summary.recharged_credit_rmb == Decimal("10")
-    assert summary.total_credit_rmb == Decimal("20")
+    assert summary.total_credit_rmb == Decimal("15")
     assert summary.used_rmb == Decimal("0.17")
-    assert summary.remaining_rmb == Decimal("19.83")
+    assert summary.remaining_rmb == Decimal("14.83")
     [day] = (await client.get("/api/billing/ai-usage")).json()["days"]
     assert {Decimal(item["cost_rmb"]) for item in day["purposes"]} == {Decimal("0.15"), Decimal("0.02")}
     assert [(entry["label"], Decimal(entry["amount_rmb"])) for entry in day["credits"]] == [("充值", Decimal("10"))]
@@ -209,7 +209,7 @@ async def test_admin_adds_recharge_and_grant_credit_and_sees_overdraft(admin_cli
     await test_db.commit()
 
     before = (await admin_client.get(f"/api/billing/admin/users/{user_id}/ai-credit")).json()
-    assert Decimal(before["summary"]["remaining_rmb"]) == Decimal("-2")
+    assert Decimal(before["summary"]["remaining_rmb"]) == Decimal("-7")
 
     response = await admin_client.post(
         f"/api/billing/admin/users/{user_id}/ai-credit",
@@ -223,7 +223,7 @@ async def test_admin_adds_recharge_and_grant_credit_and_sees_overdraft(admin_cli
     body = response.json()
     assert Decimal(body["summary"]["recharged_credit_rmb"]) == Decimal("20")
     assert Decimal(body["summary"]["manual_grant_rmb"]) == Decimal("5")
-    assert Decimal(body["summary"]["remaining_rmb"]) == Decimal("23")
+    assert Decimal(body["summary"]["remaining_rmb"]) == Decimal("18")
     assert [(entry["label"], Decimal(entry["amount_rmb"]), entry["note"]) for entry in body["credits"]] == [
         ("赠送额度", Decimal("5"), ""),
         ("充值", Decimal("20"), "微信转账"),

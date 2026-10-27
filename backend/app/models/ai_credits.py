@@ -12,7 +12,7 @@ from app.clock import utcnow_naive
 from app.database import Base
 
 
-DEFAULT_FREE_CREDIT_RMB = Decimal("10.000000")
+DEFAULT_FREE_CREDIT_RMB = Decimal("5.000000")
 
 
 class AICreditAccount(Base):
@@ -23,7 +23,7 @@ class AICreditAccount(Base):
         String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, unique=True
     )
     free_credit_rmb: Mapped[Decimal] = mapped_column(
-        Numeric(14, 6), nullable=False, default=DEFAULT_FREE_CREDIT_RMB, server_default=text("10")
+        Numeric(14, 6), nullable=False, default=DEFAULT_FREE_CREDIT_RMB, server_default=text("5")
     )
     recharged_credit_rmb: Mapped[Decimal] = mapped_column(
         Numeric(14, 6), nullable=False, default=Decimal("0"), server_default=text("0")

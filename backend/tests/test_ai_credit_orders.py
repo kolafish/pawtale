@@ -124,7 +124,7 @@ async def test_buying_a_pack_credits_once_and_refund_takes_it_back(client, test_
     assert (await client.get(status_url)).json()["status"] == "paid"
     summary = await get_ai_credit_summary(test_db, user_id=user_id)
     assert summary.recharged_credit_rmb == Decimal("29.9")
-    assert summary.remaining_rmb == Decimal("39.9")
+    assert summary.remaining_rmb == Decimal("34.9")
 
     refund = {
         "MsgType": "event", "Event": "xpay_refund_notify", "OpenId": "payer-openid",
@@ -138,7 +138,7 @@ async def test_buying_a_pack_credits_once_and_refund_takes_it_back(client, test_
     assert (await client.get(status_url)).json()["status"] == "refunded"
     summary = await get_ai_credit_summary(test_db, user_id=user_id)
     assert summary.recharged_credit_rmb == Decimal("0")
-    assert summary.remaining_rmb == Decimal("10")
+    assert summary.remaining_rmb == Decimal("5")
 
     [day] = (await client.get("/api/billing/ai-usage")).json()["days"]
     assert sorted((entry["label"], Decimal(entry["amount_rmb"])) for entry in day["credits"]) == [

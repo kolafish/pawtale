@@ -18,12 +18,12 @@ class AICreditSummaryResponse(BaseModel):
     model_config = ConfigDict(json_schema_extra={
         "example": {
             "currency": "CNY",
-            "free_credit_rmb": 10,
+            "free_credit_rmb": 5,
             "manual_grant_rmb": 0,
             "recharged_credit_rmb": 0,
-            "total_credit_rmb": 10,
+            "total_credit_rmb": 5,
             "used_rmb": 0.12,
-            "remaining_rmb": 9.88,
+            "remaining_rmb": 4.88,
             "unpriced_success_count": 0,
         }
     })
