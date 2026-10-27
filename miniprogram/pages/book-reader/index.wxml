@@ -70,7 +70,7 @@
     <button class="ui-share-more" bindtap="retryExcerpt">重试</button>
   </view>
 </view>
-<view wx:else class="ui-page-shell {{pageClass}}">
+<view wx:else class="ui-page-shell {{pageClass}} {{excerptMode === 'select' ? 'ui-fixed-action-page' : ''}}">
   <text wx:if="{{sharePreview}}" class="share-preview-notice">好友将看到这些内容</text>
   <view wx:if="{{loading}}" class="reader-state ui-card">
     <text>正在打开成书...</text>
@@ -196,7 +196,7 @@
           <text class="excerpt-help excerpt-select-help">长按正文，拖动选区选择 1–512 字。好友只会看到选中的文字。</text>
           <editor id="excerpt-editor" class="excerpt-selector chapter-content" read-only="{{true}}" bindready="onExcerptEditorReady" />
           <text wx:if="{{error}}" class="excerpt-selection-error">{{error}}</text>
-          <view class="excerpt-actions">
+          <view class="excerpt-actions excerpt-selection-actions ui-fixed-action-dock">
             <button wx:if="{{excerptReloadRequired}}" class="ui-share-more" bindtap="retryExcerpt">重新载入正文</button>
             <button class="excerpt-share-button" catchtouchend="previewExcerptSelection" loading="{{excerptBusy}}" disabled="{{excerptBusy || excerptReloadRequired}}">分享这段选文</button>
           </view>
