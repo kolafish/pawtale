@@ -69,6 +69,20 @@
       />
     </view>
 
+    <view wx:if="{{projectId}}" class="field">
+      <view class="sharing-setting-row">
+        <text class="field-label sharing-setting-label">分享全书</text>
+        <switch checked="{{bookShareEnabled}}" color="#a35445" aria-label="分享全书"
+          disabled="{{loading || saving || bookShareBusy || bookShareState !== 'ready'}}" bindchange="toggleBookShare" />
+      </view>
+      <text class="mode-desc">即时生效。开启后，收到分享的人可阅读全书。关闭后，旧全书链接失效，选文和整章分享不受影响。</text>
+      <text wx:if="{{bookShareBusy}}" class="mode-desc" aria-live="polite">正在更新分享设置…</text>
+      <text wx:elif="{{bookShareState === 'loading'}}" class="mode-desc">正在读取分享状态…</text>
+      <text wx:elif="{{bookShareState === 'unavailable'}}" class="mode-desc">还没有全书稿，生成后可开启。</text>
+      <text wx:if="{{bookShareError}}" class="sharing-setting-error" aria-live="polite">{{bookShareError}}</text>
+      <button wx:if="{{bookShareState === 'error'}}" class="ghost-button support-action" bindtap="loadBookShareSetting" disabled="{{saving}}">重试读取分享状态</button>
+    </view>
+
     <view class="field">
       <text class="field-label">默认访谈方式</text>
       <text class="mode-desc">用于之后的讲述；书稿补充先选问题。</text>
@@ -135,8 +149,8 @@
   </view>
 
   <view class="actions">
-    <button id="project-cancel-action" class="ghost-button support-action ui-pressable" disabled="{{saving || loading}}" bindtap="cancel">取消</button>
-    <button id="project-save-action" class="primary-button support-action ui-pressable" loading="{{saving}}" disabled="{{saving || loading}}" bindtap="saveProject">
+    <button id="project-cancel-action" class="ghost-button support-action ui-pressable" disabled="{{saving || loading || bookShareBusy}}" bindtap="cancel">取消</button>
+    <button id="project-save-action" class="primary-button support-action ui-pressable" loading="{{saving}}" disabled="{{saving || loading || bookShareBusy}}" bindtap="saveProject">
       {{saving ? "保存中" : "保存"}}
     </button>
   </view>

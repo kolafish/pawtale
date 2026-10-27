@@ -25,6 +25,12 @@ import {
 } from "../../services/memoir";
 import { markHomeLaunchProjectCreated } from "../../services/home-launch-state";
 import {
+  getMemoirBookShareStatus,
+  revokeMemoirBookShare,
+  updateMemoirBookShare,
+} from "../../services/memoir-book-api";
+import { optionalApiResource } from "../../services/request";
+import {
   defaultNarrationSessionFields,
   memoirProjectProfile,
 } from "../../services/memoir-project-profile";
@@ -33,6 +39,7 @@ import {
   queryParam,
   type PageDatasetEvent,
   type PageQuery,
+  type PageSwitchEvent,
   type PageTextInputEvent,
 } from "../../services/page-input";
 import { setPageNavigationTitle } from "../../services/page-navigation";
@@ -74,6 +81,10 @@ interface ProjectEditData {
   defaultNarrationMode: DefaultNarrationMode;
   transcriptPolishLevel: MemoirTranscriptPolishLevel;
   shareVideoStyle: MemoirShareVideoStyle;
+  bookShareEnabled: boolean;
+  bookShareState: "loading" | "ready" | "unavailable" | "error";
+  bookShareBusy: boolean;
+  bookShareError: string;
   genderOptions: Array<Option<MemoirNarratorGender>>;
   narrationOptions: Array<Option<DefaultNarrationMode> & { description: string }>;
   transcriptPolishOptions: TranscriptPolishOption[];
@@ -117,6 +128,10 @@ definePage<ProjectEditData>()({
     defaultNarrationMode: "guided_interview",
     transcriptPolishLevel: transcriptPolishLevel(),
     shareVideoStyle: "illustrated",
+    bookShareEnabled: false,
+    bookShareState: "unavailable",
+    bookShareBusy: false,
+    bookShareError: "",
     genderOptions: [
       { value: "male", label: "男" },
       { value: "female", label: "女" },
@@ -129,6 +144,7 @@ definePage<ProjectEditData>()({
 
   onShow() {
     this.setData(accessibilityPagePatch(PAGE_CLASS));
+    if (this.data.projectId && !this.data.loading) return this.loadBookShareSetting();
   },
 
   async onLoad(query?: PageQuery) {
@@ -175,10 +191,37 @@ definePage<ProjectEditData>()({
         transcriptPolishLevel: transcriptPolishLevel(project),
         shareVideoStyle: normalizeMemoirShareVideoStyle(project.metadata_json?.share_video_style),
       });
+      await this.loadBookShareSetting();
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "回忆录加载失败" });
     } finally {
       this.setData({ loading: false });
+    }
+  },
+
+  async loadBookShareSetting() {
+    if (!this.data.projectId || this.data.bookShareBusy || this.data.bookShareState === "loading") return;
+    this.setData({ bookShareState: "loading", bookShareError: "" });
+    try {
+      const status = await optionalApiResource(getMemoirBookShareStatus(this.data.projectId));
+      this.setData({ bookShareEnabled: status?.active ?? false, bookShareState: status ? "ready" : "unavailable" });
+    } catch (error) {
+      this.setData({ bookShareState: "error", bookShareError: error instanceof Error ? error.message : "分享状态加载失败" });
+    }
+  },
+
+  async toggleBookShare(event: PageSwitchEvent) {
+    const enabled = event.detail.value;
+    const previous = this.data.bookShareEnabled;
+    if (!this.data.projectId || this.data.bookShareState !== "ready" || this.data.bookShareBusy || this.data.saving || enabled === previous) return;
+    this.setData({ bookShareEnabled: enabled, bookShareBusy: true, bookShareError: "" });
+    try {
+      if (enabled) await updateMemoirBookShare(this.data.projectId);
+      else await revokeMemoirBookShare(this.data.projectId);
+    } catch (error) {
+      this.setData({ bookShareEnabled: previous, bookShareError: error instanceof Error ? error.message : "分享设置失败，请重试" });
+    } finally {
+      this.setData({ bookShareBusy: false });
     }
   },
 
@@ -237,7 +280,7 @@ definePage<ProjectEditData>()({
   },
 
   async saveProject() {
-    if (this.data.saving || this.data.loading) {
+    if (this.data.saving || this.data.loading || this.data.bookShareBusy) {
       return;
     }
     const title = this.data.title.trim();
