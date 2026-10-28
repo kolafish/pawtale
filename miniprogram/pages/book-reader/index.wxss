@@ -507,11 +507,70 @@
 .excerpt-share-button { margin: 0; background: #974c42; color: #fffaf3; }
 .excerpt-share-button[disabled] { opacity: .45; }
 .excerpt-share-button:active, .excerpt-reader-button:active { transform: scale(.96); }
-.excerpt-reader-actions { display: flex; flex-direction: column; gap: 12px; width: 90%; margin: 0 auto; }
-button.excerpt-reader-button { display: flex; align-items: center; justify-content: center; box-sizing: border-box; flex: none; width: 100%; max-width: 100%; min-width: 0; height: 52px; margin: 0; padding: 0 10px; border-radius: 12px; font-size: 17px; line-height: 1.5; white-space: nowrap; transition: transform 120ms ease, opacity 120ms ease; }
-.excerpt-reader-button.is-primary { background: #974c42; color: #fffaf3; }
-.excerpt-reader-button.is-secondary { background: transparent; color: #563c2a; border: 1rpx solid #dfd0bc; }
-.excerpt-page .share-like-bar { background: transparent; border: 0; padding: 8rpx 0; }
+.excerpt-reader-actions { display: flex; flex-direction: column; gap: 10px; width: 90%; margin: 0 auto; }
+button.excerpt-reader-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  flex: none;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  min-height: 48px;
+  margin: 0;
+  padding: 12px 16px;
+  border: 0;
+  border-radius: 14px;
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.5;
+  white-space: normal;
+  overflow-wrap: break-word;
+  transition: transform 120ms ease, opacity 120ms ease;
+}
+.excerpt-reader-button.is-primary {
+  background: #974c42;
+  color: #fffaf3;
+  box-shadow: 0 3px 8px rgba(97, 47, 39, .1);
+}
+.excerpt-reader-button.is-secondary {
+  min-height: 44px;
+  padding: 10px 16px;
+  background: #f2ece3;
+  color: #715845;
+  font-size: 15px;
+  font-weight: 400;
+}
+.excerpt-page .share-like-bar {
+  width: 90%;
+  margin: 10px auto 24rpx;
+  padding: 0;
+  gap: 16rpx;
+  background: transparent;
+  border: 0;
+}
+.excerpt-page .share-like-button {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  margin: 0 auto;
+  padding: 8px 20px;
+  border: 1rpx solid #dfd0bc;
+  border-radius: 14px;
+  background: transparent;
+  color: #806b55;
+  font-size: 15px;
+  font-weight: 400;
+  line-height: 1.5;
+}
+.excerpt-page .share-like-button.is-liked {
+  border-color: #e7c6bc;
+  background: #f5e6e0;
+  color: #944535;
+}
+.excerpt-page .share-like-heart { font-size: 20px; line-height: 1; }
+.excerpt-page .share-like-avatar { border-radius: 50%; }
 .excerpt-page.large-text .excerpt-quote { font-size: 19px; }
 
 /* Contain each section's float without constraining the paragraph text flow. */
