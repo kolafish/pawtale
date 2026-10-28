@@ -246,18 +246,6 @@
       </view>
     </view>
 
-    <view
-      class="logout-button support-action ui-block-action ui-pressable {{loading ? 'is-disabled' : ''}}"
-      aria-role="button"
-      aria-disabled="{{loading}}"
-      bindtap="logout"
-    >{{loading ? (deletingAccount ? "正在注销…" : "正在退出…") : "退出登录"}}</view>
-    <button
-      class="delete-account-button"
-      hover-class="ui-subtle-action-hover"
-      disabled="{{loading}}"
-      bindtap="deleteAccount"
-    >注销账号</button>
   </block>
 
   <view class="section">
@@ -268,6 +256,21 @@
         <text class="row-chevron">›</text>
       </view>
     </view>
+  </view>
+
+  <view wx:if="{{loggedIn}}" class="account-actions">
+    <button
+      class="account-action-button"
+      hover-class="ui-subtle-action-hover"
+      disabled="{{loading}}"
+      bindtap="logout"
+    >{{loading && !deletingAccount ? "正在退出…" : "退出登录"}}</button>
+    <button
+      class="account-action-button"
+      hover-class="ui-subtle-action-hover"
+      disabled="{{loading}}"
+      bindtap="deleteAccount"
+    >{{deletingAccount ? "正在注销…" : "注销账号"}}</button>
   </view>
 
   <view
