@@ -29,6 +29,7 @@ from app.domain.memoir.types import (
 )
 from app.models.memoir import (
     MemoirBookImagePlacement,
+    MemoirBookChapterDraftVersion,
     MemoirBookOutput,
     MemoirBookPlanChapter,
     MemoirImageAsset,
@@ -49,6 +50,7 @@ from app.schemas.memoir_images import (
 from app.services import content_storage
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.branding import branded_image_derivative
+from app.services.memoir.book_output_snapshots import normalized_section_snapshots
 from app.services.memoir.book_output_state import invalidate_book_output
 from app.services.memoir.book_output_versions import append_book_output_version, load_latest_book_output_version
 from app.services.memoir.share_video_backgrounds import ShareVideoBackgroundAsset
@@ -235,6 +237,41 @@ async def _source_material_locations(
     }
 
 
+async def suggested_image_sources(
+    db: AsyncSession, *, project_id: str, assets: list[MemoirImageAsset],
+) -> dict[str, list[str]]:
+    """Resolve only exact saved-section provenance, never a similarity match."""
+    version_ids = {
+        asset.id: asset.metadata_json.get("source_version_id")
+        for asset in assets
+        if not asset.source_utterance_id and asset.source_signature.startswith("excerpt:")
+        and isinstance(asset.metadata_json.get("source_version_id"), str)
+    }
+    versions = {version.id: version for version in (await db.scalars(
+        select(MemoirBookChapterDraftVersion).where(
+            MemoirBookChapterDraftVersion.project_id == project_id,
+            MemoirBookChapterDraftVersion.id.in_(set(version_ids.values())),
+        )
+    )).all()} if version_ids else {}
+    sources: dict[str, list[str]] = {}
+    for asset in assets:
+        ids = [asset.source_utterance_id] if asset.source_utterance_id else []
+        version = versions.get(version_ids.get(asset.id, ""))
+        if version and version.chapter_id == asset.source_chapter_id and asset.source_quote:
+            matches = [section for section in normalized_section_snapshots(version.section_snapshot_json)
+                       if asset.source_quote in str(section["content"])]
+            if version.content.count(asset.source_quote) == 1 and len(matches) == 1:
+                ids = list(dict.fromkeys(matches[0]["used_material_ids"]))
+        sources[asset.id] = ids
+    locations = await _source_material_locations(
+        db, project_id=project_id, utterance_ids={source for ids in sources.values() for source in ids},
+    )
+    return {
+        asset_id: ids if (location := _anchored_image_location(ids, locations)) and location[0] else []
+        for asset_id, ids in sources.items()
+    }
+
+
 def _uses_material_anchor(asset: MemoirImageAsset) -> bool:
     return bool(
         asset.source_utterance_id
@@ -307,15 +344,19 @@ def _placement_response(
     )
 
 
-def _asset_response(
+async def _asset_response(
+    db: AsyncSession,
     asset: MemoirImageAsset,
     *,
     chapter_titles: dict[str, str],
+    suggested_sources: list[str] | None = None,
 ) -> MemoirImageAssetResponse:
     placements = [
         _placement_response(placement, chapter_titles=chapter_titles)
         for placement in sorted(asset.placements, key=lambda item: (not item.enabled, item.sort_order, item.created_at))
     ]
+    if suggested_sources is None:
+        suggested_sources = (await suggested_image_sources(db, project_id=asset.project_id, assets=[asset]))[asset.id]
     return MemoirImageAssetResponse(
         id=asset.id,
         project_id=asset.project_id,
@@ -339,6 +380,7 @@ def _asset_response(
         provider=asset.provider,
         model=asset.model,
         source_utterance_id=asset.source_utterance_id,
+        suggested_source_utterance_ids=suggested_sources,
         source_chapter_id=asset.source_chapter_id,
         source_chapter_title=chapter_titles.get(asset.source_chapter_id or "", ""),
         share_video_job_id=asset.share_video_job_id,
@@ -561,7 +603,7 @@ async def upload_image_asset(db: AsyncSession, *, user_id: str, project_id: str,
         MemoirImageAsset.project_id == project_id, MemoirImageAsset.source_signature == signature,
     ).options(selectinload(MemoirImageAsset.placements)))
     if existing and existing.status == MemoirImageAssetStatus.READY.value:
-        return _asset_response(existing, chapter_titles={})
+        return await _asset_response(db, existing, chapter_titles={})
     folder = content_storage.PROJECTS_DIR / project_id / "image-uploads" / signature.removeprefix("upload:")
     path, width, height = await asyncio.to_thread(_store_uploaded_image, content, folder)
     asset = existing or MemoirImageAsset(project_id=project_id, user_id=project.user_id, source_signature=signature, placements=[])
@@ -576,7 +618,7 @@ async def upload_image_asset(db: AsyncSession, *, user_id: str, project_id: str,
     db.add(asset)
     await db.commit()
     await db.refresh(asset, attribute_names=["placements"])
-    return _asset_response(asset, chapter_titles={})
+    return await _asset_response(db, asset, chapter_titles={})
 
 
 async def list_image_assets(
@@ -612,8 +654,9 @@ async def list_image_assets(
     included_count = sum(
         1 for item in items if any(placement.enabled for placement in item.placements)
     )
+    sources = await suggested_image_sources(db, project_id=project_id, assets=list(items))
     return MemoirImageAssetListResponse(
-        items=[_asset_response(item, chapter_titles=chapter_titles) for item in items],
+        items=[await _asset_response(db, item, chapter_titles=chapter_titles, suggested_sources=sources[item.id]) for item in items],
         total=len(items),
         ready_count=ready_count,
         included_count=included_count,
@@ -649,7 +692,7 @@ async def update_image_asset(
             if value
         },
     )
-    return _asset_response(asset, chapter_titles=chapter_titles)
+    return await _asset_response(db, asset, chapter_titles=chapter_titles)
 
 
 async def delete_image_asset(
@@ -695,7 +738,9 @@ async def create_image_placement(
     body_placement = placement_type in {
         MemoirBookImagePlacementType.CHAPTER_OPENING, MemoirBookImagePlacementType.CHAPTER_INLINE,
     }
-    if not source_ids and asset.source_utterance_id and (
+    if not source_ids and placement_type == MemoirBookImagePlacementType.CHAPTER_INLINE:
+        source_ids = (await suggested_image_sources(db, project_id=project_id, assets=[asset]))[asset.id]
+    if not source_ids and asset.source_utterance_id and not req.replace_body_placements and (
         body_placement or (placement_type == MemoirBookImagePlacementType.APPENDIX and _uses_material_anchor(asset))
     ):
         source_ids = [asset.source_utterance_id]
@@ -814,6 +859,10 @@ async def create_image_placement(
         await _select_cover_placement(db, project_id=project_id, keep=placement)
     else:
         await _begin_manual_image_selection(db, project=project, keep=placement)
+    if req.replace_body_placements:
+        for previous in asset.placements:
+            if previous is not placement and previous.placement_type not in {"cover", "back_cover"}:
+                previous.enabled = False
     placement.caption_override = req.caption_override or placement.caption_override
     placement.source_utterance_ids_json = source_ids
     placement.display_size = display_size
@@ -831,7 +880,7 @@ async def create_image_placement(
             if value
         },
     )
-    return _asset_response(asset, chapter_titles=chapter_titles)
+    return await _asset_response(db, asset, chapter_titles=chapter_titles)
 
 
 def _placement_display_size(
@@ -917,7 +966,7 @@ async def update_image_placement(
             if value
         },
     )
-    return _asset_response(asset, chapter_titles=chapter_titles)
+    return await _asset_response(db, asset, chapter_titles=chapter_titles)
 
 
 async def delete_image_placement(

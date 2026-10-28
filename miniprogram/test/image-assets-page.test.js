@@ -54,6 +54,7 @@ function imageAssetView(asset, localPath = "") {
     statusText: "未使用",
     placementText: "尚未入书",
     detailsExpanded: false,
+    sourceIds: asset.suggested_source_utterance_ids || (asset.source_utterance_id ? [asset.source_utterance_id] : []),
     enabledPlacements: asset.placements.filter((placement) => placement.enabled),
   };
 }
@@ -382,6 +383,8 @@ test("image assets page places a source-linked illustration near its material", 
     assetId: "asset-1",
     data: {
       placement_type: "chapter_inline",
+      source_utterance_ids: ["utterance-1"],
+      replace_body_placements: true,
       inline_position: "auto",
       display_size: "full_width",
     },
@@ -400,4 +403,60 @@ test("image placement lets an author choose a manual position or return to autom
   assert.equal(context.data.items[0].detailsExpanded, true);
   for (const value of ["1", "2", "3", "0"]) await context.chooseSourcePosition({ ...event, detail: { value } });
   assert.deepEqual(inputs, ["before", "middle", "after", "auto"]);
+});
+
+
+test("excerpt images use recovered sources and become placed after saving", async () => {
+  const asset = imageAsset("excerpt", { suggested_source_utterance_ids: ["source-a", "source-b"] });
+  const calls = [];
+  const { page } = loadImageAssetsPage({
+    listMemoirImageAssets: async () => ({ items: [asset], total: 1, included_count: 0, unused_count: 1 }),
+    downloadMemoirImageAssetFile: async () => "/tmp/excerpt.jpg",
+    createMemoirBookImagePlacement: async (_project, _asset, input) => {
+      calls.push(input);
+      return { ...asset, include_in_book: true, placements: [{ id: "placed", enabled: true,
+        placement_type: "chapter_inline", source_utterance_ids: input.source_utterance_ids,
+        chapter_id: "chapter-1", chapter_title: "童年", inline_position: "auto" }] };
+    },
+  });
+  global.wx = { showToast() {} };
+  const context = pageContext(page, { projectId: "project-1" });
+  await context.loadImageAssets();
+  await context.placeNearSource({ currentTarget: { dataset: { id: asset.id } } });
+  assert.deepEqual(calls[0].source_utterance_ids, ["source-a", "source-b"]);
+  assert.equal(calls[0].replace_body_placements, true);
+  assert.equal(context.data.items[0].include_in_book, true);
+  assert.equal(context.data.includedCount, 1);
+  assert.equal(context.data.items[0].detailsExpanded, false);
+  await context.placeNearSource({ currentTarget: { dataset: { id: asset.id } } });
+  assert.equal(calls.length, 1);
+});
+
+test("unresolved images require a source choice and replace the body placement", async () => {
+  const asset = imageAsset("unresolved", { suggested_source_utterance_ids: [] });
+  const calls = [];
+  const { page } = loadImageAssetsPage({
+    listMemoirImageAssets: async () => ({ items: [asset], total: 1, included_count: 0, unused_count: 1 }),
+    downloadMemoirImageAssetFile: async () => "/tmp/unresolved.jpg",
+    getMemoirBookPlan: async () => ({ chapters: [{ id: "chapter", title: "童年", include_in_book: true, sort_order: 0,
+      sections: [{ id: "section", title: "院子", status: "active", include_in_book: true, sort_order: 0,
+        materials: [{ utterance_id: "chosen-source", text: "院子里的故事", include_in_book: true, sort_order: 0 },
+          { utterance_id: "excluded", text: "未收录素材", include_in_book: false, sort_order: 1 }] }] }] }),
+    createMemoirBookImagePlacement: async (_p, _a, data) => { calls.push(data); return asset; },
+  });
+  global.wx = { showToast() {} };
+  const context = pageContext(page, { projectId: "project-1" });
+  await context.loadImageAssets();
+  assert.deepEqual(context.data.materialOptions.map(item => item.value), ["chosen-source"]);
+  const event = { currentTarget: { dataset: { id: asset.id } } };
+  await context.placeNearSource(event);
+  assert.equal(calls.length, 0);
+  assert.equal(context.data.items[0].detailsExpanded, true);
+  await context.chooseSourceMaterial({ ...event, detail: { value: "0" } });
+  assert.deepEqual(calls[0], { placement_type: "chapter_inline", source_utterance_ids: ["chosen-source"],
+    inline_position: "auto", display_size: "full_width", replace_body_placements: true });
+  await context.placeInAppendix(event);
+  assert.equal(calls[1].placement_type, "appendix");
+  assert.equal(calls[1].source_utterance_ids, undefined);
+  assert.equal(calls[1].replace_body_placements, true);
 });

@@ -42,7 +42,7 @@ import {
   type StoryVideoAsset,
 } from "../../services/story-media-index";
 
-interface ChapterOption {
+interface PlacementOption {
   label: string;
   value: string;
 }
@@ -58,6 +58,7 @@ interface ImageAssetView extends MemoirImageAsset {
   placementText: string;
   detailsExpanded: boolean;
   inlinePositionIndex: number;
+  sourceIds: string[];
   enabledPlacements: MemoirBookImagePlacement[];
 }
 
@@ -80,7 +81,8 @@ interface ImageAssetsData extends VideoPlaybackData {
   includedCount: number;
   unusedCount: number;
   items: ImageAssetView[];
-  chapterOptions: ChapterOption[];
+  chapterOptions: PlacementOption[];
+  materialOptions: PlacementOption[];
   placingTarget: string;
   deletingTarget: string;
   isStoryMaterialView: boolean;
@@ -112,7 +114,7 @@ function trimText(value: string | null | undefined): string {
 
 function statusText(asset: MemoirImageAsset): string {
   if (asset.status === "ready") {
-    return asset.include_in_book ? "已入书" : "未使用";
+    return asset.include_in_book ? "已入书" : "未入书";
   }
   if (asset.status === "failed") {
     return "生成失败";
@@ -151,7 +153,7 @@ function placementText(asset: MemoirImageAsset): string {
         : `已放在章节开头：${placement.chapter_title || "未命名章节"}`
     ));
   if (appendixCount) {
-    parts.push("已加入书末图录");
+    parts.push("已放在书末相册");
   }
   if (enabled.some((placement) => placement.placement_type === "cover")) {
     parts.push("已用于封面");
@@ -183,6 +185,8 @@ function buildAssetView(
     statusText: statusText(asset),
     placementText: placementText(asset),
     detailsExpanded: current?.detailsExpanded || false,
+    sourceIds: asset.placements.find(item => item.enabled && item.placement_type === "chapter_inline")?.source_utterance_ids
+      || asset.suggested_source_utterance_ids || (asset.source_utterance_id ? [asset.source_utterance_id] : []),
     inlinePositionIndex: ["auto", "before", "middle", "after"].indexOf(asset.placements.find(item => item.enabled && item.placement_type === "chapter_inline")?.inline_position || "auto"),
     enabledPlacements: (asset.placements || []).filter((placement) => placement.enabled),
   };
@@ -239,13 +243,27 @@ function assetCountData(items: ImageAssetView[]): Pick<
   };
 }
 
-function chapterOptions(plan: MemoirBookPlan | null): ChapterOption[] {
+function chapterOptions(plan: MemoirBookPlan | null): PlacementOption[] {
   return [...(plan?.chapters || [])]
+    .filter(chapter => chapter.include_in_book)
     .sort((left, right) => left.sort_order - right.sort_order)
     .map((chapter, index) => ({
       label: `第 ${index + 1} 章 ${chapter.title || "未命名章节"}`,
       value: chapter.id,
     }));
+}
+
+function materialOptions(plan: MemoirBookPlan | null): PlacementOption[] {
+  return [...(plan?.chapters || [])].filter(chapter => chapter.include_in_book)
+    .sort((a, b) => a.sort_order - b.sort_order)
+    .flatMap(chapter => [...chapter.sections]
+      .filter(section => section.status === "active" && section.include_in_book)
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .flatMap(section => [...section.materials].filter(material => material.include_in_book)
+        .sort((a, b) => a.sort_order - b.sort_order)
+        .map(material => ({ value: material.utterance_id,
+          label: `${chapter.title} · ${firstSentence(material.text, 28) || section.title}` }))),
+    );
 }
 
 definePage<ImageAssetsData>()({
@@ -262,6 +280,7 @@ definePage<ImageAssetsData>()({
     unusedCount: 0,
     items: [],
     chapterOptions: [],
+    materialOptions: [],
     placingTarget: "",
     deletingTarget: "",
     isStoryMaterialView: false,
@@ -362,6 +381,7 @@ definePage<ImageAssetsData>()({
           ...assetCountData(items),
           total: items.length,
           chapterOptions: chapterOptions(snapshot.plan || null),
+          materialOptions: materialOptions(snapshot.plan || null),
           contextText: "查看这里已有的图片和分享视频；点按素材后再预览",
           items,
           videos: videoViews(videos, materialTextByUtterance(chapters)),
@@ -381,6 +401,7 @@ definePage<ImageAssetsData>()({
         includedCount: response.included_count,
         unusedCount: response.unused_count,
         chapterOptions: chapterOptions(plan),
+        materialOptions: materialOptions(plan),
         items: buildAssetViews(response.items, this.data.items),
         videos: [],
       });
@@ -609,18 +630,34 @@ definePage<ImageAssetsData>()({
 
   async placeNearSource(event: DatasetEvent) {
     const assetId = datasetString(event, "id");
-    if (!assetId) return;
-    await this.createPlacement(assetId, { placement_type: "chapter_inline", inline_position: "auto", display_size: "full_width" });
+    const asset = this.assetById(assetId);
+    if (!asset || asset.include_in_book || this.data.placingTarget || this.data.deletingTarget) return;
+    if (!asset.sourceIds.length) {
+      this.setData({ items: this.data.items.map(item => item.id === assetId ? { ...item, detailsExpanded: true } : item) });
+      return;
+    }
+    await this.createPlacement(assetId, { placement_type: "chapter_inline", source_utterance_ids: asset.sourceIds,
+      inline_position: "auto", display_size: "full_width" });
   },
 
   async chooseSourcePosition(event: PickerEvent) {
     const assetId = datasetString(event, "id");
-    if (!assetId) return;
+    const asset = this.assetById(assetId);
+    if (!asset?.sourceIds.length) return;
     await this.createPlacement(assetId, {
       placement_type: "chapter_inline",
+      source_utterance_ids: asset.sourceIds,
       inline_position: (["auto", "before", "middle", "after"] as const)[pickerIndex(event)] || "auto",
       display_size: "full_width",
     });
+  },
+
+  async chooseSourceMaterial(event: PickerEvent) {
+    const assetId = datasetString(event, "id");
+    const option = this.data.materialOptions[pickerIndex(event)];
+    if (!assetId || !option) return;
+    await this.createPlacement(assetId, { placement_type: "chapter_inline",
+      source_utterance_ids: [option.value], inline_position: "auto", display_size: "full_width" });
   },
 
   async placeInAppendix(event: DatasetEvent) {
@@ -638,11 +675,17 @@ definePage<ImageAssetsData>()({
     assetId: string,
     data: MemoirBookImagePlacementCreateRequest,
   ) {
+    if (this.data.placingTarget || this.data.deletingTarget) return;
+    const asset = this.assetById(assetId);
+    if (!asset || asset.status !== "ready") return;
     this.setData({ placingTarget: assetId, error: "" });
     try {
-      const updated = await createMemoirBookImagePlacement(this.data.projectId, assetId, data);
+      const updated = await createMemoirBookImagePlacement(this.data.projectId, assetId, {
+        ...data, replace_body_placements: true,
+      });
       this.replaceAsset(updated);
-      wx.showToast({ title: "已加入书稿", icon: "success" });
+      this.setData({ items: this.data.items.map(item => item.id === assetId ? { ...item, detailsExpanded: false } : item) });
+      wx.showToast({ title: asset.include_in_book ? "已调整位置" : "已加入书稿", icon: "success" });
     } catch (error) {
       if (routeAuthError(error, "login")) {
         return;
@@ -656,7 +699,7 @@ definePage<ImageAssetsData>()({
   async removeFromBook(event: DatasetEvent) {
     const assetId = datasetString(event, "id");
     const asset = this.assetById(assetId);
-    if (!asset || !asset.enabledPlacements.length) {
+    if (!asset || !asset.enabledPlacements.length || this.data.placingTarget || this.data.deletingTarget) {
       return;
     }
     this.setData({ placingTarget: assetId, error: "" });
@@ -677,6 +720,7 @@ definePage<ImageAssetsData>()({
   },
 
   async deleteAsset(event: DatasetEvent) {
+    if (this.data.placingTarget || this.data.deletingTarget) return;
     const assetId = datasetString(event, "id");
     const asset = this.assetById(assetId);
     if (!asset) {

@@ -244,7 +244,7 @@ async def test_excerpt_image_reuses_jobs_styles_and_asset_management_with_single
     from app.services.memoir import material_image_generation, image_assets
     from app.services.memoir.share_video_backgrounds import VolcArkGeneratedImage, share_video_background_style_options
     from tests.test_memoir_image_assets import _png_bytes, register_memoir_editing_job_handlers, run_test_editing_job
-    project_id, chapter, _, version, _, _, _ = await saved_stories(client, test_db)
+    project_id, chapter, _, version, _, _, sources = await saved_stories(client, test_db, with_sources=True)
     monkeypatch.setattr(material_image_generation, "DATA_DIR", tmp_path)
     monkeypatch.setattr(image_assets, "DATA_DIR", tmp_path)
     calls = []
@@ -274,6 +274,7 @@ async def test_excerpt_image_reuses_jobs_styles_and_asset_management_with_single
     asset = assets[0]
     assert asset["source_chapter_id"] == chapter.id and asset["source_quote"] == payload["content"]
     assert asset["metadata_json"]["generation_estimated_cost"]["amount_rmb"] == 0.12
+    assert asset["suggested_source_utterance_ids"] == [sources[0]["utterance_id"]]
     assert not asset["include_in_book"]
     assert (await client.get("/api/mobile/memoir/image-generation/styles")).json() == share_video_background_style_options()
     shared = (await client.post(path, json={"version_id": version.id, "content": payload["content"], "image_asset_id": asset["id"], "title": "院子的往事"})).json()

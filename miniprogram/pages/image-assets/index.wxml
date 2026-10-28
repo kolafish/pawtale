@@ -100,75 +100,45 @@
         <view class="asset-copy">
           <view class="asset-title-row">
             <text class="asset-title">{{item.titleText}}</text>
-            <text class="asset-status {{item.include_in_book ? 'included' : ''}}">{{item.statusText}}</text>
+            <button class="asset-delete ui-button" data-id="{{item.id}}" loading="{{deletingTarget === item.id}}"
+              disabled="{{!!placingTarget || !!deletingTarget}}" bindtap="deleteAsset" aria-label="删除图片素材">删除</button>
           </view>
-          <text class="asset-placement">{{item.placementText}}</text>
         </view>
       </view>
 
-      <view wx:if="{{item.detailsExpanded}}" class="asset-more">
-        <picker wx:if="{{item.source_utterance_id}}" range="{{['自动分散', '素材前面', '素材中间', '素材后面']}}"
-          value="{{item.inlinePositionIndex}}" data-id="{{item.id}}" disabled="{{placingTarget === item.id || item.status !== 'ready'}}" bindchange="chooseSourcePosition">
-          <view class="action-button ui-pressable">调整位置</view>
-        </picker>
-        <view class="asset-secondary-actions">
-          <button
-            class="action-button danger ui-button"
-            data-id="{{item.id}}"
-            loading="{{deletingTarget === item.id}}"
-            disabled="{{deletingTarget === item.id}}"
-            bindtap="deleteAsset"
-          >
-            删除图片素材
-          </button>
-        </view>
+      <view class="asset-placement-summary">
+        <text class="asset-status {{item.include_in_book ? 'included' : ''}}">{{item.include_in_book ? '✓ 已入书' : item.statusText}}</text>
+        <text wx:if="{{item.include_in_book}}" class="asset-placement">{{item.placementText}}</text>
       </view>
 
       <view class="asset-actions">
-        <button wx:if="{{item.source_utterance_id}}" class="action-button primary-action ui-button"
-          data-id="{{item.id}}" loading="{{placingTarget === item.id}}" disabled="{{placingTarget === item.id || item.status !== 'ready'}}" bindtap="placeNearSource">自动放置</button>
-        <picker
-          wx:if="{{chapterOptions.length}}"
-          range="{{chapterOptions}}"
-          range-key="label"
-          data-id="{{item.id}}"
-          disabled="{{placingTarget === item.id || item.status !== 'ready'}}"
-          bindchange="placeInChapter"
-        >
-          <view class="action-button ui-pressable {{!item.source_utterance_id ? 'primary-action' : ''}} {{placingTarget === item.id || item.status !== 'ready' ? 'disabled' : ''}}">
-            {{item.source_utterance_id ? "放到章节开头" : "放入章节"}}
-          </view>
-        </picker>
-        <button
-          wx:if="{{!item.source_utterance_id}}"
-          class="action-button ui-button"
-          data-id="{{item.id}}"
-          loading="{{placingTarget === item.id}}"
-          disabled="{{placingTarget === item.id || item.status !== 'ready'}}"
-          bindtap="placeInAppendix"
-        >
-          加入图录
-        </button>
-        <button
-          wx:if="{{item.enabledPlacements.length}}"
-          class="action-button ui-button"
-          data-id="{{item.id}}"
-          loading="{{placingTarget === item.id}}"
-          disabled="{{placingTarget === item.id}}"
-          bindtap="removeFromBook"
-        >
-          移出书稿
-        </button>
+        <button wx:if="{{!item.include_in_book}}" class="action-button primary-action ui-button" data-id="{{item.id}}"
+          loading="{{placingTarget === item.id}}" disabled="{{!!placingTarget || !!deletingTarget || item.status !== 'ready'}}"
+          bindtap="placeNearSource">加入书稿</button>
+        <button class="action-button {{item.include_in_book ? 'primary-action' : ''}} ui-button" data-id="{{item.id}}"
+          disabled="{{!!placingTarget || !!deletingTarget || item.status !== 'ready'}}"
+          aria-expanded="{{item.detailsExpanded}}" bindtap="toggleAssetDetails">{{item.detailsExpanded ? '收起选项' : (item.include_in_book ? '调整位置' : '选择位置')}}</button>
+        <button wx:if="{{item.include_in_book}}" class="action-button ui-button" data-id="{{item.id}}"
+          loading="{{placingTarget === item.id}}" disabled="{{!!placingTarget || !!deletingTarget}}" bindtap="removeFromBook">移出书稿</button>
       </view>
 
-      <view
-        class="asset-details-toggle ui-block-action ui-pressable"
-        data-id="{{item.id}}"
-        aria-role="button"
-        aria-expanded="{{item.detailsExpanded}}"
-        bindtap="toggleAssetDetails"
-      >
-        {{item.detailsExpanded ? "收起" : "更多"}}
+      <view wx:if="{{item.detailsExpanded}}" class="asset-more">
+        <text class="asset-position-hint">{{item.sourceIds.length ? '已关联正文素材，多张插图可自动分散。' : '请选择对应的正文素材，图片会放在素材附近。'}}</text>
+        <picker wx:if="{{materialOptions.length}}" range="{{materialOptions}}" range-key="label" data-id="{{item.id}}"
+          disabled="{{!!placingTarget || !!deletingTarget || item.status !== 'ready'}}" bindchange="chooseSourceMaterial">
+          <view class="asset-position-option ui-pressable">选择对应素材<text aria-hidden="true">›</text></view>
+        </picker>
+        <picker wx:if="{{item.sourceIds.length}}" range="{{['自动分散', '素材前面', '素材中间', '素材后面']}}"
+          value="{{item.inlinePositionIndex}}" data-id="{{item.id}}" disabled="{{!!placingTarget || !!deletingTarget || item.status !== 'ready'}}" bindchange="chooseSourcePosition">
+          <view class="asset-position-option ui-pressable">{{['自动分散到素材附近', '素材前面', '素材中间', '素材后面'][item.inlinePositionIndex]}}<text aria-hidden="true">›</text></view>
+        </picker>
+        <picker wx:if="{{chapterOptions.length}}" range="{{chapterOptions}}" range-key="label" data-id="{{item.id}}"
+          disabled="{{!!placingTarget || !!deletingTarget || item.status !== 'ready'}}" bindchange="placeInChapter">
+          <view class="asset-position-option ui-pressable">放到章节开头<text aria-hidden="true">›</text></view>
+        </picker>
+        <button class="asset-position-option ui-button" data-id="{{item.id}}" disabled="{{!!placingTarget || !!deletingTarget || item.status !== 'ready'}}" bindtap="placeInAppendix">
+          <view>书末相册<text class="asset-position-hint">集中放在全书最后</text></view><text aria-hidden="true">›</text>
+        </button>
       </view>
     </view>
   </view>
