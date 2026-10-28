@@ -17,14 +17,7 @@ function loadProjectEditPage({
   getMemoirBookShareStatus = async () => ({ active: false }),
   updateMemoirBookShare = async () => {},
   revokeMemoirBookShare = async () => {},
-  storage = new Map(),
-  userId = "user-1",
 }) {
-  Object.assign(global.wx, {
-    getStorageSync: (key) => storage.get(key),
-    setStorageSync: (key, value) => storage.set(key, value),
-    removeStorageSync: (key) => storage.delete(key),
-  });
   mockModule("../services/memoir-book-api.ts", {
     getMemoirBookShareStatus,
     updateMemoirBookShare,
@@ -32,7 +25,7 @@ function loadProjectEditPage({
   });
   mockModule("../services/auth.ts", {
     getMemoirIdentity: async () => ({
-      id: userId,
+      id: "user-1",
       active_project_id: project.id,
       active_project: project,
       projects: [project],
@@ -295,71 +288,32 @@ test("a sharing request that never reached the server can be retried explicitly"
   assert.equal(writes, 2);
 });
 
-test("pending sharing targets survive reopening, stay user/project scoped, and clear after convergence", async () => {
-  const storage = new Map();
+test("reopening sharing settings reads the server state without requiring local persistence", async () => {
   const project = { id: "project-1", title: "爷爷的回忆" };
   let active = false;
-  global.wx = { setNavigationBarTitle() {} };
-  const options = {
-    project, storage,
-    getMemoirBookShareStatus: async () => ({ active }),
-    updateMemoirBookShare: async () => { throw new ApiError(0, "请求仍在处理中", null); },
+  global.wx = {
+    setNavigationBarTitle() {},
+    getStorageSync: () => undefined,
+    setStorageSync: () => { throw new Error("storage full"); },
   };
-  const open = async (overrides = {}) => {
-    const { page } = loadProjectEditPage({ ...options, ...overrides });
-    const context = pageContext(page);
-    await context.onLoad({ projectId: (overrides.project || project).id });
-    return context;
-  };
-  const first = await open();
-  await first.toggleBookShare({ detail: { value: true } });
-  const reopened = await open();
-  assert.equal(reopened.data.bookSharePendingTarget, true);
-  assert.equal(reopened.data.bookShareEnabled, false);
-  const anotherProject = await open({ project: { id: "project-2", title: "其他回忆录" } });
-  assert.equal(anotherProject.data.bookSharePendingTarget, null);
-  const anotherUser = await open({ userId: "user-2" });
-  assert.equal(anotherUser.data.bookSharePendingTarget, null);
-  assert.equal((await open()).data.bookSharePendingTarget, true);
-  active = true;
-  await reopened.loadBookShareSetting();
-  assert.equal((await open()).data.bookSharePendingTarget, null);
-});
-
-test("leaving before the sharing response arrives preserves the target for a new page", async () => {
-  const storage = new Map();
-  const project = { id: "project-1", title: "爷爷的回忆" };
-  let finish;
-  global.wx = { setNavigationBarTitle() {} };
   const { page } = loadProjectEditPage({
-    project, storage,
-    updateMemoirBookShare: () => new Promise(resolve => { finish = resolve; }),
+    project,
+    getMemoirBookShareStatus: async () => ({ active }),
+    updateMemoirBookShare: async () => { throw new ApiError(0, "响应超时", null); },
+    revokeMemoirBookShare: async () => { active = false; },
   });
   const first = pageContext(page);
   await first.onLoad({ projectId: project.id });
-  const pending = first.toggleBookShare({ detail: { value: true } });
-  const { page: nextPage } = loadProjectEditPage({ project, storage });
-  const next = pageContext(nextPage);
-  await next.onLoad({ projectId: project.id });
-  assert.equal(next.data.bookSharePendingTarget, true);
-  finish();
-  await pending;
-});
-
-test("a sharing change is not sent when its pending target cannot be saved", async () => {
-  const project = { id: "project-1", title: "爷爷的回忆" };
-  global.wx = { setNavigationBarTitle() {} };
-  const { page } = loadProjectEditPage({
-    project,
-    updateMemoirBookShare: () => assert.fail("must persist the pending target before sending the change"),
-  });
-  const context = pageContext(page);
-  await context.onLoad({ projectId: project.id });
-  global.wx.setStorageSync = () => { throw new Error("storage full"); };
-  await context.toggleBookShare({ detail: { value: true } });
-  assert.equal(context.data.bookShareEnabled, false);
-  assert.equal(context.data.bookShareBusy, false);
-  assert.ok(context.data.bookShareError);
+  await first.toggleBookShare({ detail: { value: true } });
+  assert.equal(first.data.bookSharePendingTarget, true);
+  active = true; // The timed-out request committed after leaving the first page.
+  const reopened = pageContext(page);
+  await reopened.onLoad({ projectId: project.id });
+  assert.equal(reopened.data.bookShareEnabled, true);
+  assert.equal(reopened.data.bookSharePendingTarget, null);
+  await reopened.toggleBookShare({ detail: { value: false } });
+  assert.equal(active, false);
+  assert.equal(reopened.data.bookShareEnabled, false);
 });
 
 test("an unavailable or unknown share status cannot grant access, and new memoirs do not request sharing", async () => {

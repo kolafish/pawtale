@@ -75,29 +75,6 @@ function currentCacheIdentity(): MemoirCacheIdentity | null {
   return identity?.user_id ? identity : null;
 }
 
-function pendingBookShareDescriptor(identity: MemoirCacheIdentity): MemoirCacheDescriptor<{ enabled: boolean }> {
-  return {
-    scope: { userId: identity.user_id, storageOwnerId: identity.storage_owner_id,
-      projectId: identity.project_id, resource: "book_share_pending" },
-    cacheSchemaVersion: 1,
-    // Keep pending intent until reconciliation, rather than expiring it as a snapshot.
-    maxAgeMs: Number.MAX_SAFE_INTEGER,
-    isPayload: (value): value is { enabled: boolean } => isObject(value) && typeof value.enabled === "boolean",
-  };
-}
-
-export function readPendingMemoirBookShare(identity: MemoirCacheIdentity): boolean | null {
-  return readMemoirCache(pendingBookShareDescriptor(identity)).payload?.enabled ?? null;
-}
-
-export function writePendingMemoirBookShare(identity: MemoirCacheIdentity, enabled: boolean): MemoirCacheWriteStatus {
-  return writeMemoirCache(pendingBookShareDescriptor(identity), { enabled });
-}
-
-export function clearPendingMemoirBookShare(identity: MemoirCacheIdentity, expected: boolean): void {
-  if (readPendingMemoirBookShare(identity) === expected) removeMemoirCache(pendingBookShareDescriptor(identity).scope);
-}
-
 function identityDescriptor(
   identity: MemoirCacheIdentity,
 ): MemoirCacheDescriptor<MemoirIdentity> {

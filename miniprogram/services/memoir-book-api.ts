@@ -78,13 +78,6 @@ export function getMemoirBookShareStatus(projectId: string, chapterId = "", sect
   return memoirRequest<MemoirBookShareStatus>(memoirBookSharePath(projectId, chapterId, sectionId));
 }
 
-export function createMemoirBookShare(projectId: string, chapterId = "", sectionId = ""): Promise<MemoirBookShareCreated> {
-  return memoirRequest<MemoirBookShareCreated>(memoirBookSharePath(projectId, chapterId, sectionId), {
-    method: "POST",
-    invalidatesSnapshots: false,
-  });
-}
-
 export function updateMemoirBookShare(projectId: string, chapterId = "", sectionId = ""): Promise<MemoirBookShareCreated> {
   return memoirRequest<MemoirBookShareCreated>(memoirBookSharePath(projectId, chapterId, sectionId), {
     method: "PUT",

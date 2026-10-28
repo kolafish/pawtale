@@ -151,7 +151,6 @@ function loadBookPage({
     getMemoirBookChapterDraft: async () => null,
     getMemoirBookOutput: async () => null,
     getMemoirBookShareStatus: unmockedAsync("getMemoirBookShareStatus"),
-    createMemoirBookShare: unmockedAsync("createMemoirBookShare"),
     updateMemoirBookShare: unmockedAsync("updateMemoirBookShare"),
     readMemoirBookShare: async () => ({ latest_version: null }),
     revokeMemoirBookShare: unmockedAsync("revokeMemoirBookShare"),
