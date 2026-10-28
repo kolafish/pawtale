@@ -1011,3 +1011,64 @@ async def test_unselected_image_positions_distribute_and_keep_manual_choices(cli
     for asset_id in (second, third):
         placement = await test_db.get(MemoirBookImagePlacement, placements[asset_id], populate_existing=True)
         assert placement.inline_position == "auto"
+
+
+@pytest.mark.parametrize("unresolved", ["", "repeated", "cross-section", "excluded", "wrong-version"])
+async def test_excerpt_image_sources_are_recovered_only_from_exact_saved_section(client, test_db, unresolved):
+    from app.models.memoir import MemoirSectionMaterial
+    from tests.test_memoir_story_shares import saved_stories
+
+    project_id, chapter, _, version, _, _, sources = await saved_stories(client, test_db, with_sources=True)
+    quote = "院子里的正文"
+    if unresolved == "repeated":
+        version.content += "\n" + quote
+    elif unresolved == "cross-section":
+        quote = version.content
+    elif unresolved == "excluded":
+        material = await test_db.scalar(select(MemoirSectionMaterial).where(
+            MemoirSectionMaterial.utterance_id == sources[0]["utterance_id"]))
+        material.include_in_book = False
+    asset = MemoirImageAsset(project_id=project_id, user_id=sources[0]["user_id"], status="ready",
+        source_type="chapter_illustration", source_signature="excerpt:legacy", source_chapter_id=chapter.id,
+        source_quote=quote, metadata_json={"source_version_id": "missing" if unresolved == "wrong-version" else version.id})
+    test_db.add(asset)
+    await test_db.commit()
+    path = f"/api/mobile/memoir/projects/{project_id}/image-assets"
+    listed = await client.get(path)
+    assert listed.status_code == 200, listed.text
+    expected = [] if unresolved else [sources[0]["utterance_id"]]
+    assert listed.json()["items"][0]["suggested_source_utterance_ids"] == expected
+    placed = await client.post(f"{path}/{asset.id}/placements", json={
+        "placement_type": "chapter_inline", "replace_body_placements": True,
+    })
+    assert placed.status_code == (400 if unresolved else 201), placed.text
+    if not unresolved:
+        placement = next(item for item in placed.json()["placements"] if item["enabled"])
+        assert placement["source_utterance_ids"] == expected
+        images, _, _ = await image_assets.manuscript_image_snapshots(test_db, project_id=project_id)
+        assert images[chapter.id][0]["inline_position"] == "middle"
+    else:
+        assert (await client.get(path)).json()["included_count"] == 0
+
+
+async def test_adjusting_image_position_replaces_body_atomically_and_preserves_cover(client, test_db, tmp_path, monkeypatch):
+    _, project_id, chapter_id, asset_id = await _seed_image_asset(client, test_db, tmp_path, monkeypatch)
+    path = f"/api/mobile/memoir/projects/{project_id}/image-assets/{asset_id}/placements"
+    for kind in ("chapter_opening", "cover"):
+        result = await client.post(path, json={"placement_type": kind, "chapter_id": chapter_id if kind != "cover" else None})
+        assert result.status_code == 201, result.text
+    rejected = await client.post(path, json={"placement_type": "chapter_inline",
+        "source_utterance_ids": ["missing"], "replace_body_placements": True})
+    assert rejected.status_code == 400
+    unchanged = (await client.get(f"/api/mobile/memoir/projects/{project_id}/image-assets")).json()["items"][0]
+    assert sorted(item["placement_type"] for item in unchanged["placements"] if item["enabled"]) == ["chapter_opening", "cover"]
+    for kind in ("chapter_inline", "appendix", "appendix"):
+        result = await client.post(path, json={"placement_type": kind, "replace_body_placements": True})
+        assert result.status_code == 201, result.text
+        active = [item for item in result.json()["placements"] if item["enabled"]]
+        assert sorted(item["placement_type"] for item in active) == sorted([kind, "cover"])
+        if kind == "appendix":
+            album = next(item for item in active if item["placement_type"] == "appendix")
+            assert album["source_utterance_ids"] == []
+            images, appendix, cover = await image_assets.manuscript_image_snapshots(test_db, project_id=project_id)
+            assert not images and len(appendix) == 1 and cover is not None

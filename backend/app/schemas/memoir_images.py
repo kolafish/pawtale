@@ -101,6 +101,7 @@ class MemoirImageAssetResponse(BaseModel):
     provider: str = ""
     model: str = ""
     source_utterance_id: str | None = None
+    suggested_source_utterance_ids: list[str] = Field(default_factory=list)
     source_chapter_id: str | None = None
     source_chapter_title: str = ""
     share_video_job_id: str | None = None
@@ -146,6 +147,7 @@ class MemoirBookImagePlacementCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     placement_type: MemoirBookImagePlacementType = MemoirBookImagePlacementType.CHAPTER_OPENING
+    replace_body_placements: bool = False
     chapter_id: str | None = None
     source_utterance_ids: list[str] | None = Field(default=None, min_length=1)
     inline_position: MemoirImageInlinePosition | None = None
@@ -179,6 +181,8 @@ class MemoirBookImagePlacementCreateRequest(BaseModel):
 
     @model_validator(mode="after")
     def _valid_anchor_placement(self) -> "MemoirBookImagePlacementCreateRequest":
+        if self.replace_body_placements and self.placement_type.value in {"cover", "back_cover"}:
+            raise ValueError("封面不能替换正文插图位置")
         if self.source_utterance_ids and self.placement_type.value in {"cover", "back_cover"}:
             raise ValueError("封面不关联正文素材")
         return self
