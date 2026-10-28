@@ -472,7 +472,8 @@
 .share-preview-notice { display: block; padding: 16rpx 0; color: var(--ui-text-secondary); text-align: center; }
 .share-reading-image { clear: both; text-indent: 0; }
 .share-cover-image, .share-reading-image image { width: 100%; border-radius: 28rpx; }
-.share-reading-image text { display: block; color: var(--ui-text-secondary); font-size: var(--ui-font-meta); line-height: 1.5; margin: 12rpx 0; }
+.share-reading-image image { display: block; outline: 1px solid rgba(0, 0, 0, .1); outline-offset: -1px; }
+.share-reading-image text { display: block; color: var(--ui-text-muted); font-size: 12px; line-height: 1.4; margin-top: 8rpx; }
 .small-section-content, .chapter-content, .book-content { font-size: 32rpx; line-height: 1.8; }
 .large-text .small-section-content, .large-text .chapter-content, .large-text .book-content { font-size: 36rpx; }
 /* Selected stories share the card's warm paper and editorial typography. */
@@ -583,8 +584,12 @@ button.excerpt-reader-button {
 .share-reading-image.portrait {
   float: right;
   clear: right;
-  width: 38%;
-  margin: 8rpx 0 20rpx 24rpx;
+  width: 35%;
+  margin: 8rpx 0 28rpx 20rpx;
+}
+
+.share-reading-image.portrait ~ .share-reading-image.portrait {
+  margin-top: 32rpx;
 }
 
 .share-reading-image.portrait image {
