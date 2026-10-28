@@ -52,7 +52,7 @@
       <text class="excerpt-eyebrow">分享的故事</text>
       <text class="excerpt-title">{{excerptTitle}}</text>
       <view wx:if="{{excerptStoryImageUrl}}" class="excerpt-story-image-shell"><image class="excerpt-story-image" src="{{excerptStoryImageUrl}}" mode="aspectFill" /></view>
-      <text wx:if="{{excerptStoryImageUrl && excerptImageDisclosure}}" class="excerpt-image-disclosure">AI生成插图</text>
+      <text wx:if="{{excerptStoryImageUrl && excerptImageDisclosure}}" class="excerpt-image-disclosure">AI背景图</text>
       <view class="excerpt-quote"><text user-select="{{true}}">{{excerptContent}}</text></view>
       <view class="excerpt-source-card {{excerptReadingLink && excerptReadingLink.scope === 'book' ? 'is-readable' : ''}}"
         bindtap="openExcerptReading" aria-role="{{excerptReadingLink && excerptReadingLink.scope === 'book' ? 'link' : ''}}"
@@ -215,8 +215,7 @@
 <view wx:for="{{shareImages}}" wx:key="id" wx:for-item="illustration" class="share-reading-image">
           <block wx:if="{{illustration.chapterId === chapter.chapterId && !illustration.sectionId}}">
             <image src="{{illustration.url}}" mode="widthFix" />
-            <text wx:if="{{illustration.caption}}">{{illustration.caption}}</text>
-            <text wx:if="{{illustration.disclosure && illustration.disclosure !== illustration.caption}}">{{illustration.disclosure}}</text>
+            <text wx:if="{{illustration.disclosure}}">AI背景图</text>
           </block>
         </view>
         <view wx:if="{{chapter.sections.length}}" class="reader-small-section-list">
@@ -234,8 +233,7 @@
                 <block wx:for="{{shareImages}}" wx:key="id" wx:for-item="illustration">
                   <view wx:if="{{illustration.chapterId === chapter.chapterId && illustration.sectionId === section.id && illustration.paragraphBefore === paragraphIndex}}" class="share-reading-image {{illustration.portrait ? 'portrait' : ''}}">
                     <image src="{{illustration.url}}" mode="widthFix" data-id="{{illustration.id}}" data-url="{{illustration.url}}" bindload="onReadingImageLoad" />
-                    <text wx:if="{{illustration.caption}}">{{illustration.caption}}</text>
-                    <text wx:if="{{illustration.disclosure && illustration.disclosure !== illustration.caption}}">{{illustration.disclosure}}</text>
+                    <text wx:if="{{illustration.disclosure}}">AI背景图</text>
                   </view>
                 </block>
                 <view class="small-section-content">
@@ -250,8 +248,7 @@
               <block wx:for="{{shareImages}}" wx:key="id" wx:for-item="illustration">
                 <view wx:if="{{illustration.chapterId === chapter.chapterId && illustration.sectionId === section.id && illustration.paragraphBefore === section.paragraphs.length}}" class="share-reading-image">
                   <image src="{{illustration.url}}" mode="widthFix" data-id="{{illustration.id}}" data-url="{{illustration.url}}" bindload="onReadingImageLoad" />
-                  <text wx:if="{{illustration.caption}}">{{illustration.caption}}</text>
-                  <text wx:if="{{illustration.disclosure && illustration.disclosure !== illustration.caption}}">{{illustration.disclosure}}</text>
+                  <text wx:if="{{illustration.disclosure}}">AI背景图</text>
                 </view>
               </block>
             </view>

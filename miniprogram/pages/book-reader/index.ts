@@ -77,7 +77,7 @@ type BookReaderData = ReaderData & BookTTSState & ShareLikeData & typeof INITIAL
   readerDemo: boolean;
   sharePreview: boolean;
   shareScope: "book" | "chapter" | "story";
-  shareImages: { id: string; chapterId: string; sectionId: string; paragraphBefore: number; paragraphCount: number; position: string; portrait: boolean; url: string; caption: string; disclosure: string }[];
+  shareImages: { id: string; chapterId: string; sectionId: string; paragraphBefore: number; paragraphCount: number; position: string; portrait: boolean; url: string; disclosure: string }[];
   shareCoverUrl: string;
   shareByline: string;
   sharePreface: string;
@@ -844,7 +844,7 @@ definePage<BookReaderData>()({
       return { id: item.image_asset_id, chapterId: chapter.chapter_id, sectionId,
         paragraphBefore: position === "before" ? 0 : position === "middle" ? Math.ceil(count / 2) : count,
         paragraphCount: count, position, portrait: false,
-        url, caption: item.caption, disclosure: item.disclosure };
+        url, disclosure: item.disclosure };
     })));
     if (generation === this.sharedReadGeneration) this.setData({ shareImages: images.filter(item => Boolean(item.url)) });
   },
