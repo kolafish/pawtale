@@ -614,7 +614,7 @@ test("home view patch keeps first-screen template state simple", () => {
       showVoiceAuthorizationPanel: homeViewPatch(baseData).showVoiceAuthorizationPanel,
     },
     {
-      greetingText: "你好，余主任",
+      greetingText: "您好，余主任",
       headerSubtitleText: "",
       primaryVoiceButtonTitle: "开始讲述",
       showNarrationChoiceCard: false,

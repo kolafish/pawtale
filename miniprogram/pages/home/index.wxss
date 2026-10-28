@@ -412,6 +412,7 @@
 }
 
 /* Keep flex centering above the native button[size="mini"] display rule. */
+.home-header-button.ui-button,
 .home-inline-action.ui-button {
   display: flex;
 }

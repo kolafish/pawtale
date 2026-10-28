@@ -204,7 +204,7 @@ export function homeViewPatch(state: HomeData): HomeViewPatch {
   const greetingName = state.displayName.trim();
   return {
     homePageClass: `home-page${state.largeTextEnabled ? " large-text" : ""}${state.voiceEntry ? " is-narrating" : ""}`,
-    greetingText: greetingName && greetingName !== "作者" ? `你好，${greetingName}` : "你好",
+    greetingText: greetingName && greetingName !== "作者" ? `您好，${greetingName}` : "您好",
     headerSubtitleText: "",
     voiceStartButtonClass: blocked ? "button-blocked" : "",
     voiceStartButtonHoverClass: blocked ? "none" : "voice-start-button-hover",
@@ -341,7 +341,7 @@ definePage<HomeData>()({
     voiceAuthorizationAgreed: false,
     voiceAuthorizationRequested: false,
     voiceAuthorizationSaving: false,
-    greetingText: "你好",
+    greetingText: "您好",
     headerSubtitleText: "从一段回忆开始。",
     voiceStartButtonClass: "",
     voiceStartButtonHoverClass: "voice-start-button-hover",
