@@ -452,7 +452,7 @@ async def test_demo_videos_play_publicly_without_disclosing_the_full_book_link(
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"demo video")
     settings = get_settings().model_copy(update={
-        "memoir_demo_chapter_ids": chapters[0].id,
+        "memoir_demo_project_ids": created["session"]["project_id"],
         "memoir_demo_video_codes": f"{selected.share_code},0123456789abcdef0123",
     })
     monkeypatch.setattr(demo_story, "get_settings", lambda: settings)

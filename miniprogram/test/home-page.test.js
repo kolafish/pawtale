@@ -1276,7 +1276,7 @@ test("an expired session returns an existing memoir to home after login", async 
       },
     },
     voiceApiExports: {
-      getMemoirDemoStory: async () => ({ title: "示例", chapters: [] }),
+      getMemoirDemoStory: async () => ({ title: "示例", chapters: [], books: [] }),
       createMemoirVoiceSession: async () => { creates += 1; return { session: { id: "resumed" } }; },
     },
   });
@@ -1312,7 +1312,7 @@ test("cancelling narration login allows the visitor to return home without a log
   global.wx = { navigateTo: ({ url }) => navigations.push(url) };
   const { page } = loadHomePage({ voiceApiExports: {
     getMemoirStorySnapshot: async () => { throw new ApiError(401, "请先登录", {}); },
-    getMemoirDemoStory: async () => ({ title: "示例", chapters: [] }),
+    getMemoirDemoStory: async () => ({ title: "示例", chapters: [], books: [] }),
   } });
   require("../services/navigation.ts").navigateToLoginThenNarrate();
   const context = pageContext(page);
@@ -1600,6 +1600,7 @@ test("visitors browse the sample memoir and open only its readable chapters", as
     getMemoirStorySnapshot: async () => { throw new ApiError(401, "请先登录", {}); },
     getMemoirDemoStory: async () => ({
       title: "余仲尤往事",
+      books: [{ id: "yu", title: "余仲尤往事", book_chapter_count: 1, book_char_count: 120 }],
       chapters: [chapter("family", "家里的人", true), chapter("closed", "下乡那几年", false)],
       book_chapter_count: 2,
       book_char_count: 200,
@@ -1628,8 +1629,8 @@ test("visitors browse the sample memoir and open only its readable chapters", as
   context.openChapter({ detail: { chapterId: "closed" } });
   context.openBook();
   assert.deepEqual(opened, [
-    "/pages/book-reader/index?demo=1",
-    "/pages/book-reader/index?demo=1",
+    "/pages/book-reader/index?demo=1&projectId=yu",
+    "/pages/book-reader/index?demo=1&projectId=yu",
   ]);
   assert.equal(toasts.length, 1);
 });
@@ -1649,4 +1650,35 @@ test("a failed demo refresh clears old public links and remains retryable withou
   assert.equal(context.data.loading, false);
   assert.ok(context.data.storyError);
   assert.deepEqual(context.data.demoReadableChapterIds, []);
+});
+
+
+test("visitors swipe the default grandmother book to Yu and open the selected book", async () => {
+  const { ApiError } = require("../services/request.ts");
+  const { page } = loadHomePage({ voiceApiExports: {
+    getMemoirStorySnapshot: async () => { throw new ApiError(401, "请先登录", {}); },
+    getMemoirDemoStory: async () => ({
+      title: "我的奶奶—李桂芳", chapters: [], videos: [], book_chapter_count: 5, book_char_count: 10000,
+      books: [
+        { id: "grandma", title: "我的奶奶—李桂芳", book_chapter_count: 5, book_char_count: 10000 },
+        { id: "yu", title: "余仲尤的往事", book_chapter_count: 5, book_char_count: 20000 },
+      ],
+    }),
+  } });
+  const opened = [];
+  global.wx = { navigateTo: ({ url }) => opened.push(url) };
+  const context = pageContext(page);
+  await context.loadHome();
+  assert.equal(context.data.selectedDemoIndex, 0);
+  assert.deepEqual(context.data.demoBooks.map(book => book.title), ["我的奶奶—李桂芳", "余仲尤的往事"]);
+  context.openBook();
+  context.changeDemoBook({ detail: { current: 1 } });
+  context.openBook();
+  // A tap carries its card identity even while the swipe change is being delivered.
+  context.openBook({ currentTarget: { dataset: { demoId: "grandma" } } });
+  assert.deepEqual(opened, [
+    "/pages/book-reader/index?demo=1&projectId=grandma",
+    "/pages/book-reader/index?demo=1&projectId=yu",
+    "/pages/book-reader/index?demo=1&projectId=grandma",
+  ]);
 });

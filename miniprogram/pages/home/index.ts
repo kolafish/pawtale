@@ -99,12 +99,23 @@ const RESUME_HINT_CHAR_LIMIT = 28;
 // The first story starts without a setup form; the title can be changed later.
 const FIRST_PROJECT_TITLE = "我的回忆录";
 
+interface DemoMemoirCard {
+  id: string;
+  title: string;
+  label: string;
+  action: string;
+  showProgress: boolean;
+  progressText: string;
+}
+
 interface HomeData extends HomeStoryData {
   loading: boolean;
   creatingVoice: boolean;
   voiceEntry: VoiceSessionEntry | null;
   needsLogin: boolean;
   demoReadableChapterIds: string[];
+  demoBooks: DemoMemoirCard[];
+  selectedDemoIndex: number;
   error: string;
   userId: string;
   displayName: string;
@@ -268,6 +279,8 @@ function applyHomeSnapshotData(
     error: "",
     needsLogin: false,
     demoReadableChapterIds: [],
+    demoBooks: [],
+    selectedDemoIndex: 0,
     userId: identity.id,
     displayName: userDisplayName(identity.display_name, identity.email),
     projectId: identity.active_project_id,
@@ -328,6 +341,8 @@ definePage<HomeData>()({
     voiceEntry: null,
     needsLogin: false,
     demoReadableChapterIds: [],
+    demoBooks: [],
+    selectedDemoIndex: 0,
     error: "",
     userId: "",
     displayName: "",
@@ -525,6 +540,8 @@ definePage<HomeData>()({
           noticeReadState: { readableSeen: false, attentionId: "" },
           needsLogin: true,
           demoReadableChapterIds: [],
+          demoBooks: [],
+          selectedDemoIndex: 0,
           voiceEntry: null,
           showContinueNarration: false,
           userId: "",
@@ -834,9 +851,16 @@ definePage<HomeData>()({
     wx.navigateTo({ url: pageUrl("/pages/book-completion/index", { projectId: this.data.projectId, projectTitle: this.data.story.memoir.title }) });
   },
 
-  openBook() {
+  changeDemoBook(event: { detail: { current: number } }) {
+    const index = event.detail.current;
+    if (this.data.needsLogin && this.data.demoBooks[index]) this.setData({ selectedDemoIndex: index });
+  },
+
+  openBook(event?: { currentTarget: { dataset: { demoId?: string } } }) {
     if (this.data.needsLogin || !this.data.hasProject) {
-      wx.navigateTo({ url: pageUrl("/pages/book-reader/index", { demo: "1" }) });
+      wx.navigateTo({ url: pageUrl("/pages/book-reader/index", {
+        demo: "1", projectId: event?.currentTarget.dataset.demoId || this.data.demoBooks[this.data.selectedDemoIndex]?.id || "",
+      }) });
       return;
     }
     if (!this.data.projectId) return;
@@ -867,11 +891,16 @@ definePage<HomeData>()({
     try {
       const demo = await getMemoirDemoStory();
       if (loadSequence !== this.homeLoadSequence || !this.data.needsLogin) return;
-      if (!demo.chapters.length) {
+      if (!demo.books.length) {
         setHomeData(this, { storyError: "示例回忆录暂未开放，请稍后再来。" });
         return;
       }
       setHomeData(this, {
+        demoBooks: demo.books.map(book => ({
+          id: book.id, title: book.title, label: "示例回忆录", action: "翻开看看", showProgress: true,
+          progressText: storyViewData({ ...book, chapters: [], identity: { active_project: { title: book.title } } }).memoir.bookMetaText,
+        })),
+        selectedDemoIndex: 0,
         demoReadableChapterIds: demo.chapters.filter(chapter => chapter.readable).map(chapter => chapter.id),
         story: storyViewData({ ...demo, identity: { active_project: { title: demo.title } } }),
         storyLoaded: true,
@@ -887,9 +916,9 @@ definePage<HomeData>()({
     const { chapterId } = event.detail;
     if (this.data.needsLogin) {
       if (this.data.demoReadableChapterIds.includes(chapterId)) {
-        wx.navigateTo({ url: pageUrl("/pages/book-reader/index", { demo: "1" }) });
+        wx.navigateTo({ url: pageUrl("/pages/book-reader/index", { demo: "1", projectId: this.data.demoBooks[0]?.id || "" }) });
       } else {
-        wx.showToast({ title: "示例只开放了部分章节", icon: "none" });
+        wx.showToast({ title: "这一章尚未成书", icon: "none" });
       }
       return;
     }

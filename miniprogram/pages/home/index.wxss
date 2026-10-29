@@ -232,6 +232,22 @@
   transition-timing-function: ease-out;
 }
 
+.memoir-demo-swiper {
+  height: 460rpx;
+  margin-top: 24rpx;
+}
+
+.home-memoir-slide {
+  box-sizing: border-box;
+  height: 100%;
+  margin-top: 0;
+  padding-bottom: 48rpx;
+}
+
+.large-text .memoir-demo-swiper {
+  height: 550rpx;
+}
+
 .home-memoir-card-hover {
   opacity: 0.94;
   transform: scale(0.985);

@@ -124,8 +124,9 @@ export function downloadMemoirSharedAudio(token: string, versionId: string, audi
     { failureMessage: "朗读暂时无法播放，请重新打开故事后重试", domainLabel: "分享朗读" });
 }
 
-export function readMemoirDemoBook(): Promise<MemoirBookOutput> {
-  return request<MemoirBookOutput>("/api/mobile/memoir/demo-book");
+export function readMemoirDemoBook(projectId = ""): Promise<MemoirBookOutput> {
+  const query = projectId ? `?project_id=${encodeURIComponent(projectId)}` : "";
+  return request<MemoirBookOutput>(`/api/mobile/memoir/demo-book${query}`);
 }
 
 function bookPlanPath(projectId: string, suffix = ""): string {

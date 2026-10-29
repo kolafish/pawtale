@@ -204,14 +204,18 @@ test("returning to a shared reader replaces removed content with the current sha
 });
 
 test("demo reader uses the public book and disables account-only audio", async () => {
+  const requested = [];
   const destinations = [];
   global.wx = { getStorageSync: () => "", navigateTo({url}) { destinations.push(url); } };
   const { page } = loadBookReaderPage({
     getMemoirBookOutput: unmockedAsync("owner book API"),
-    readMemoirDemoBook: async () => sampleFinishedBook("家里的人完整章节"),
+    readMemoirDemoBook: async (projectId) => { requested.push(projectId); return sampleFinishedBook("家里的人完整章节"); },
   });
   const context = pageContext(page);
-  await context.onLoad({ demo: "1" });
+  await context.onLoad({ demo: "1", projectId: "yu" });
+  assert.deepEqual(requested, ["yu"]);
+  await context.retrySharedReading();
+  assert.deepEqual(requested, ["yu", "yu"]);
   assert.equal(context.data.readerShared, true);
   assert.equal(context.data.shareLikeVisible, false);
   assert.equal(context.readerText, "家里的人完整章节");
