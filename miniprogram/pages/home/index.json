@@ -2,6 +2,7 @@
   "navigationBarTitleText": "",
   "usingComponents": {
     "voice-session": "/components/voice-session/index",
-    "share-response-inbox": "/components/share-response-inbox/index"
+    "share-response-inbox": "/components/share-response-inbox/index",
+    "story-result": "/components/story-result/index"
   }
 }

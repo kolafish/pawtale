@@ -38,6 +38,7 @@ import { PollingTimer } from "../../services/polling-timer";
 import {
   emptyHomeStoryData,
   homeStorySnapshotData,
+  homeGrowthResult,
   clearStoryGrowthAnimation,
   HomeGrowthTracker,
   homeNoticeQueue,
@@ -479,11 +480,20 @@ definePage<HomeData>()({
       writeCachedMemoirHome({ server_revision: snapshot.server_revision, identity: snapshot.identity, latest_transcript: snapshot.latest_transcript });
       applyHomeSnapshotData(this, snapshot);
       const freshEvents = this.growthTracker.observe(snapshot.identity.id, this.data.projectId, snapshot.growth_events);
+      const pendingGrowth = this.growthTracker.pending(snapshot.growth_events);
+      const storyData = homeStorySnapshotData(snapshot, freshEvents);
+      const settled = snapshot.progress?.status !== "processing" && snapshot.progress?.stage !== "queued";
+      const nextResult = settled
+        ? homeGrowthResult(pendingGrowth, storyData.story) : null;
+      const growthResult = this.data.growthResult || (nextResult
+        ? { ...nextResult, id: `${this.data.userId}/${this.data.projectId}/${nextResult.id}` } : null);
+      const projectId = this.data.projectId;
+      void this.growthTracker.syncAcknowledgements(snapshot.growth_events, id => acknowledgeMemoirAutomationEvent(projectId, id));
       const target = this.storyNavigationTarget;
       this.storyNavigationTarget = null;
       const validTarget = target && (!target.projectId || target.projectId === this.data.projectId);
       setHomeData(this, {
-        ...homeStorySnapshotData(snapshot, freshEvents, this.growthTracker.pending(snapshot.growth_events)),
+        ...storyData, growthResult,
       }, () => {
         if (loadSequence !== this.homeLoadSequence) return;
         if (!background) this.measureNarration();
@@ -762,7 +772,7 @@ definePage<HomeData>()({
   async dismissNotice() {
     const notice = this.data.notice;
     const { userId, projectId } = this.data;
-    if (!notice || !projectId || this.data.dismissingGrowth) return;
+    if (!notice || !projectId) return;
     if (notice.kind === "progress" || notice.kind === "readable") {
       const noticeReadState = { ...this.data.noticeReadState,
         ...(notice.kind === "readable" ? { readableSeen: true } : { attentionId: notice.id }),
@@ -774,25 +784,20 @@ definePage<HomeData>()({
       this.shareLikeNoticeRequestSequence += 1;
       markShareLikeNoticeSeen(userId, projectId, notice.people.latestAt);
       setHomeData(this, { shareLikeNotice: null });
-    } else {
-      this.setData({ dismissingGrowth: true });
-      try {
-        await acknowledgeMemoirAutomationEvent(projectId, notice.eventId);
-        if (this.data.userId === userId && this.data.projectId === projectId) {
-          this.growthTracker.acknowledge(notice.eventId);
-          setHomeData(this, {
-            storyError: "",
-            growthNotices: this.data.growthNotices.filter(item => item.id !== notice.id),
-          });
-        }
-      } catch (error) {
-        if (this.data.userId === userId && this.data.projectId === projectId) {
-          this.setData({ storyError: error instanceof Error ? error.message : "提醒确认失败，请重试" });
-        }
-      } finally {
-        if (this.data.userId === userId && this.data.projectId === projectId) this.setData({ dismissingGrowth: false });
-      }
     }
+  },
+
+  async completeGrowthResult(event: { detail: { id: string } }) {
+    const result = this.data.growthResult;
+    if (!this.homeVisible || this.data.voiceEntry || !result || result.id !== event.detail.id) return;
+    const { userId, projectId } = this.data;
+    const events = this.growthTracker.pending([]).filter(item => result.eventIds.includes(item.event_id));
+    this.growthTracker.played(result.eventIds);
+    const noticeReadState = { ...this.data.noticeReadState,
+      readableSeen: this.data.noticeReadState.readableSeen || Boolean(this.data.readableNoticeText) };
+    rememberHomeNoticeReadState(userId, projectId, noticeReadState);
+    setHomeData(this, { growthResult: null, noticeReadState });
+    await this.growthTracker.syncAcknowledgements(events, id => acknowledgeMemoirAutomationEvent(projectId, id));
   },
 
   async retryDraft() {

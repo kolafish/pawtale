@@ -78,7 +78,10 @@
     <button wx:if="{{storyError || (!storyLoaded && error)}}" class="home-story-action ui-button" bindtap="refreshStory"
       loading="{{loading}}" disabled="{{loading}}">重新读取</button>
 
-    <view wx:if="{{notice}}" class="home-growth-notice" aria-live="polite">
+    <story-result wx:if="{{growthResult && !voiceEntry}}" result="{{growthResult}}" large-text="{{largeTextEnabled}}"
+      bindcomplete="completeGrowthResult" />
+
+    <view wx:if="{{notice && !growthResult}}" class="home-growth-notice" aria-live="polite">
       <template wx:if="{{notice.kind === 'like'}}" is="shareLikePeople" data="{{avatars: notice.people.avatars, text: notice.text}}" />
       <text wx:else class="home-growth-value ui-tabular">{{notice.text}}</text>
       <view class="home-growth-actions">
@@ -86,8 +89,7 @@
           loading="{{retryingDraft}}" disabled="{{retryingDraft}}">继续整理 ›</button>
         <button wx:elif="{{notice.kind === 'progress' && notice.action === 'review'}}" size="mini"
           class="home-inline-action ui-button" bindtap="openReviewIssues">查看待确认 ›</button>
-        <button size="mini" class="home-inline-action ui-button" bindtap="dismissNotice"
-          loading="{{dismissingGrowth}}" disabled="{{dismissingGrowth}}">知道了</button>
+        <button size="mini" class="home-inline-action ui-button" bindtap="dismissNotice">知道了</button>
       </view>
     </view>
 

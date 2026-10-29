@@ -40,6 +40,7 @@ type ComponentInstance<
   setData(data: Partial<TData>, callback?: () => void): void;
   triggerEvent(name: string, detail?: unknown): void;
   createSelectorQuery(): WechatMiniprogram.SelectorQuery;
+  createIntersectionObserver(options?: { thresholds?: number[] }): WechatMiniprogram.IntersectionObserver;
 };
 
 declare function Component<
@@ -59,6 +60,7 @@ declare function Component<
       & ThisType<ComponentInstance<TProperties, TData, TMethods>>;
     lifetimes?: {
       attached?(): void;
+      ready?(): void;
       detached?(): void;
     } & ThisType<ComponentInstance<TProperties, TData, TMethods>>;
     pageLifetimes?: {
@@ -70,9 +72,19 @@ declare function Component<
 ): void;
 
 declare namespace WechatMiniprogram {
+  interface CanvasNode {
+    width: number;
+    height: number;
+    getContext(type: "2d"): CanvasRenderingContext2D;
+  }
+  interface IntersectionObserver {
+    relativeToViewport(): IntersectionObserver;
+    observe(selector: string, callback: (result: { intersectionRatio: number }) => void): void;
+    disconnect(): void;
+  }
   interface BoundingClientRectResult { top: number; bottom: number; left: number; right: number; width: number; height: number }
   interface NodesRef {
-    fields(options: { size?: boolean; computedStyle?: string[] }, callback: (result: { width?: number; height?: number; top?: string } | null) => void): SelectorQuery;
+    fields(options: { node?: boolean; size?: boolean; computedStyle?: string[] }, callback: (result: { node?: CanvasNode; width?: number; height?: number; top?: string } | null) => void): SelectorQuery;
     context(callback: (result: { context: EditorContext } | null) => void): SelectorQuery;
     boundingClientRect(callback: (rect: BoundingClientRectResult | null) => void): SelectorQuery;
     scrollOffset(callback: (offset: { scrollTop: number; scrollLeft: number }) => void): SelectorQuery;
@@ -581,6 +593,7 @@ declare namespace WechatMiniprogram {
     switchTab(option: NavigateOption): void;
     navigateBack(option?: NavigateBackOption): void;
     createSelectorQuery(): SelectorQuery;
+    getWindowInfo(): { pixelRatio: number };
     pageScrollTo(option: { scrollTop?: number; selector?: string; offsetTop?: number; duration?: number }): void;
     showActionSheet(option: ActionSheetOption): void;
     showModal(option: ModalOption): void;
