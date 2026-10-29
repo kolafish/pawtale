@@ -84,3 +84,55 @@ def render_excerpt_share_card(*, book_title: str, chapter_title: str, content: s
     output = BytesIO()
     image.save(output, "JPEG", quality=88, optimize=True)
     return output.getvalue()
+
+
+def render_excerpt_share_poster(*, title: str, book_title: str, quote: str, code_content: bytes,
+                                image_content: bytes | None = None, ai_image: bool = False) -> bytes:
+    """A 3:4 story print. The quote is validated against the published selection by the caller."""
+    from PIL import ImageChops
+
+    paper = "#fcf8f1"
+    image = Image.new("RGB", (1200, 1600), paper)
+    draw = ImageDraw.Draw(image)
+    with Image.open(_ASSETS / "branding" / "laoyu-portrait.png") as source:
+        mark = source.convert("RGBA")
+        mark = ImageOps.contain(mark.crop(mark.getbbox()), (104, 116))
+    image.paste(mark, (80, 44), mark)
+    _text(image, "老余口述", (210, 48, 500, 110), size=42, align="left", bold=True)
+    _text(image, "把家人的故事，慢慢写成一本书", (210, 116, 1120, 158), size=25, align="left")
+    _text(image, title, (80, 187, 1120, 368), size=76, minimum=44, align="left", bold=True)
+    draw.line((82, 388, 172, 388), fill="#b9785c", width=4)
+
+    if image_content:
+        with Image.open(BytesIO(image_content)) as source:
+            picture = ImageOps.contain(ImageOps.exif_transpose(source).convert("RGBA"), (1120, 490))
+        # Fade only the outer edge of illustrations into the same paper used throughout.
+        # Keep photos intact, including their original colors and full framing.
+        if ai_image:
+            fade = min(48, picture.width // 5, picture.height // 5)
+            mask = Image.new("L", picture.size, 255)
+            edge = ImageDraw.Draw(mask)
+            for inset in range(fade):
+                edge.rectangle((inset, inset, picture.width - 1 - inset, picture.height - 1 - inset),
+                               outline=round(255 * inset / fade))
+            picture.putalpha(ImageChops.multiply(picture.getchannel("A"), mask))
+        image.paste(picture, ((1200 - picture.width) // 2, 410 + (490 - picture.height) // 2), picture)
+        if ai_image:
+            _text(image, "AI 意象插图", (850, 896, 1120, 930), size=22)
+        quote_top = 930
+    else:
+        quote_top = 490
+    # 120 Chinese glyphs fit at the minimum readable size, including long unbroken text.
+    _text(image, quote, (108, quote_top, 1092, 1200), size=38 if image_content else 52,
+          minimum=34, align="left")
+    draw.line((80, 1220, 1120, 1220), fill="#decfbd", width=1)
+    _text(image, f"选自《{book_title}》", (80, 1230, 1120, 1292), size=28, minimum=22)
+    # A quiet centered paper panel; never cover or redraw the official code/avatar.
+    draw.rounded_rectangle((480, 1300, 720, 1540), radius=26, fill="#f3ebdf")
+    with Image.open(BytesIO(code_content)) as source:
+        code = ImageOps.contain(source.convert("RGBA"), (220, 220))
+    image.paste(code, ((1200 - code.width) // 2, 1310 + (220 - code.height) // 2), code)
+    _text(image, "微信扫码 · 阅读这段回忆", (80, 1548, 1120, 1590), size=24)
+    output = BytesIO()
+    image.save(output, "JPEG", quality=94, optimize=True)
+    return output.getvalue()

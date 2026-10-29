@@ -1391,3 +1391,68 @@ for (const [label, paragraphs, ratio, position, grouped] of [
   context.layoutReadingImages(context.data.shareImages);
   assert.equal(Boolean(context.data.imageGallerySections.s), grouped);
 });
+
+test("poster exports only a selected quote, saves the downloaded image, and invalidates it on edits", async () => {
+  const downloads = [];
+  mockModule("../services/authenticated-media.ts", { downloadAuthenticatedFile: async url => { downloads.push(url); return "/tmp/poster.jpg"; } });
+  const context = excerptContext();
+  context.excerptToken = "x1.poster";
+  context.setData({ excerptMode: "preview", excerptContent: "奶奶坐在门口。那天我回家了。", excerptPosterQuote: "奶奶坐在门口。", excerptImageReady: true });
+  context.chooseExcerptOutput({ currentTarget: { dataset: { output: "poster" } } });
+  await context.generateExcerptPoster();
+  assert.equal(downloads.length, 1);
+  const url = new URL(downloads[0]);
+  assert.ok(url.pathname.endsWith("/excerpt-shares/x1.poster/poster.jpg"));
+  assert.equal(url.searchParams.get("quote"), "奶奶坐在门口。");
+  assert.equal(context.data.excerptPosterPath, "/tmp/poster.jpg");
+  assert.equal(context.data.excerptPosterBusy, false);
+  assert.equal(context.onShareAppMessage().path, "/pages/book-reader/index?excerptToken=x1.poster");
+  const saved = [], opened = [];
+  global.wx.saveImageToPhotosAlbum = ({ filePath, success }) => { saved.push(filePath); success(); };
+  global.wx.showToast = ({ title }) => saved.push(title);
+  global.wx.previewImage = options => opened.push(options.current);
+  context.previewExcerptPoster();
+  await context.saveExcerptPoster();
+  assert.deepEqual(opened, ["/tmp/poster.jpg"]);
+  assert.deepEqual(saved, ["/tmp/poster.jpg", "已保存到相册"]);
+  context.changeExcerptPosterQuote({ detail: { value: "那天我回家了。" } });
+  assert.equal(context.data.excerptPosterPath, "");
+  context.changeExcerptPosterQuote({ detail: { value: "原文没有的话" } });
+  await context.generateExcerptPoster();
+  assert.equal(downloads.length, 1);
+  assert.ok(context.data.excerptPosterError);
+});
+
+test("poster download failure is retryable and late results cannot replace another selection", async () => {
+  let complete, attempts = 0;
+  mockModule("../services/authenticated-media.ts", { downloadAuthenticatedFile: async () => {
+    if (++attempts === 1) throw Error("小程序码暂时不可用");
+    return new Promise(resolve => { complete = resolve; });
+  } });
+  const context = excerptContext();
+  context.excerptToken = "x1.poster";
+  context.setData({ excerptMode: "preview", excerptContent: "奶奶坐在门口。", excerptPosterQuote: "奶奶坐在门口。" });
+  await context.generateExcerptPoster();
+  assert.match(context.data.excerptPosterError, /小程序码/);
+  assert.equal(context.data.excerptPosterBusy, false);
+  const pending = context.generateExcerptPoster();
+  context.editExcerptCard();
+  complete("/tmp/stale.jpg");
+  await pending;
+  assert.equal(context.data.excerptMode, "compose");
+  assert.equal(context.data.excerptPosterPath, "");
+  assert.equal(context.data.excerptPosterBusy, false);
+});
+
+test("poster album denial keeps the image available for retry, cancellation stays quiet", async () => {
+  const context = excerptContext();
+  context.setData({ excerptMode: "preview", excerptPosterPath: "/tmp/poster.jpg" });
+  global.wx.saveImageToPhotosAlbum = ({ fail }) => fail({ errMsg: "saveImageToPhotosAlbum:fail auth deny" });
+  await context.saveExcerptPoster();
+  assert.match(context.data.excerptPosterError, /相册权限/);
+  assert.equal(context.data.excerptPosterPath, "/tmp/poster.jpg");
+  assert.equal(context.data.excerptPosterSaving, false);
+  global.wx.saveImageToPhotosAlbum = ({ fail }) => fail({ errMsg: "saveImageToPhotosAlbum:fail cancel" });
+  await context.saveExcerptPoster();
+  assert.equal(context.data.excerptPosterError, "");
+});

@@ -78,6 +78,20 @@ export function saveVideoToAlbum(filePath: string): Promise<void> {
   });
 }
 
+export function saveImageToAlbum(filePath: string): Promise<void> {
+  return new Promise((resolve, reject) => wx.saveImageToPhotosAlbum({
+    filePath,
+    success: () => resolve(),
+    fail: (error) => {
+      const message = (error.errMsg || "").toLowerCase();
+      if (message.includes("cancel")) reject(new ShareFileMessageCancelError());
+      else if (message.includes("auth") || message.includes("privacy")) {
+        reject(new Error("没有相册权限，请在小程序设置里允许保存到相册后重试"));
+      } else reject(new Error(error.errMsg || "保存图片失败，请重试"));
+    },
+  }));
+}
+
 export function homeShareAppMessage(): WechatMiniprogram.ShareAppMessagePayload {
   return {
     title: HOME_SHARE_TITLE,

@@ -69,7 +69,7 @@ def _prompt_content(selected_text: str) -> str:
     return representative_excerpt(normalized, limit=MATERIAL_IMAGE_CONTENT_MAX_CHARS)
 
 
-def build_material_image_prompt(selected_text: str, style_id: str | None, *, background_note: str = "") -> tuple[str, str, str]:
+def build_material_image_prompt(selected_text: str, style_id: str | None, *, background_note: str = "", warm_paper: bool = False) -> tuple[str, str, str]:
     normalized_style = normalize_share_video_background_style(
         style_id or DEFAULT_SHARE_VIDEO_BACKGROUND_STYLE
     )
@@ -96,6 +96,8 @@ def build_material_image_prompt(selected_text: str, style_id: str | None, *, bac
 - 不添加没有依据的人物关系、关键动作、事件或时代符号；未说明的外貌、环境用简约、不具辨识性的画法，不能伪装成事实还原。
 - 不要出现任何文字、字幕、题字、印章、水印、logo 或现代 UI 元素。
 - 避免畸形人物、塑料质感、过度锐化、过度饱和、夸张电影光效和泛泛的 AI 插画感。""".strip()
+    if warm_paper:
+        prompt += "\n用于回忆录分享海报：画面四周使用接近 #fcf8f1 的暖米白纸底，笔触自然淡出到纸面，不画硬边框。保留所选绘画风格与故事主体的自然色彩。"
     if background_note.strip():
         prompt += image_narrator_block("", background_note)
     prompt_hash = sha256(
@@ -287,7 +289,7 @@ async def create_excerpt_image_generation_job(db: AsyncSession, *, user_id: str,
     style_id = normalize_share_video_background_style(style_id)
     model = get_settings().memoir_excerpt_image_model.strip()
     background_note = _normalized_text(background_note)
-    signature_parts = [version.id, content, style_id, model, MATERIAL_IMAGE_PROMPT_VERSION]
+    signature_parts = [version.id, content, style_id, model, MATERIAL_IMAGE_PROMPT_VERSION, "warm-paper-v1"]
     if background_note:
         signature_parts.append(background_note)
     signature = "excerpt:" + sha256("\0".join(signature_parts).encode()).hexdigest()
@@ -470,6 +472,7 @@ async def run_material_image_generation_job(
             asset.source_quote,
             asset.style_id,
             background_note=str((asset.metadata_json or {}).get("background_note") or ""),
+            warm_paper=asset.source_signature.startswith("excerpt:"),
         )
         extension = (settings.volc_ark_image_output_format.strip().lower() or "png").lstrip(".")
         storage_path = _storage_path(asset, extension)
