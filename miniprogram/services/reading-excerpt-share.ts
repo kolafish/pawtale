@@ -1,7 +1,7 @@
 import { createMemoirExcerptShare, readMemoirExcerptShare, suggestMemoirExcerptTitle, createMemoirExcerptImageJob, getMemoirIllustrationStyles } from "./memoir-book-api";
 import { excerptShareMessage, enableMiniProgramShareMenu, hideMiniProgramShareMenu } from "./share";
 import type { MemoirShareLikeTarget } from "../domain/memoir-share-likes";
-import { ApiError, cleanBaseUrl, readBackendConfig } from "./request";
+import { ApiError } from "./request";
 import type { MemoirExcerptShare } from "../domain/memoir-book";
 import { TranscriptMaterialImageController, initialTranscriptMaterialImageTaskState } from "./transcript-material-image";
 import { getMemoirMaterialImageGenerationJob } from "./memoir-transcript-api";
@@ -14,7 +14,7 @@ export const INITIAL_EXCERPT_DATA = {
   excerptStyle: "text" as "text" | "image", excerptImageSource: "ai" as "ai" | "photo",
   excerptBackgroundNote: "", excerptIllustrationStyle: "watercolor", excerptStyleOptions: [] as ReturnType<typeof illustrationStyleViews>,
   excerptPhotoIds: [] as string[], excerptAiAssetIds: [] as string[], excerptPhotoBusy: false,
-  excerptStoryImageUrl: "", excerptImageDisclosure: "", excerptReadingLink: null as MemoirExcerptShare["reading_link"],
+  excerptReadingLink: null as MemoirExcerptShare["reading_link"],
   excerptContent: "", excerptBookTitle: "", excerptChapterTitle: "",
   excerptImageUrl: "", excerptImageReady: false, excerptBusy: false, excerptSelectionCount: 0,
   excerptReloadRequired: false,
@@ -32,6 +32,7 @@ interface ExcerptHost {
   createSelectorQuery(): WechatMiniprogram.SelectorQuery;
   setData(patch: Partial<ExcerptHost["data"]>, callback?: () => void): void;
   loadChapterReader(projectId: string, chapterId: string): Promise<void>;
+  applyExcerptReading(excerpt: MemoirExcerptShare, generation: number): Promise<void>;
   loadShareLikes(target: MemoirShareLikeTarget): Promise<void>;
 }
 function methods<T extends object>(value: T & ThisType<ExcerptHost & T>): T { return value; }
@@ -233,16 +234,18 @@ export const readingExcerptMethods = methods({
   },
   async loadExcerptSnapshot() {
     const generation = ++this.excerptGeneration;
+    const readingGeneration = ++this.sharedReadGeneration;
     this.setData({ loading: true, error: "" });
     hideMiniProgramShareMenu();
     try {
       const excerpt = await readMemoirExcerptShare(this.excerptToken);
       if (generation !== this.excerptGeneration) return;
       this.setData({ excerptTitle: excerpt.title, excerptSummary: excerpt.summary,
-        excerptStoryImageUrl: excerpt.image_url ? `${cleanBaseUrl(readBackendConfig().httpBaseUrl)}${excerpt.image_url}` : "",
-        excerptImageDisclosure: excerpt.image_disclosure || "", excerptReadingLink: excerpt.reading_link || null,
+        excerptReadingLink: excerpt.reading_link || null,
         excerptContent: excerpt.content, excerptBookTitle: excerpt.book_title,
         excerptChapterTitle: excerpt.chapter_title, loading: false, excerptImageReady: true });
+      await this.applyExcerptReading(excerpt, readingGeneration);
+      if (generation !== this.excerptGeneration) return;
       enableMiniProgramShareMenu();
       await this.loadShareLikes({ reading_token: this.excerptToken });
     } catch (error) {

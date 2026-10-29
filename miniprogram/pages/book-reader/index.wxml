@@ -5,7 +5,7 @@
   </block>
   <text wx:else selectable>{{text}}</text>
 </template>
-<view wx:if="{{excerptMode === 'compose' || excerptMode === 'preview' || excerptMode === 'shared'}}" class="ui-page-shell {{pageClass}} excerpt-page">
+<view wx:if="{{excerptMode === 'compose' || excerptMode === 'preview'}}" class="ui-page-shell {{pageClass}} excerpt-page">
   <view wx:if="{{loading}}" class="reader-state">正在打开选文…</view>
   <block wx:elif="{{excerptMode === 'compose'}}">
     <text class="excerpt-eyebrow">分享这段故事</text>
@@ -53,34 +53,6 @@
       <button class="excerpt-share-button" open-type="{{excerptImageReady ? 'share' : ''}}" disabled="{{!excerptImageReady}}">分享给好友</button>
     </view>
   </block>
-  <block wx:elif="{{excerptContent}}">
-    <view class="excerpt-paper">
-      <text class="excerpt-eyebrow">分享的故事</text>
-      <text class="excerpt-title">{{excerptTitle}}</text>
-      <view wx:if="{{excerptStoryImageUrl}}" class="excerpt-story-image-shell"><image class="excerpt-story-image" src="{{excerptStoryImageUrl}}" mode="aspectFill" /></view>
-      <text wx:if="{{excerptStoryImageUrl && excerptImageDisclosure}}" class="excerpt-image-disclosure">AI背景图</text>
-      <view class="excerpt-quote"><text user-select="{{true}}">{{excerptContent}}</text></view>
-      <view class="excerpt-source-card {{excerptReadingLink && excerptReadingLink.scope === 'book' ? 'is-readable' : ''}}"
-        bindtap="openExcerptReading" aria-role="{{excerptReadingLink && excerptReadingLink.scope === 'book' ? 'link' : ''}}"
-        aria-label="选自《{{excerptBookTitle}}》，{{excerptChapterTitle}}{{excerptReadingLink && excerptReadingLink.scope === 'book' ? '，继续阅读这本回忆录' : ''}}"
-        hover-class="{{excerptReadingLink && excerptReadingLink.scope === 'book' ? 'excerpt-source-card-hover' : 'none'}}">
-        <view class="excerpt-source">
-          <image class="excerpt-source-icon" src="/assets/book-reader/hero-branch.png" mode="aspectFit" aria-hidden="true" />
-          <view class="excerpt-source-copy"><text class="excerpt-attribution">选自《{{excerptBookTitle}}》</text><text class="excerpt-source-chapter">{{excerptChapterTitle}}</text></view>
-        </view>
-        <view wx:if="{{excerptReadingLink && excerptReadingLink.scope === 'book'}}" class="excerpt-reading-link"><text class="excerpt-reading-label">继续阅读这本回忆录</text><text class="excerpt-reading-arrow" aria-hidden="true">→</text></view>
-      </view>
-    </view>
-    <view class="excerpt-origin">
-      <image src="/assets/memoir-microphone.png" mode="aspectFit" aria-hidden="true" />
-      <text>由讲述者亲口讲述 · 老余口述整理成书</text>
-    </view>
-    <view class="excerpt-reader-actions">
-      <button class="excerpt-reader-button is-primary" open-type="share">分享给好友</button>
-      <button class="excerpt-reader-button is-secondary" bindtap="openShareHome">我也想记录家人的故事</button>
-    </view>
-    <template is="shareLikeBar" data="{{shareLikeVisible, shareLiked, shareCanLike, shareLikeBusy, shareLikeAvatars, shareLikeText, shareLikeProfileMissing}}" />
-  </block>
   <view wx:if="{{error}}" class="reader-state error">
     <text>{{error}}</text>
     <button class="ui-share-more" bindtap="retryExcerpt">重试</button>
@@ -89,12 +61,12 @@
 <view wx:else class="ui-page-shell {{pageClass}} {{excerptMode === 'select' ? 'ui-fixed-action-page' : ''}}">
   <text wx:if="{{sharePreview}}" class="share-preview-notice">好友将看到这些内容</text>
   <view wx:if="{{loading}}" class="reader-state ui-card">
-    <text>正在打开成书...</text>
+    <text>{{excerptMode === 'shared' ? '正在打开选文…' : '正在打开成书...'}}</text>
   </view>
 
   <view wx:elif="{{error && (excerptMode !== 'select' || !bookPreviewChapters.length)}}" class="reader-state error ui-card">
     <text>{{error}}</text>
-    <button wx:if="{{excerptMode === 'select'}}" class="ui-share-more" bindtap="retryExcerpt">重新载入正文</button>
+    <button wx:if="{{excerptMode === 'select' || excerptMode === 'shared'}}" class="ui-share-more" bindtap="retryExcerpt">重新载入正文</button>
     <button wx:if="{{readerShared && shareRetryable}}" class="ui-share-primary" bindtap="retrySharedReading">重试</button>
     <button wx:if="{{readerShared}}" class="ui-share-more" bindtap="openShareHome">返回首页</button>
   </view>
@@ -110,7 +82,7 @@
         aria-hidden="true"
       />
       <view class="reader-cover-copy">
-        <text wx:if="{{readerMode === 'chapter'}}" class="reader-eyebrow">{{readerShared ? (shareScope === 'story' ? '一则故事' : '本章') : '整章预览'}}</text>
+        <text wx:if="{{readerMode === 'chapter'}}" class="reader-eyebrow">{{excerptMode === 'shared' ? '分享的故事' : (readerShared ? (shareScope === 'story' ? '一则故事' : '本章') : '整章预览')}}</text>
         <text class="reader-title">{{readerTitle}}</text>
         <text wx:if="{{shareByline}}" class="reader-subtitle">{{shareByline}}</text>
         <text wx:if="{{readerSubtitle}}" class="reader-subtitle">{{readerSubtitle}}</text>
@@ -121,7 +93,7 @@
         </text>
         <text wx:if="{{bookVersionNotice}}" class="reader-notice subtle">{{bookVersionNotice}}</text>
         <view
-          wx:if="{{excerptMode !== 'select' && (!readerShared || (!sharePreview && !readerDemo))}}"
+          wx:if="{{!excerptMode && (!readerShared || (!sharePreview && !readerDemo))}}"
           class="reader-audio-action ui-block-action ui-pressable {{bookViewingHistoricalVersion ? 'is-disabled' : ''}}"
           aria-role="button"
           aria-disabled="{{bookViewingHistoricalVersion}}"
@@ -271,9 +243,21 @@
     </view>
 
     <view wx:if="{{shareAfterword && readerChapterIndex === readerChapterTotal - 1}}" class="reader-section ui-card"><text class="section-label">后记</text><text class="book-content" selectable>{{shareAfterword}}</text></view>
+    <block wx:if="{{excerptMode === 'shared'}}">
+      <view class="excerpt-source-card {{excerptReadingLink && excerptReadingLink.scope === 'book' ? 'is-readable' : ''}}"
+        bindtap="openExcerptReading" aria-role="{{excerptReadingLink && excerptReadingLink.scope === 'book' ? 'link' : ''}}"
+        aria-label="选自《{{excerptBookTitle}}》，{{excerptChapterTitle}}{{excerptReadingLink && excerptReadingLink.scope === 'book' ? '，继续阅读这本回忆录' : ''}}"
+        hover-class="{{excerptReadingLink && excerptReadingLink.scope === 'book' ? 'excerpt-source-card-hover' : 'none'}}">
+        <view class="excerpt-source">
+          <image class="excerpt-source-icon" src="/assets/book-reader/hero-branch.png" mode="aspectFit" aria-hidden="true" />
+          <view class="excerpt-source-copy"><text class="excerpt-attribution">选自《{{excerptBookTitle}}》</text><text class="excerpt-source-chapter">{{excerptChapterTitle}}</text></view>
+        </view>
+        <view wx:if="{{excerptReadingLink && excerptReadingLink.scope === 'book'}}" class="excerpt-reading-link"><text class="excerpt-reading-label">继续阅读这本回忆录</text><text class="excerpt-reading-arrow" aria-hidden="true">→</text></view>
+      </view>
+    </block>
     <template is="shareLikeBar" data="{{shareLikeVisible, shareLiked, shareCanLike, shareLikeBusy, shareLikeAvatars, shareLikeText, shareLikeProfileMissing, shareForward: readerShared && !sharePreview && !readerDemo}}" />
   </block>
-  <view wx:if="{{readerShared && !sharePreview && !readerDemo}}" hidden="{{loading || error}}">
+  <view wx:if="{{readerShared && !excerptMode && !sharePreview && !readerDemo}}" hidden="{{loading || error}}">
     <share-response-form id="shared-response" reading-token="{{responseToken}}" active="{{!loading && !error}}" bindunavailable="onResponseUnavailable" />
   </view>
 
@@ -285,7 +269,7 @@
         class="reader-top-action ui-pressable"
         aria-role="button"
         bindtap="scrollReaderToTop"
-      >↑ {{readerMode === "chapter" ? "回到章首" : "回到目录"}}</view>
+      >↑ {{excerptMode === "shared" ? "回到开头" : (readerMode === "chapter" ? "回到章首" : "回到目录")}}</view>
     </view>
   </block>
 </view>
