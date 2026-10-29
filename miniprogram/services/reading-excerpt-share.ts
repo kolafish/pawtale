@@ -202,7 +202,7 @@ export const readingExcerptMethods = methods({
       this.setData({ excerptMode: "preview", excerptTitle: share.title, excerptSummary: share.summary, excerptContent: share.content,
         excerptBookTitle: share.book_title, excerptChapterTitle: share.chapter_title,
         excerptImageUrl: excerptShareMessage(share.token, share.title).imageUrl || "", excerptImageReady: false,
-        excerptOutput: "card", excerptPosterQuote: Array.from(share.content).slice(0, 120).join(""),
+        excerptOutput: "card", excerptPosterQuote: share.content,
         excerptPosterPath: "", excerptPosterError: "" },
         () => wx.pageScrollTo?.({ scrollTop: 0, duration: 0 }));
     } catch (error) {
@@ -230,8 +230,8 @@ export const readingExcerptMethods = methods({
   async generateExcerptPoster() {
     if (this.data.excerptMode !== "preview" || !this.excerptToken || this.data.excerptPosterBusy) return;
     const quote = this.data.excerptPosterQuote.trim();
-    if (!quote || Array.from(quote).length > 120 || !this.data.excerptContent.includes(quote)) {
-      this.setData({ excerptPosterError: "请从完整选文中保留一段 1–120 字的连续原文。" });
+    if (!quote || Array.from(quote).length > 512 || !this.data.excerptContent.includes(quote)) {
+      this.setData({ excerptPosterError: "请从完整选文中保留一段 1–512 字的连续原文。" });
       return;
     }
     const generation = this.excerptGeneration;

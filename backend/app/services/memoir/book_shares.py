@@ -513,8 +513,8 @@ async def excerpt_share_poster(db: AsyncSession, token: str, *, user_id: str, qu
     if project is None or project.user_id != user_id:
         raise HTTPException(404, "分享链接已失效")
     quote = quote.strip()
-    if not quote or len(quote) > 120 or quote not in share.content:
-        raise HTTPException(422, "请从完整选文中保留一段 1–120 字的连续原文")
+    if not quote or len(quote) > 512 or quote not in share.content:
+        raise HTTPException(422, "请从完整选文中保留一段 1–512 字的连续原文")
     asset = await _excerpt_image(db, share)
     picture = None
     if asset:

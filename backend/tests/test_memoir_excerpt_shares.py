@@ -304,10 +304,12 @@ async def test_excerpt_image_reuses_jobs_styles_and_asset_management_with_single
     assert (await client.post(path + "/image-jobs", json={**payload, "background_note": "我" * 301})).status_code == 422
 
 
-async def test_poster_uses_only_confirmed_quote_and_code_opens_same_excerpt(client, test_db, monkeypatch):
+@pytest.mark.parametrize("selected", ["院子里的正文", "回忆🌿。" * 128])
+async def test_poster_uses_only_confirmed_quote_and_code_opens_same_excerpt(client, test_db, monkeypatch, selected):
     from app.services import wechat_miniprogram_code
     project_id, chapter, _, version, _, _, _ = await saved_stories(client, test_db)
-    selected = "院子里的正文"
+    version.content = selected + "另一则私密正文"
+    await test_db.commit()
     snapshot = (await client.post(f"/api/mobile/memoir/projects/{project_id}/chapters/{chapter.id}/excerpt-shares",
                                  json={"version_id": version.id, "content": selected, "title": "一家人的院子"})).json()
     code_calls = []
@@ -325,7 +327,7 @@ async def test_poster_uses_only_confirmed_quote_and_code_opens_same_excerpt(clie
         assert (await guest.get(path, params=params)).status_code == 401
     async with await _family_member(test_db, "另一位用户") as other:
         assert (await other.get(path, params=params)).status_code == 404
-    for quote in ("", "改写后的句子", "字" * 121):
+    for quote in ("", "改写后的句子", "字" * 513):
         assert (await client.get(path, params={"quote": quote})).status_code == 422
     assert not code_calls
     drawn = []
@@ -335,7 +337,8 @@ async def test_poster_uses_only_confirmed_quote_and_code_opens_same_excerpt(clie
     assert response.status_code == 200, response.text if response.status_code != 200 else ""
     assert response.headers["cache-control"] == "no-store"
     with Image.open(BytesIO(response.content)) as poster:
-        assert poster.size == (1200, 1600) and poster.format == "JPEG"
+        assert poster.width == 1200 and poster.format == "JPEG"
+        assert poster.height > 1600 if len(selected) > 120 else poster.height == 1600
     assert selected in drawn and "一家人的院子" in drawn
     assert "另一则私密正文" not in "".join(drawn)
     assert code_calls == [{"path": f'pages/book-reader/index?excerptToken={snapshot["token"]}', "width": 280}]
@@ -348,19 +351,24 @@ async def test_poster_uses_only_confirmed_quote_and_code_opens_same_excerpt(clie
     assert (await client.get(path, params=params)).status_code == 503
 
 
-def test_poster_preserves_photo_frame_and_fades_only_illustration_edges():
+def test_poster_preserves_photo_colors_and_blends_both_image_sources_into_tinted_paper():
     picture, code = BytesIO(), BytesIO()
     Image.new("RGB", (600, 400), "#243c74").save(picture, "PNG")
     Image.new("RGB", (280, 280), "black").save(code, "PNG")
     posters = [reading_share_card.render_excerpt_share_poster(title="长标题" * 13, book_title="长书名" * 20,
-        quote="原文" * 60, image_content=picture.getvalue(), code_content=code.getvalue(), ai_image=ai) for ai in (False, True)]
+        quote="原文" * 60, image_content=picture.getvalue(), code_content=code.getvalue(), ai_image=ai,
+        caption="2003 年，我和奶奶") for ai in (False, True)]
     with Image.open(BytesIO(posters[0])) as photo, Image.open(BytesIO(posters[1])) as illustration:
         assert photo.size == illustration.size
         assert photo.width == 1200 and photo.height > 1600
         assert max(abs(a-b) for a,b in zip(photo.getpixel((600, 650)), (36, 60, 116))) < 5
-        # Both preserve the image center; only the illustration fades at its top edge.
+        # Both preserve the center and blend the perimeter into the same light blue paper.
         assert max(abs(a-b) for a,b in zip(illustration.getpixel((600, 650)), (36, 60, 116))) < 5
-        assert sum(illustration.getpixel((600, 412))) > sum(photo.getpixel((600, 412))) + 200
+        for poster in (photo, illustration):
+            paper = poster.getpixel((10, 10))
+            assert min(paper) > 220 and paper[2] > paper[0]
+            assert sum(poster.getpixel((600, 412))) > sum(poster.getpixel((600, 650))) + 200
+        assert photo.getpixel((10, 10)) == illustration.getpixel((10, 10))
 
 
 @pytest.mark.parametrize("with_image", [False, True])
@@ -380,7 +388,7 @@ def test_long_posters_grow_without_shrinking_text_or_the_scan_code(monkeypatch, 
 
     monkeypatch.setattr(ImageDraw.ImageDraw, "text", draw_text)
     sizes, code_boxes, font_sizes = [], [], []
-    for quote in ["忆" * 20, "忆" * 120]:
+    for quote in ["忆" * 20, "忆" * 512]:
         drawn.clear()
         result = reading_share_card.render_excerpt_share_poster(
             title="家里的往事", book_title="回忆录", quote=quote, code_content=code.getvalue(),
@@ -414,3 +422,28 @@ def test_poster_quote_wraps_punctuation_with_its_words():
     assert "".join(lines) == quote
     assert all(line[0] not in '，。！？；：、”’）' and line[-1] not in '“‘（' for line in lines)
     assert all(font.getlength(line) <= 984 for line in lines)
+
+
+def test_card_and_poster_share_light_edge_tints_without_recoloring_the_subject():
+    from PIL import ImageDraw
+
+    code = BytesIO()
+    Image.new("RGB", (280, 280), "black").save(code, "PNG")
+    papers = []
+    for color in ("#6e859b", "#a36e81"):
+        picture = Image.new("RGB", (600, 400), color)
+        ImageDraw.Draw(picture).rectangle((60, 40, 540, 360), fill="#967349")
+        buffer = BytesIO()
+        picture.save(buffer, "PNG")
+        card = reading_share_card.render_excerpt_share_card(book_title="回忆录", chapter_title="童年", content="回忆",
+                                                           image_content=buffer.getvalue())
+        poster = reading_share_card.render_excerpt_share_poster(title="童年", book_title="回忆录", quote="回忆",
+            code_content=code.getvalue(), image_content=buffer.getvalue())
+        with Image.open(BytesIO(card)) as small, Image.open(BytesIO(poster)) as large:
+            paper = large.getpixel((10, 10))
+            assert max(abs(a-b) for a, b in zip(paper, small.getpixel((10, 10)))) <= 3
+            assert min(paper) > 220
+            assert max(abs(a-b) for a, b in zip(large.getpixel((600, 650)), (150, 115, 73))) <= 3
+            papers.append(paper)
+    assert papers[0][2] > papers[0][0]  # blue edge, despite the warm subject
+    assert papers[1][0] > papers[1][2]  # pink edge
