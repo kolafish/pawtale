@@ -475,6 +475,7 @@ async def _excerpt_response(db: AsyncSession, share: MemoirExcerptShare, token: 
         book_title=share.book_title, chapter_title=share.chapter_title, content=share.content,
         image_url=f"/api/mobile/memoir/excerpt-shares/{token}/image" if asset else "",
         image_disclosure=str((asset.metadata_json or {}).get("disclosure") or "") if asset and asset.provider != "user_upload" else "",
+        image_caption=asset.caption or "" if asset and asset.provider == "user_upload" else "",
         reading_link=await _excerpt_reading_link(db, share))
 
 
@@ -499,7 +500,8 @@ async def excerpt_share_card(db: AsyncSession, token: str) -> bytes:
         image = await asyncio.to_thread(path.read_bytes)
     return await asyncio.to_thread(render_excerpt_share_card, book_title=share.book_title,
         chapter_title=share.chapter_title, content=share.content, summary=share.summary,
-        image_content=image, ai_image=bool(asset and asset.provider != "user_upload"))
+        image_content=image, ai_image=bool(asset and asset.provider != "user_upload"),
+        caption=asset.caption or "" if asset and asset.provider == "user_upload" else "")
 
 
 async def excerpt_share_poster(db: AsyncSession, token: str, *, user_id: str, quote: str) -> bytes:
@@ -525,7 +527,8 @@ async def excerpt_share_poster(db: AsyncSession, token: str, *, user_id: str, qu
         raise HTTPException(503, "小程序码生成失败，请稍后重试") from exc
     return await asyncio.to_thread(render_excerpt_share_poster, title=share.title or share.chapter_title,
         book_title=share.book_title, quote=quote, code_content=code,
-        image_content=picture, ai_image=bool(asset and asset.provider != "user_upload"))
+        image_content=picture, ai_image=bool(asset and asset.provider != "user_upload"),
+        caption=asset.caption or "" if asset and asset.provider == "user_upload" else "")
 
 
 async def shared_card(db: AsyncSession, token: str, *, version_id: str = "", excerpt_start: int = 0, excerpt_length: int = 0) -> bytes:

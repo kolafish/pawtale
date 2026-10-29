@@ -109,6 +109,9 @@
         </view>
       </view>
 
+      <photo-caption-editor wx:if="{{item.source_type === 'manual_upload'}}" project-id="{{projectId}}" asset-id="{{item.id}}" caption="{{item.caption}}"
+        disabled="{{!!placingTarget || !!deletingTarget}}" bindsaved="onPhotoCaptionSaved" />
+
       <view class="asset-placement-summary">
         <text class="asset-status {{item.include_in_book ? 'included' : ''}}">{{item.include_in_book ? '✓ 已入书' : item.statusText}}</text>
         <text wx:if="{{item.include_in_book}}" class="asset-placement">{{item.placementText}}</text>

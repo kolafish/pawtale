@@ -217,6 +217,13 @@ async def test_excerpt_photo_uses_managed_asset_and_honors_deletion(client, test
     assert created.status_code == 200, created.text
     snapshot = created.json()
     assert snapshot["image_url"] and snapshot["image_disclosure"] == ""
+    assert snapshot["image_caption"] == ""
+    photo_path = f'/api/mobile/memoir/projects/{project_id}/image-assets/{asset["id"]}'
+    assert (await client.patch(photo_path, json={"caption": "爸爸和奶奶，1982 年"})).status_code == 200
+    updated = (await client.post("/api/mobile/memoir/excerpt-shares/read", json={"token": snapshot["token"]})).json()
+    assert updated["image_caption"] == "爸爸和奶奶，1982 年"
+    assert updated["image_disclosure"] == ""
+
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as guest:
         assert (await guest.get(snapshot["image_url"])).status_code == 200
         card = await guest.get(f'/api/mobile/memoir/excerpt-shares/{snapshot["token"]}/card.jpg')

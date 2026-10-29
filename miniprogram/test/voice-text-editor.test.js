@@ -327,3 +327,10 @@ for (const ending of ["silence", "manual"]) {
     assert.equal(context.events.filter(e => e.name === "submit").at(-1).detail.value, "已有意见。\n童年记忆换个名字。");
   });
 }
+
+test("optional text fields can clear saved content without allowing empty ordinary submissions", () => {
+  const { component } = loadComponentModule("../components/voice-text-editor/index.ts");
+  const context = componentContext(component, { voiceEnabled: false, allowEmpty: true });
+  context.submit();
+  assert.deepEqual(context.events, [{ name: "submit", detail: { value: "" } }]);
+});

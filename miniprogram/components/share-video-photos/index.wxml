@@ -38,6 +38,11 @@
 <text wx:elif="{{photos.length > 1}}" class="photo-status muted">照片按顺序配给每句话，长按拖动调整顺序</text>
 <text wx:else class="photo-status muted">可以选家里的老照片、旧物或地点，这段最多放 {{maxCount}} 张</text>
 
+<block wx:for="{{photos}}" wx:key="id">
+  <photo-caption-editor wx:if="{{editCaptions && item.uploaded}}" project-id="{{projectId}}" asset-id="{{item.id}}" caption="{{item.caption}}"
+    label="{{photos.length > 1 ? '第 ' + (index + 1) + ' 张照片说明' : '照片说明'}}" disabled="{{disabled || busy}}" bindsaved="onPhotoCaptionSaved" bindbusy="onPhotoCaptionBusy" />
+</block>
+
 <view wx:if="{{pickerOpen}}" class="picker-mask" catchtouchmove="keepPageStill" bindtap="closePicker"></view>
 <view wx:if="{{pickerOpen}}" class="picker-sheet">
   <view class="picker-head">

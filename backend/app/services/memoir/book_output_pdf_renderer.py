@@ -429,7 +429,7 @@ class PDFBookBuilder:
         self.body_page_count = 0
         self.y = 0
         self.wrapped_image: PDFImageCommand | None = None
-        self.pending_wrapped_images: list[Path] = []
+        self.pending_wrapped_images: list[tuple[Path, str]] = []
 
     def _content_left(self) -> int:
         if not self.current_page or not self.layout.mirror_body_pages:
@@ -540,33 +540,40 @@ class PDFBookBuilder:
         max_height: int | None = None,
         wrap_right: bool = False,
         wrap_max_height: float | None = None,
+        caption: str = "",
     ) -> bool:
         if not image_path.exists() or not image_path.is_file():
             return False
-        if wrap_right:
+        content_width = self.layout.page_width - self.layout.margin_x * 2
+        # Long photo notes need the full column, rather than a very tall float.
+        if wrap_right and len(self._image_caption_lines(caption, content_width * 0.38)) <= 6:
             with Image.open(image_path) as source:
                 width, height = ImageOps.exif_transpose(source).size
             if height > width:
                 if self.wrapped_image:
-                    self.pending_wrapped_images.append(image_path)
+                    self.pending_wrapped_images.append((image_path, caption))
                     return True
                 content_width = self.layout.page_width - self.layout.margin_x * 2
                 image_width = content_width * 0.38
                 image_height = image_width * height / width
-                available_height = self.layout.page_height - self.layout.margin_top - self.layout.margin_bottom - self.layout.line_height
+                caption_width = image_width
+                caption_height = self._image_caption_height(caption, image_width)
+                available_height = self.layout.page_height - self.layout.margin_top - self.layout.margin_bottom - self.layout.line_height - caption_height
                 if wrap_max_height is not None:
-                    available_height = min(available_height, wrap_max_height)
+                    available_height = min(available_height, max(40, wrap_max_height - caption_height))
                 if image_height > available_height:
                     image_width *= available_height / image_height
                     image_height = available_height
-                self._ensure_space_height(image_height - self.layout.font_size + 8)
+                self._ensure_space_height(image_height + caption_height - self.layout.font_size + 8)
                 image = PDFImageCommand(
-                    path=image_path, x=self._content_left() + content_width - image_width,
+                    path=image_path, x=self._content_left() + content_width - caption_width + (caption_width - image_width) / 2,
                     y=self.y + self.layout.font_size - image_height,
                     width=image_width, height=image_height,
                 )
                 self._ensure_page().images.append(image)
-                self.wrapped_image = image
+                caption_x = self._content_left() + content_width - caption_width
+                self._add_image_caption(caption, caption_x, image.y, caption_width)
+                self.wrapped_image = replace(image, x=caption_x, width=caption_width, y=image.y - caption_height, height=image.height + caption_height)
                 return True
         self.finish_image_wrap()
         width_ratio = 1.0
@@ -576,44 +583,81 @@ class PDFBookBuilder:
             width_ratio = 0.82
         box_width = int((self.layout.page_width - self.layout.margin_x * 2) * width_ratio)
         box_height = max_height or min(220, int(self.layout.page_height * 0.34))
-        self._ensure_space_height(box_height + 18)
+        caption_height = self._image_caption_height(caption, box_width)
+        box_height = min(box_height, self.layout.page_height - self.layout.margin_top - self.layout.margin_bottom - caption_height - 18)
+        if caption:
+            with Image.open(image_path) as source:
+                width, height = ImageOps.exif_transpose(source).size
+            box_height = min(box_height, box_width * height / width)
+        self._ensure_space_height(box_height + caption_height + 18)
         page = self._ensure_page()
         x = self._content_left() + int(
             (self.layout.page_width - self.layout.margin_x * 2 - box_width) / 2
         )
         y = self.y - box_height
         page.images.append(PDFImageCommand(path=image_path, x=x, y=y, width=box_width, height=box_height))
-        self.y = y - 15
+        self._add_image_caption(caption, x, y, box_width)
+        self.y = y - caption_height - 15
         return True
 
-    def add_image_gallery(self, paths: list[Path]) -> None:
-        """Fit complete images into two columns; paginate by row, not by gallery."""
+    def _add_pending_image(self) -> None:
+        path, caption = self.pending_wrapped_images.pop(0)
+        self.add_image(path, wrap_right=True, caption=caption)
+
+    def _image_caption_lines(self, caption: str, width: float) -> list[str]:
+        return _wrap_pdf_line(" ".join(caption.split()), max(2, int(width / self.layout.small_font_size))) if caption.strip() else []
+
+    def _image_caption_height(self, caption: str, width: float) -> float:
+        lines = self._image_caption_lines(caption, width)
+        return len(lines) * (self.layout.small_font_size * 1.5) + 6 if lines else 0
+
+    def _add_image_caption(self, caption: str, x: float, bottom: float, width: float) -> None:
+        size = self.layout.small_font_size
+        for index, line in enumerate(self._image_caption_lines(caption, width)):
+            self._ensure_page().commands.append(PDFTextCommand(
+                text=line, x=x + (width - _estimated_text_width(line, size)) / 2,
+                y=bottom - 6 - size - index * size * 1.5, font_size=size,
+                color=(0.416, 0.376, 0.349),
+            ))
+
+    def add_image_gallery(self, paths: list[Path], *, captions: list[str] | None = None) -> None:
+        """Keep every caption with its image; paginate complete rows."""
         self.finish_image_wrap()
         content_width = self.layout.page_width - self.layout.margin_x * 2
         gap = self.layout.font_size
         column_width = (content_width - gap) / 2
-        max_height = min(content_width * 0.65, self.layout.page_height - self.layout.margin_top - self.layout.margin_bottom - 18)
+        page_height = self.layout.page_height - self.layout.margin_top - self.layout.margin_bottom - 18
         for offset in range(0, len(paths), 2):
+            row_captions = captions[offset:offset + 2] if captions else []
+            if any(self._image_caption_height(caption, column_width) > page_height / 2 for caption in row_captions):
+                for path, caption in zip(paths[offset:offset + 2], row_captions):
+                    self.add_image(path, caption=caption)
+                continue
             row = []
-            for path in paths[offset:offset + 2]:
+            for index, path in enumerate(paths[offset:offset + 2], start=offset):
+                caption = captions[index] if captions else ""
+                caption_height = self._image_caption_height(caption, column_width)
                 with Image.open(path) as source:
                     width, height = ImageOps.exif_transpose(source).size
-                scale = min(column_width / width, max_height / height)
-                row.append((path, width * scale, height * scale))
-            row_height = max(height for _, _, height in row)
+                scale = min(column_width / width, min(content_width * 0.65, page_height - caption_height) / height)
+                row.append((path, width * scale, height * scale, caption, caption_height))
+            row_height = max(height + caption_height for _, _, height, _, caption_height in row)
             available_height = self.y - self.layout.margin_bottom - 18
             # A small proportional reduction avoids leaving a nearly usable page empty.
             if row_height * 0.75 <= available_height < row_height:
-                scale = available_height / row_height
-                row = [(path, width * scale, height * scale) for path, width, height in row]
-                row_height = available_height
+                scale = min((available_height - ch) / height for _, _, height, _, ch in row)
+                if scale > 0:
+                    row = [(path, width * scale, height * scale, caption, ch) for path, width, height, caption, ch in row]
+                    row_height = max(height + ch for _, _, height, _, ch in row)
             self._ensure_space_height(row_height + 18)
-            for column, (path, width, height) in enumerate(row):
+            for column, (path, width, height, caption, _) in enumerate(row):
                 slot_left = (content_width - column_width) / 2 if len(row) == 1 else column * (column_width + gap)
+                x = self._content_left() + slot_left
                 self._ensure_page().images.append(PDFImageCommand(
-                    path=path, x=self._content_left() + slot_left + (column_width - width) / 2,
+                    path=path, x=x + (column_width - width) / 2,
                     y=self.y - height, width=width, height=height,
                 ))
+                self._add_image_caption(caption, x, self.y - height, column_width)
             self.y -= row_height + 18
         if paths:
             self.y -= self.layout.line_height / 2
@@ -623,7 +667,7 @@ class PDFBookBuilder:
             self.y = min(self.y, self.wrapped_image.y - self.layout.line_height)
             self.wrapped_image = None
             if self.pending_wrapped_images:
-                self.add_image(self.pending_wrapped_images.pop(0), wrap_right=True)
+                self._add_pending_image()
 
     def add_spacer(self, lines: float = 1.0) -> None:
         self._ensure_space(1)
@@ -699,13 +743,13 @@ class PDFBookBuilder:
                 if self.y + self.layout.font_size <= self.wrapped_image.y - 8:
                     self.wrapped_image = None
                     if self.pending_wrapped_images:
-                        self.add_image(self.pending_wrapped_images.pop(0), wrap_right=True)
+                        self._add_pending_image()
                     else:
                         break
                 self._ensure_space_height(self.layout.line_height)
                 if not self.wrapped_image:
                     if self.pending_wrapped_images:
-                        self.add_image(self.pending_wrapped_images.pop(0), wrap_right=True)
+                        self._add_pending_image()
                     else:
                         break
                 # Leave one em between text and the image, including punctuation.

@@ -81,7 +81,7 @@ type BookReaderData = ReaderData & BookTTSState & ShareLikeData & typeof INITIAL
   readerDemo: boolean;
   sharePreview: boolean;
   shareScope: "book" | "chapter" | "story";
-  shareImages: { id: string; chapterId: string; sectionId: string; paragraphBefore: number; paragraphCount: number; position: string; portrait: boolean; aspectRatio: number; galleryHeight: number; url: string; disclosure: string }[];
+  shareImages: { id: string; chapterId: string; sectionId: string; paragraphBefore: number; paragraphCount: number; position: string; portrait: boolean; aspectRatio: number; galleryHeight: number; url: string; caption?: string; disclosure: string }[];
   imageGallerySections: Record<string, boolean>;
   shareCoverUrl: string;
   shareByline: string;
@@ -832,11 +832,11 @@ definePage<BookReaderData>()({
     });
     await this.loadReadingImages([{ chapter_id: "excerpt", illustrations: excerpt.image_url ? [{
       image_asset_id: "excerpt", image_url: excerpt.image_url, placement: "chapter_inline", section_id: "excerpt",
-      inline_position: "before", disclosure: excerpt.image_disclosure || "",
+      inline_position: "before", disclosure: excerpt.image_disclosure || "", caption: excerpt.image_caption || "",
     }] : [] }], false, generation);
   },
 
-  async loadReadingImages(chapters: { chapter_id: string; illustrations: Pick<MemoirBookManuscriptIllustration, "image_asset_id" | "image_url" | "placement" | "section_id" | "inline_position" | "disclosure">[] }[], privateImages: boolean, generation: number) {
+  async loadReadingImages(chapters: { chapter_id: string; illustrations: Pick<MemoirBookManuscriptIllustration, "image_asset_id" | "image_url" | "placement" | "section_id" | "inline_position" | "disclosure" | "caption">[] }[], privateImages: boolean, generation: number) {
     const images = await Promise.all(chapters.flatMap(chapter => chapter.illustrations.map(async item => {
       const sectionId = item.placement === "chapter_opening" ? "" : item.section_id || "";
       const section = this.bookChapters.find(c => c.chapterId === chapter.chapter_id)?.sections.find(s => s.id === sectionId);
@@ -846,7 +846,7 @@ definePage<BookReaderData>()({
       return { id: item.image_asset_id, chapterId: chapter.chapter_id, sectionId,
         paragraphBefore: position === "before" ? 0 : position === "middle" ? Math.ceil(count / 2) : count,
         paragraphCount: count, position, portrait: true, aspectRatio: 16 / 9, galleryHeight: 0,
-        url, disclosure: item.disclosure };
+        url, caption: item.disclosure ? "AI 意象插图" : (item.caption || "").replace(/\s+/g, " ").trim(), disclosure: item.disclosure };
     })));
     if (generation === this.sharedReadGeneration) this.layoutReadingImages(images.filter(item => Boolean(item.url)));
   },
@@ -881,7 +881,11 @@ definePage<BookReaderData>()({
         .sort((a, b) => b.paragraphBefore - a.paragraphBefore);
       let requiredUnits = 0;
       for (const image of portraits) {
-        const imageHeight = contentWidth * 0.35 * image.aspectRatio + 28 + (image.disclosure ? (large ? 32 : 29) * 1.4 + 8 : 0);
+        const caption = image.caption || (image.disclosure ? "AI 意象插图" : "");
+        const captionSize = large ? 32 : 29;
+        const captionUnits = Array.from(caption).reduce((sum, char) => sum + (char.charCodeAt(0) < 128 ? 0.55 : 1), 0);
+        const captionLines = Math.ceil(captionUnits / Math.floor(contentWidth * 0.35 / captionSize));
+        const imageHeight = contentWidth * 0.35 * image.aspectRatio + 28 + (caption ? captionLines * captionSize * 1.5 + 8 : 0);
         requiredUnits += Math.ceil(imageHeight / lineHeight) * lineUnits;
         const remainingUnits = Array.from(section.paragraphs.slice(image.paragraphBefore).join("").replace(/\s/g, ""))
           .reduce((sum, char) => sum + (char.charCodeAt(0) < 128 ? 0.55 : 1), 0);

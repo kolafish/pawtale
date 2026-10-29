@@ -1,3 +1,4 @@
+import type { MemoirImageAsset } from "../../domain/memoir-book";
 import { chooseImageFiles } from "../../services/authenticated-media";
 import {
   downloadMemoirImageAssetFile,
@@ -8,6 +9,8 @@ import {
 interface PhotoView {
   id: string;
   path: string;
+  caption?: string;
+  uploaded?: boolean;
 }
 
 interface PickerItem extends PhotoView {
@@ -51,11 +54,13 @@ Component({
     photoIds: { type: Array, value: [] },
     maxCount: { type: Number, value: 20 },
     disabled: { type: Boolean, value: false },
+    editCaptions: { type: Boolean, value: false },
   },
 
   data: {
     photos: [] as PhotoView[],
     paths: {} as Record<string, string>,
+    assets: {} as Record<string, { caption: string; uploaded: boolean }>,
     busy: false,
     statusText: "",
     dragIndex: -1,
@@ -69,7 +74,7 @@ Component({
   observers: {
     photoIds(value: unknown) {
       const ids = value as string[];
-      this.setData({ photos: ids.map((id) => ({ id, path: this.data.paths[id] || "" })) });
+      this.setData({ photos: ids.map((id) => ({ id, path: this.data.paths[id] || "", ...this.data.assets[id] })) });
       void this.loadPaths(ids);
     },
   },
@@ -97,7 +102,30 @@ Component({
       });
     },
 
+    rememberAssets(items: MemoirImageAsset[]) {
+      const assets = { ...this.data.assets };
+      for (const asset of items) assets[asset.id] = { caption: asset.caption || "", uploaded: asset.source_type === "manual_upload" };
+      this.setData({ assets, photos: this.data.photos.map(photo => ({ ...photo, ...assets[photo.id] })) });
+    },
+
+    onPhotoCaptionBusy(event: { detail: { busy: boolean } }) {
+      this.setBusy(event.detail.busy, event.detail.busy ? "正在保存照片说明" : "");
+    },
+
+    onPhotoCaptionSaved(event: { detail: { asset: MemoirImageAsset } }) {
+      this.rememberAssets([event.detail.asset]);
+      this.emitChange(this.ids());
+    },
+
     async loadPaths(ids: string[]) {
+      if (this.properties.editCaptions && ids.some(id => !this.data.assets[id])) {
+        try {
+          const { items } = await listMemoirImageAssets(this.properties.projectId);
+          this.rememberAssets(items);
+        } catch (error) {
+          this.triggerEvent("error", { message: errorMessage(error, "照片说明读取失败，请重新打开") });
+        }
+      }
       for (const id of ids) {
         if (this.data.paths[id]) continue;
         try {
@@ -140,6 +168,7 @@ Component({
         try {
           const asset = await uploadMemoirImageAsset(this.properties.projectId, file);
           // The picked file already is a local preview of what was uploaded.
+          this.rememberAssets([asset]);
           this.rememberPath(asset.id, file);
           added.push(asset.id);
         } catch (error) {
@@ -158,6 +187,7 @@ Component({
       this.setData({ pickerOpen: true, pickerLoading: true, pickerItems: [], pickerCount: 0 });
       try {
         const { items } = await listMemoirImageAssets(this.properties.projectId);
+        this.rememberAssets(items);
         const chosen = this.ids();
         const pickerItems = items
           .filter((asset) => asset.status === "ready")

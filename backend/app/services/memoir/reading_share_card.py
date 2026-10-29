@@ -41,6 +41,19 @@ def _text(image: Image.Image, text: str, box: tuple[int, int, int, int], *, size
         y += height
 
 
+def _caption_height(text: str, *, width: int) -> int:
+    if not text:
+        return 0
+    font = ImageFont.truetype(str(_ASSETS / "fonts" / "NotoSerifSC-Regular.ttf"), 22)
+    lines, line = 1, ""
+    for char in text:
+        if line and font.getlength(line + char) > width:
+            lines += 1
+            line = ""
+        line += char
+    return lines * 34 + 8
+
+
 @lru_cache(maxsize=64)
 def render_reading_share_card(*, title: str, book_title: str, is_book: bool,
                               chapter_count: int = 0, char_count: int = 0, excerpt: str = "") -> bytes:
@@ -61,7 +74,7 @@ def render_reading_share_card(*, title: str, book_title: str, is_book: bool,
 
 
 def render_excerpt_share_card(*, book_title: str, chapter_title: str, content: str,
-                              summary: str = "", image_content: bytes | None = None, ai_image: bool = False) -> bytes:
+                              summary: str = "", image_content: bytes | None = None, ai_image: bool = False, caption: str = "") -> bytes:
     image = Image.new("RGB", (1000, 800), "#fcf8f1")
     _text(image, "老余口述 · 一个家庭的回忆录", (56, 24, 944, 80), size=32, align="left")
     # Older snapshots have no confirmed summary; retain a bounded original-text teaser.
@@ -69,12 +82,13 @@ def render_excerpt_share_card(*, book_title: str, chapter_title: str, content: s
     limit = min(64, max(1, len(compact) - 12)) if len(compact) > 24 else len(compact)
     preview = summary or compact[:limit].rstrip("，。！？；：、,.;!?: ") + ("…" if limit < len(compact) else "")
     if image_content:
+        label = "AI 意象插图" if ai_image else " ".join(caption.split())
+        caption_height = min(300, _caption_height(label, width=888))
         with Image.open(BytesIO(image_content)) as source:
-            picture = ImageOps.fit(ImageOps.exif_transpose(source).convert("RGB"), (1000, 396))
+            picture = ImageOps.fit(ImageOps.exif_transpose(source).convert("RGB"), (1000, max(96, 396 - caption_height)))
         image.paste(picture, (0, 96))
-        if ai_image:
-            ImageDraw.Draw(image).rounded_rectangle((754, 438, 978, 482), radius=8, fill="#fcf8f1")
-            _text(image, "AI生成插图", (766, 442, 968, 478), size=23)
+        if label:
+            _text(image, label, (56, 492 - caption_height, 944, 492), size=22)
         _text(image, preview, (56, 506, 944, 634), size=40, minimum=40, align="left")
     else:
         _text(image, preview, (64, 154, 936, 592), size=58, minimum=48, align="left")
@@ -87,7 +101,7 @@ def render_excerpt_share_card(*, book_title: str, chapter_title: str, content: s
 
 
 def render_excerpt_share_poster(*, title: str, book_title: str, quote: str, code_content: bytes,
-                                image_content: bytes | None = None, ai_image: bool = False) -> bytes:
+                                image_content: bytes | None = None, ai_image: bool = False, caption: str = "") -> bytes:
     """A 3:4 story print. The quote is validated against the published selection by the caller."""
     from PIL import ImageChops
 
@@ -104,8 +118,11 @@ def render_excerpt_share_poster(*, title: str, book_title: str, quote: str, code
     draw.line((82, 388, 172, 388), fill="#b9785c", width=4)
 
     if image_content:
+        label = "AI 意象插图" if ai_image else " ".join(caption.split())
+        caption_height = _caption_height(label, width=1040)
+        picture_height = 520 - caption_height
         with Image.open(BytesIO(image_content)) as source:
-            picture = ImageOps.contain(ImageOps.exif_transpose(source).convert("RGBA"), (1120, 490))
+            picture = ImageOps.contain(ImageOps.exif_transpose(source).convert("RGBA"), (1120, picture_height))
         # Fade only the outer edge of illustrations into the same paper used throughout.
         # Keep photos intact, including their original colors and full framing.
         if ai_image:
@@ -116,9 +133,9 @@ def render_excerpt_share_poster(*, title: str, book_title: str, quote: str, code
                 edge.rectangle((inset, inset, picture.width - 1 - inset, picture.height - 1 - inset),
                                outline=round(255 * inset / fade))
             picture.putalpha(ImageChops.multiply(picture.getchannel("A"), mask))
-        image.paste(picture, ((1200 - picture.width) // 2, 410 + (490 - picture.height) // 2), picture)
-        if ai_image:
-            _text(image, "AI 意象插图", (850, 896, 1120, 930), size=22)
+        image.paste(picture, ((1200 - picture.width) // 2, 410 + (picture_height - picture.height) // 2), picture)
+        if label:
+            _text(image, label, (80, 930 - caption_height, 1120, 930), size=22)
         quote_top = 930
     else:
         quote_top = 490

@@ -193,3 +193,49 @@ def test_long_prose_keeps_multiple_portraits_in_text_flow(tmp_path, monkeypatch)
     for page, image in images:
         assert any(line.y > image.y and line.y < image.y + image.height and line.x < image.x
                    for line in page.commands if line.font_size == builder.layout.font_size)
+
+
+@pytest.mark.parametrize("edition", list(MemoirBookOutputExportLayout))
+@pytest.mark.parametrize("mode", ["full", "float", "gallery"])
+@pytest.mark.parametrize("caption", ["爸爸和奶奶，1982 年春天摄于老家", "老照片里的家人" * 70])
+def test_photo_caption_stays_centered_with_its_image_without_losing_text(tmp_path, edition, mode, caption):
+    path = tmp_path / "family.jpg"
+    Image.new("RGB", (600, 900), "#eee3ce").save(path)
+    layout = PDF_LAYOUTS[edition]
+    builder = PDFBookBuilder(title="家人", layout=layout)
+    builder.new_page("正文", body_numbering=True)
+    builder.y = layout.margin_bottom + 55
+    if mode == "gallery":
+        builder.add_image_gallery([path, path], captions=[caption, "AI 意象插图"])
+    else:
+        builder.add_image(path, caption=caption, wrap_right=mode == "float")
+    builder.finish_image_wrap()
+    body = "这些是家里的旧照片。" * 30
+    builder.add_body_text(body)
+    all_text = "".join(command.text for page in builder.pages for command in page.commands)
+    assert caption.replace(" ", "") in all_text.replace(" ", "")
+    assert body in all_text
+    for page in builder.pages:
+        notes = [line for line in page.commands if line.font_size == layout.small_font_size]
+        for note in notes:
+            center = note.x + _estimated_text_width(note.text, note.font_size) / 2
+            images = [image for image in page.images if abs(image.x + image.width / 2 - center) < 1]
+            assert images, "Caption must be centered under an image on the same page"
+            assert layout.margin_bottom <= note.y < max(image.y for image in images)
+        for image in page.images:
+            assert image.height > 0 and image.y >= layout.margin_bottom
+
+
+def test_book_export_shows_photo_notes_and_ai_source_labels(tmp_path, monkeypatch):
+    path = tmp_path / "picture.jpg"
+    Image.new("RGB", (600, 400), "#eee3ce").save(path)
+    monkeypatch.setattr("app.services.memoir.book_output_export._illustration_file_path", lambda _: path)
+    builder = PDFBookBuilder(title="家人", layout=PDF_LAYOUTS[MemoirBookOutputExportLayout.STANDARD])
+    _add_chapters(builder, [{"title": "家里的照片", "content": "我们常常翻看旧相册。", "illustrations": [
+        {"placement": "chapter_inline", "caption": "爸爸，1982 年", "disclosure": ""},
+        {"placement": "chapter_inline", "caption": "生成插图使用的故事原文", "disclosure": "AI 生成"},
+    ]}])
+    text = "".join(line.text for page in builder.pages for line in page.commands)
+    assert "爸爸，1982 年" in text
+    assert "AI 意象插图" in text
+    assert "生成插图使用的故事原文" not in text

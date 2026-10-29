@@ -1,0 +1,7 @@
+{
+  "component": true,
+  "usingComponents": {
+    "voice-text-editor": "/components/voice-text-editor/index"
+  },
+  "styleIsolation": "apply-shared"
+}

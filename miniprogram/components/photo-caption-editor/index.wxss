@@ -1,0 +1,12 @@
+.photo-caption-editor { margin-top: 12rpx; }
+.caption-label, .caption-copy, .caption-error, .caption-saved {
+  display: block;
+  font-size: var(--ui-font-caption);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  color: var(--ui-text-muted);
+}
+.caption-label { margin-bottom: 12rpx; }
+.caption-copy { text-align: center; }
+.caption-action { min-height: 48px; white-space: normal; }
+.caption-error { color: var(--ui-danger-text); margin-top: 8rpx; }

@@ -1456,3 +1456,30 @@ test("poster album denial keeps the image available for retry, cancellation stay
   await context.saveExcerptPoster();
   assert.equal(context.data.excerptPosterError, "");
 });
+
+test("shared photos retain the author's note while AI illustrations disclose their source", async () => {
+  for (const [disclosure, caption, expected] of [
+    ["", "爸爸和奶奶，1982 年春天", "爸爸和奶奶，1982 年春天"],
+    ["AI", "用于生成的故事原文", "AI 意象插图"],
+    ["", "", ""],
+  ]) {
+    const context = excerptContext({
+      readMemoirExcerptShare: async () => ({ title: "家里的照片", book_title: "回忆录", chapter_title: "童年", content: "家里的旧相册。",
+        image_url: "/api/mobile/memoir/excerpt-shares/x1.caption/image", image_disclosure: disclosure, image_caption: caption }),
+    });
+    await context.onLoad({ excerptToken: "x1.caption" });
+    assert.equal(context.data.shareImages[0].caption, expected);
+  }
+});
+
+test("a long photo note reserves reading space instead of overlapping the next story", () => {
+  const { page } = loadBookReaderPage();
+  const context = pageContext(page);
+  context.bookChapters = [{ chapterId: "c", sections: [{ id: "s", paragraphs: ["我那年开始工作。".repeat(15)] }] }];
+  const image = { id: "photo", chapterId: "c", sectionId: "s", paragraphCount: 1, paragraphBefore: 0,
+    position: "before", portrait: true, aspectRatio: 1.5, url: "photo.jpg", disclosure: "", caption: "家人" };
+  context.layoutReadingImages([image]);
+  assert.equal(Boolean(context.data.imageGallerySections.s), false);
+  context.layoutReadingImages([{ ...image, caption: "这是照片里的家人和他们当时生活的地方。".repeat(15) }]);
+  assert.equal(context.data.imageGallerySections.s, true);
+});
