@@ -43,15 +43,19 @@ async def get_mobile_memoir_identity(
 
 
 @router.get("/demo-story", response_model=MemoirDemoStoryResponse)
-async def get_mobile_memoir_demo_story(response: Response, db: AsyncSession = Depends(get_db)):
+async def get_mobile_memoir_demo_story(
+    response: Response, project_id: str = "", db: AsyncSession = Depends(get_db),
+):
     response.headers["Cache-Control"] = "no-store"
-    return await demo_story.demo_story(db)
+    return await demo_story.demo_story(db, project_id)
 
 
 @router.get("/demo-book", response_model=MemoirBookOutputResponse)
-async def get_mobile_memoir_demo_book(response: Response, db: AsyncSession = Depends(get_db)):
+async def get_mobile_memoir_demo_book(
+    response: Response, project_id: str = "", db: AsyncSession = Depends(get_db),
+):
     response.headers["Cache-Control"] = "no-store"
-    return await demo_story.demo_book(db)
+    return await demo_story.demo_book(db, project_id)
 
 
 @router.get("/home-snapshot", response_model=MemoirHomeSnapshotResponse)

@@ -347,7 +347,7 @@ definePage<BookReaderData>()({
     this.readingToken = shareToken;
     this.sharedReadingShown = false;
     this.setData({ responseToken: shareToken });
-    // Visitors open the sample memoir's open chapters before logging in.
+    // Visitors read the selected public memoir before logging in.
     const demo = queryParam(query, "demo") === "1";
     const readerMode = chapterId ? "chapter" : "book";
     this.setData({ projectId, chapterId, sectionId, versionId, readerMode, readerDemo: demo, sharePreview, readerShared: Boolean(shareToken) || demo || sharePreview });
@@ -356,7 +356,7 @@ definePage<BookReaderData>()({
       return;
     }
     if (shareToken || demo) {
-      await this.loadSharedBookReader(() => (demo ? readMemoirDemoBook() : readMemoirBookShare(shareToken)));
+      await this.loadSharedBookReader(() => (demo ? readMemoirDemoBook(projectId) : readMemoirBookShare(shareToken)));
       // Family who open a forwarded link can like what they read.
       if (shareToken && !this.data.error) await this.loadShareLikes({ reading_token: shareToken });
       return;
@@ -405,7 +405,7 @@ definePage<BookReaderData>()({
 
   async retrySharedReading() {
     if (this.data.sharePreview) await this.loadSharedBookReader(() => previewMemoirBookShare(this.data.projectId, this.data.chapterId || undefined, this.data.sectionId || undefined));
-    else if (this.data.readerDemo) await this.loadSharedBookReader(() => readMemoirDemoBook());
+    else if (this.data.readerDemo) await this.loadSharedBookReader(() => readMemoirDemoBook(this.data.projectId));
     else if (this.readingToken) {
       await this.loadSharedBookReader(() => readMemoirBookShare(this.readingToken));
       if (!this.data.error) await this.loadShareLikes({ reading_token: this.readingToken });

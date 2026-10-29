@@ -134,8 +134,17 @@ class MemoirDemoVideoResponse(MemoirSharedVideoResponse):
     share_code: str
 
 
+class MemoirDemoBookResponse(BaseModel):
+    id: str
+    title: str
+    book_chapter_count: int
+    book_char_count: int
+
+
 class MemoirDemoStoryResponse(BaseModel):
-    """A sample memoir for visitors; no owner or interview details."""
+    """A public memoir and the ordered visitor bookshelf; no owner or interview details."""
+
+    books: list[MemoirDemoBookResponse] = Field(default_factory=list)
 
     title: str = ""
     chapters: list[MemoirStoryChapterResponse] = Field(default_factory=list)

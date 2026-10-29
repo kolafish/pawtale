@@ -105,8 +105,16 @@ export interface MemoirDemoVideo extends MemoirSharedVideo {
   share_code: string;
 }
 
+export interface MemoirDemoBook {
+  id: string;
+  title: string;
+  book_chapter_count: number;
+  book_char_count: number;
+}
+
 /** A sample memoir visitors can browse before logging in. */
 export interface MemoirDemoStory {
+  books: MemoirDemoBook[];
   title: string;
   chapters: MemoirStoryChapter[];
   book_chapter_count: number;

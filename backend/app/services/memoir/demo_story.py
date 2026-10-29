@@ -16,6 +16,7 @@ from app.models.memoir import (
 from app.models.projects import Project
 from app.schemas.memoir_book import MemoirBookOutputResponse
 from app.schemas.memoir_snapshots import (
+    MemoirDemoBookResponse,
     MemoirDemoStoryResponse,
     MemoirDemoVideoResponse,
     MemoirStoryChapterResponse,
@@ -30,26 +31,23 @@ def _configured(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
-async def _demo_project(db: AsyncSession) -> tuple[Project, set[str]] | None:
-    chapter_ids = _configured(get_settings().memoir_demo_chapter_ids)
-    if not chapter_ids:
-        return None
-    project_id = await db.scalar(
-        select(MemoirBookPlanChapter.project_id).where(MemoirBookPlanChapter.id == chapter_ids[0])
-    )
+async def _demo_project(db: AsyncSession, project_id: str = "") -> tuple[Project, set[str]] | None:
+    project_ids = _configured(get_settings().memoir_demo_project_ids)
+    if project_id and project_id not in project_ids:
+        raise HTTPException(status_code=404, detail="示例回忆录暂时无法阅读")
+    project_id = project_id or next(iter(project_ids), "")
     project = await db.get(Project, project_id) if project_id else None
-    if project is None:
+    if project is None or project.type != "memoir":
         return None
     readable_ids = set(await db.scalars(select(MemoirBookPlanChapter.id).where(
         MemoirBookPlanChapter.project_id == project.id,
-        MemoirBookPlanChapter.id.in_(chapter_ids),
         MemoirBookPlanChapter.include_in_book.is_(True),
     )))
-    return (project, readable_ids) if readable_ids else None
+    return project, readable_ids
 
 
-async def demo_story(db: AsyncSession) -> MemoirDemoStoryResponse:
-    demo = await _demo_project(db)
+async def demo_story(db: AsyncSession, project_id: str = "") -> MemoirDemoStoryResponse:
+    demo = await _demo_project(db, project_id)
     if demo is None:
         return MemoirDemoStoryResponse()
     project, readable_ids = demo
@@ -101,7 +99,22 @@ async def demo_story(db: AsyncSession) -> MemoirDemoStoryResponse:
                 raise
             continue  # A deleted video simply leaves the sample.
         videos.append(MemoirDemoVideoResponse(**video.model_dump(), share_code=code))
+    books = []
+    for demo_id in dict.fromkeys(_configured(get_settings().memoir_demo_project_ids)):
+        entry = demo if demo_id == project.id else await _demo_project(db, demo_id)
+        if entry is None:
+            continue
+        output = book if demo_id == project.id else await _demo_book(db, entry[0].id, entry[1])
+        if output is None:
+            continue
+        manuscript = output.latest_version.manuscript
+        books.append(MemoirDemoBookResponse(
+            id=demo_id, title=output.title,
+            book_chapter_count=len(manuscript.chapters),
+            book_char_count=sum(len(chapter.content.strip()) for chapter in manuscript.chapters),
+        ))
     return MemoirDemoStoryResponse(
+        books=books,
         title=book.title if book else project.title,
         chapters=chapters,
         book_chapter_count=len(chapters),
@@ -124,12 +137,12 @@ async def _demo_book(
     ) if output else None
     if version is None:
         return None
-    result = public_reading_response(output, version, chapter_ids=chapter_ids)
+    result = public_reading_response(output, version, chapter_ids=chapter_ids, include_book_details=True)
     return result if result.latest_version and result.latest_version.content.strip() else None
 
 
-async def demo_book(db: AsyncSession) -> MemoirBookOutputResponse:
-    demo = await _demo_project(db)
+async def demo_book(db: AsyncSession, project_id: str = "") -> MemoirBookOutputResponse:
+    demo = await _demo_project(db, project_id)
     result = await _demo_book(db, demo[0].id, demo[1]) if demo else None
     if result is None:
         raise HTTPException(status_code=404, detail="示例回忆录暂时无法阅读")

@@ -50,10 +50,9 @@ class Settings(BaseSettings):
     wechat_message_token: str = ""
     wechat_message_aes_key: str = ""
 
-    # Sample memoir that visitors can browse before logging in: comma-separated
-    # chapter ids readable in full (the story tree comes from their project) and
-    # share codes of videos from the same project.
-    memoir_demo_chapter_ids: str = ""
+    # Public full memoirs, in display order (first is the default). Only these
+    # projects are readable without login; future compiled chapters follow the book.
+    memoir_demo_project_ids: str = ""
     memoir_demo_video_codes: str = ""
 
     # AI API Keys
