@@ -58,7 +58,7 @@ page {
   --ui-control-shadow:
     0 0 0 1rpx rgba(54, 42, 34, 0.055),
     0 4rpx 12rpx rgba(63, 47, 37, 0.035);
-  --ui-hit-size: 88rpx;
+  --ui-hit-size: max(88rpx, 44px);
   min-height: 100vh;
   background: var(--ui-page-background);
   color: var(--ui-text-primary);
@@ -201,7 +201,7 @@ button::after {
 .ui-consent-link {
   padding: 0 8rpx;
   border-radius: 12rpx;
-  color: var(--ui-accent);
+  color: var(--ui-accent-strong);
   font-weight: 700;
 }
 
@@ -234,8 +234,14 @@ button::after {
   line-height: 1.5;
 }
 
-.ui-accessible-page.large-text {
-  --ui-hit-size: 96rpx;
+/* Inherited tokens also reach isolated custom components. */
+.large-text {
+  --ui-font-caption: var(--ui-font-large-caption);
+  --ui-font-meta: var(--ui-font-large-meta);
+  --ui-font-body: var(--ui-font-large-body);
+  --ui-font-action: var(--ui-font-large-list-title);
+  --ui-font-list-title: var(--ui-font-large-list-title);
+  --ui-hit-size: max(96rpx, 48px);
 }
 
 .ui-accessible-page.large-text .brand-title,

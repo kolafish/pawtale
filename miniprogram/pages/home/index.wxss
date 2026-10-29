@@ -38,8 +38,8 @@
 
 .home-header-button {
   box-sizing: border-box;
-  min-width: 40px;
-  min-height: 40px;
+  min-width: var(--ui-hit-size);
+  min-height: var(--ui-hit-size);
   margin: 0;
   padding: 0 18rpx;
   border-radius: 999rpx;
@@ -152,7 +152,7 @@
 .voice-start-button {
   box-sizing: border-box;
   width: 100%;
-  min-height: 80rpx;
+  min-height: var(--ui-hit-size);
   margin-top: auto;
   padding: 8rpx 16rpx 8rpx 20rpx;
   border-radius: 999rpx;
@@ -267,7 +267,7 @@
   z-index: 3;
   top: 12rpx;
   right: 16rpx;
-  min-height: 40px;
+  min-height: var(--ui-hit-size);
   padding: 0 16rpx;
   display: flex;
   align-items: center;
@@ -297,13 +297,12 @@
 .memoir-card-title {
   max-width: 100%;
   margin-top: 10rpx;
-  overflow: hidden;
   color: var(--home-text-primary);
   font-size: 44rpx;
   font-weight: 500;
   line-height: 1.25;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .memoir-card-rule {
@@ -534,7 +533,7 @@
 .large-text .home-header-button { font-size: var(--ui-font-large-body); }
 .large-text .voice-card-title { font-size: 58rpx; }
 .large-text .voice-card-subtitle { font-size: var(--ui-font-large-body); }
-.large-text .voice-start-button { min-height: 92rpx; font-size: 37rpx; }
+.large-text .voice-start-button { min-height: var(--ui-hit-size); font-size: 37rpx; }
 .large-text .memoir-card-kicker { font-size: var(--ui-font-large-meta); }
 .large-text .memoir-card-title { font-size: 48rpx; }
 .large-text .memoir-card-progress { font-size: var(--ui-font-large-body); }

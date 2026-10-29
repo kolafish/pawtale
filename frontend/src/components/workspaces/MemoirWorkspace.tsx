@@ -57,7 +57,7 @@ export function MemoirWorkspace({ project }: MemoirWorkspaceProps) {
         <div className="hidden min-w-0 sm:block sm:w-44 lg:w-64">
           <p className="truncate text-sm font-semibold text-[#29322e]">{project.title}</p>
           {project.owner_display_name && (
-            <p className="truncate text-[11px] text-[#8a948f]">{project.owner_display_name}</p>
+            <p className="truncate text-[11px] text-[#69736e]">{project.owner_display_name}</p>
           )}
         </div>
         <nav aria-label="回忆录编辑" className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">

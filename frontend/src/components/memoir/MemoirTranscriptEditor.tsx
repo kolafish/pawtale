@@ -145,7 +145,7 @@ function MemoirAudioPlayer({
             aria-label="音频播放进度"
             className="h-5 w-full cursor-pointer accent-[#2f6d59]"
           />
-          <div className="flex items-center justify-between text-[11px] text-[#7a847f] tabular-nums">
+          <div className="flex items-center justify-between text-[11px] text-[#69736e] tabular-nums">
             <span>{formatDuration(currentTime)}</span>
             <span>{formatDuration(duration)}</span>
           </div>
@@ -216,7 +216,7 @@ export function MemoirTranscriptEditor({
               <span className="flex-shrink-0 text-[11px] text-[#2d705b]">已人工校正</span>
             ) : null}
           </div>
-          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[#7a847f]">
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[#69736e]">
             <span>{formatMaterialDateTime(material)}</span>
             <span className="tabular-nums">{material.display_char_count} 字</span>
             {material.included_chapters.length > 0 && (
@@ -240,7 +240,7 @@ export function MemoirTranscriptEditor({
       <div className="min-h-0 flex-1 overflow-y-auto">
         {material.question_text && (
           <section className="border-b border-black/5 bg-[#faf9f6] px-4 py-3 sm:px-6">
-            <p className="text-[11px] font-medium text-[#8a7963]">提问上下文</p>
+            <p className="text-[11px] font-medium text-[#71685f]">提问上下文</p>
             <p className="mt-1 text-sm leading-6 text-[#59554f]">{material.question_text}</p>
           </section>
         )}
@@ -283,7 +283,7 @@ export function MemoirTranscriptEditor({
               className="transition-transform group-open:rotate-180"
             />
             查看原始识别文字
-            <span className="ml-auto text-xs text-[#929b97] tabular-nums">{material.raw_char_count} 字</span>
+            <span className="ml-auto text-xs text-[#69736e] tabular-nums">{material.raw_char_count} 字</span>
           </summary>
           <div className="border-t border-black/5 bg-[#f7f8f7] px-4 py-4 sm:px-6">
             <p className="whitespace-pre-wrap text-sm leading-7 text-[#69736e]">

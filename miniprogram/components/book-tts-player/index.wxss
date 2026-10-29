@@ -42,14 +42,13 @@
   font-size: var(--ui-font-meta);
   line-height: 1.45;
   font-variant-numeric: tabular-nums;
-  overflow-wrap: normal;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .book-tts-action {
   flex: 0 0 auto;
-  min-width: 104rpx;
-  min-height: 80rpx;
+  min-width: max(104rpx, 44px);
+  min-height: var(--ui-hit-size);
   padding: 0 20rpx;
   display: flex;
   align-items: center;

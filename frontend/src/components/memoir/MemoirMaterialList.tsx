@@ -101,14 +101,14 @@ export function MemoirMaterialList({
           <Search
             aria-hidden="true"
             size={16}
-            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#8a948f]"
+            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#69736e]"
           />
           <input
             type="search"
             value={search}
             onChange={(event) => onSearchChange(event.target.value)}
             placeholder="搜索识别文字或问题"
-            className="h-10 w-full rounded-md border border-black/8 bg-[#f7f8f7] pl-9 pr-10 text-sm text-[#202824] outline-none transition-[border-color,box-shadow,background-color] placeholder:text-[#9aa39f] focus:border-[#3c7a67] focus:bg-white focus:shadow-[0_0_0_3px_rgba(60,122,103,0.12)]"
+            className="h-10 w-full rounded-md border border-black/8 bg-[#f7f8f7] pl-9 pr-10 text-sm text-[#202824] outline-none transition-[border-color,box-shadow,background-color] placeholder:text-[#69736e] focus:border-[#3c7a67] focus:bg-white focus:shadow-[0_0_0_3px_rgba(60,122,103,0.12)]"
           />
           {search && (
             <button
@@ -116,7 +116,7 @@ export function MemoirMaterialList({
               aria-label="清除搜索"
               title="清除搜索"
               onClick={() => onSearchChange('')}
-              className="absolute right-1 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md text-[#7a847f] transition-[background-color,color,transform] hover:bg-black/5 hover:text-[#202824] active:scale-[0.96]"
+              className="absolute right-1 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md text-[#69736e] transition-[background-color,color,transform] hover:bg-black/5 hover:text-[#202824] active:scale-[0.96]"
             >
               <X size={15} />
             </button>
@@ -175,7 +175,7 @@ export function MemoirMaterialList({
         ) : groups.length === 0 ? (
           <div className="px-6 py-16 text-center">
             <p className="text-sm font-medium text-[#46504b]">没有找到素材</p>
-            <p className="mt-1 text-xs leading-5 text-[#8a948f]">调整搜索词或校正状态后再试。</p>
+            <p className="mt-1 text-xs leading-5 text-[#69736e]">调整搜索词或校正状态后再试。</p>
           </div>
         ) : (
           <div className="pb-4">
@@ -220,7 +220,7 @@ export function MemoirMaterialList({
                             <p className="mt-1.5 line-clamp-2 text-xs leading-5 text-[#69736e]">
                               {compactMaterialText(material.summary_text || material.display_text) || '暂无识别文字'}
                             </p>
-                            <div className="mt-2 flex items-center gap-3 text-[11px] text-[#929b97]">
+                            <div className="mt-2 flex items-center gap-3 text-[11px] text-[#69736e]">
                               <span className="tabular-nums">音频 {formatDuration(material.audio_duration_seconds)}</span>
                               <span className="tabular-nums">{material.display_char_count} 字</span>
                             </div>

@@ -148,7 +148,7 @@ export function MemoirBatchCleanupTool({
                       <span className="mt-1 block line-clamp-2 text-xs leading-5 text-[#69736e]">
                         {compactMaterialText(material.display_text, 100) || '暂无识别文字'}
                       </span>
-                      <span className="mt-1 block text-[11px] text-[#929b97]">
+                      <span className="mt-1 block text-[11px] text-[#69736e]">
                         {formatMaterialDateTime(material)}
                       </span>
                     </span>
@@ -179,11 +179,11 @@ export function MemoirBatchCleanupTool({
               <section key={item.utterance_id} className="rounded-md bg-white p-3 shadow-[0_1px_7px_rgba(23,43,35,0.08)]">
                 <div className="mb-2 flex items-center justify-between gap-2">
                   <span className="text-xs font-medium text-[#59635e] tabular-nums">预览 {index + 1}</span>
-                  <span className={`text-[11px] ${item.changed ? 'text-[#2d705b]' : 'text-[#929b97]'}`}>
+                  <span className={`text-[11px] ${item.changed ? 'text-[#2d705b]' : 'text-[#69736e]'}`}>
                     {item.changed ? '有改动' : '无明显改动'}
                   </span>
                 </div>
-                <p className="mb-2 line-clamp-3 text-xs leading-5 text-[#7a847f]">{item.source_text}</p>
+                <p className="mb-2 line-clamp-3 text-xs leading-5 text-[#69736e]">{item.source_text}</p>
                 <textarea
                   value={item.cleaned_text}
                   readOnly={!canEdit}

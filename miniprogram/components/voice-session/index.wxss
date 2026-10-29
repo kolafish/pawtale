@@ -502,7 +502,7 @@
 }
 
 .assistant-tts-spoken {
-  color: var(--ui-accent);
+  color: var(--ui-accent-strong);
 }
 
 .assistant-tts-current {
@@ -766,7 +766,7 @@
 }
 
 .capture-strip.active {
-  color: var(--ui-accent);
+  color: var(--ui-accent-strong);
 }
 
 .capture-dot {
@@ -920,7 +920,7 @@
 }
 
 .history-toggle-text {
-  color: var(--ui-accent);
+  color: var(--ui-accent-strong);
   font-size: var(--ui-font-action);
   font-weight: 700;
   line-height: 42rpx;
@@ -928,7 +928,7 @@
 
 .history-toggle-mark {
   margin-top: -2rpx;
-  color: var(--ui-accent);
+  color: var(--ui-accent-strong);
   font-size: 34rpx;
   font-weight: 500;
   line-height: 42rpx;
@@ -1243,7 +1243,7 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 12rpx;
-  color: var(--ui-accent);
+  color: var(--ui-accent-strong);
   font-size: var(--ui-font-meta);
   font-weight: 800;
 }
@@ -1306,7 +1306,7 @@
 
 .recovery-button.ghost {
   background: var(--ui-surface);
-  color: var(--ui-accent);
+  color: var(--ui-accent-strong);
 }
 
 .voice-auth-panel {

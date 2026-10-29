@@ -130,7 +130,7 @@
 .mode-title {
   color: var(--ui-text-primary);
   font-family: var(--ui-font-editorial);
-  font-size: 30rpx;
+  font-size: var(--ui-font-meta);
   font-weight: 800;
   line-height: 1.35;
 }

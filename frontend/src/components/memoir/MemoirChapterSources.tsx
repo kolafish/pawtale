@@ -33,7 +33,7 @@ export function MemoirChapterSources({ chapter, materials }: MemoirChapterSource
       <header className="border-b border-black/6 bg-white px-4 py-4 sm:px-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-[11px] font-medium text-[#7a847f] tabular-nums">第 {chapter.sort_order + 1} 章</p>
+            <p className="text-[11px] font-medium text-[#69736e] tabular-nums">第 {chapter.sort_order + 1} 章</p>
             <h2 className="mt-1 text-lg font-semibold text-[#202824]">{chapter.title}</h2>
           </div>
           <div className="flex items-center gap-2 text-xs text-[#69736e]">
@@ -49,9 +49,9 @@ export function MemoirChapterSources({ chapter, materials }: MemoirChapterSource
           ))}
         </div>
         <div className="relative mt-4 max-w-xl">
-          <Search size={16} aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#8a948f]" />
+          <Search size={16} aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#69736e]" />
           <input type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="搜索当前章节或未归入的素材" className="h-10 w-full rounded-md border border-black/8 bg-[#f7f8f7] pl-9 pr-10 text-sm text-[#202824] outline-none focus:border-[#3c7a67]" />
-          {search && <button type="button" onClick={() => setSearch('')} aria-label="清除搜索" className="absolute right-1 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md text-[#7a847f]"><X size={15} /></button>}
+          {search && <button type="button" onClick={() => setSearch('')} aria-label="清除搜索" className="absolute right-1 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md text-[#69736e]"><X size={15} /></button>}
         </div>
       </header>
       <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto xl:grid-cols-2 xl:overflow-hidden">
@@ -84,12 +84,12 @@ function SourceSection({
     <section className={className}>
       <div className="sticky top-0 z-10 flex h-11 items-center border-b border-black/5 bg-[#f1f3f2]/95 px-4 text-xs font-semibold text-[#59635e] backdrop-blur-sm">
         <span>{title}</span>
-        <span className="ml-auto font-normal text-[#8a948f] tabular-nums">{count}</span>
+        <span className="ml-auto font-normal text-[#69736e] tabular-nums">{count}</span>
       </div>
       {hasItems ? (
         <div className="space-y-2 p-3 sm:p-4">{children}</div>
       ) : (
-        <p className="px-6 py-12 text-center text-sm text-[#8a948f]">{emptyText}</p>
+        <p className="px-6 py-12 text-center text-sm text-[#69736e]">{emptyText}</p>
       )}
     </section>
   );
@@ -136,7 +136,7 @@ function SourceItem({
           {audioOpen ? '收起音频' : '听原音'}
         </button>
         <div className="flex min-w-0 flex-wrap items-center justify-end gap-1">
-          <span className="text-xs text-[#8a948f]">{source.section_assignment?.section_title ?? '未归入小节'}</span>
+          <span className="text-xs text-[#69736e]">{source.section_assignment?.section_title ?? '未归入小节'}</span>
         </div>
       </div>
     </article>

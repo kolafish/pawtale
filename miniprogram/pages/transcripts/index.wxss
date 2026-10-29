@@ -55,7 +55,7 @@
 
 .search-mark {
   flex: 0 0 auto;
-  color: var(--ui-accent);
+  color: var(--ui-accent-strong);
   font-size: 34rpx;
   font-weight: 700;
   line-height: 1;
@@ -231,7 +231,7 @@
   position: absolute;
   top: 50%;
   right: 24rpx;
-  color: var(--ui-accent);
+  color: var(--ui-accent-strong);
   font-size: 38rpx;
   font-weight: 400;
   transform: translateY(-52%);

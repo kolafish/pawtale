@@ -4,9 +4,12 @@
     <text class="ui-page-context">{{contextText}}</text>
   </view>
 
-  <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
+  <view wx:if="{{error}}" class="error ui-error-banner">
+    <text>{{error}}</text>
+    <button class="ui-button ui-share-more" bindtap="loadImageAssets" disabled="{{loading || placingTarget || deletingTarget}}">重新读取</button>
+  </view>
 
-  <view class="summary-card">
+  <view wx:if="{{!error || items.length || videos.length}}" class="summary-card">
     <block wx:if="{{isStoryMaterialView}}">
       <view class="summary-item">
         <text class="summary-value">{{items.length + videos.length}}</text>
@@ -63,7 +66,7 @@
     <text class="empty-title">正在同步素材</text>
   </view>
 
-  <view wx:elif="{{!items.length && !videos.length}}" class="empty-card">
+  <view wx:elif="{{!error && !items.length && !videos.length}}" class="empty-card">
     <text class="empty-title">{{isStoryMaterialView ? "这里还没有素材" : "还没有图片素材"}}</text>
     <text wx:if="{{!isStoryMaterialView}}" class="empty-copy">到讲述详情选一段话生成插图。</text>
   </view>

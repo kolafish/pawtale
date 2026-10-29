@@ -16,7 +16,7 @@ export function MemoirDraftChapterList({
     <aside className="flex h-full min-h-0 flex-col bg-white">
       <div className="border-b border-black/6 px-4 py-4">
         <h1 className="text-base font-semibold text-[#202824]">章节稿</h1>
-        <p className="mt-1 text-xs text-[#7a847f] tabular-nums">
+        <p className="mt-1 text-xs text-[#69736e] tabular-nums">
           共 {chapters.length} 章
         </p>
       </div>
@@ -35,17 +35,17 @@ export function MemoirDraftChapterList({
                   : 'hover:bg-[#fafbfa] focus-visible:shadow-[inset_0_0_0_2px_rgba(60,122,103,0.35)]'
               }`}
             >
-              <span className="mt-0.5 inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md bg-[#eef0ef] text-[#8a948f]">
+              <span className="mt-0.5 inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md bg-[#eef0ef] text-[#69736e]">
                 <FileText size={16} />
               </span>
               <span className="min-w-0 flex-1">
-                <span className="block text-[11px] font-medium text-[#8a948f] tabular-nums">
+                <span className="block text-[11px] font-medium text-[#69736e] tabular-nums">
                   第 {index + 1} 章
                 </span>
                 <span className="mt-1 block truncate text-sm font-semibold text-[#29322e]">
                   {chapter.title}
                 </span>
-                <span className="mt-1 block text-[11px] text-[#7a847f]">
+                <span className="mt-1 block text-[11px] text-[#69736e]">
                   {chapter.sections.length} 小节
                   {chapter.include_in_book === false ? ' · 不收入本书' : ''}
                 </span>

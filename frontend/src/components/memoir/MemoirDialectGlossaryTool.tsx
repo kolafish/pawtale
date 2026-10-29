@@ -84,7 +84,7 @@ export function MemoirDialectGlossaryTool({ projectId, canEdit }: MemoirDialectG
               >
                 <div className="grid grid-cols-[minmax(0,1fr)_28px] gap-2">
                   <div className="grid min-w-0 grid-cols-2 gap-2">
-                    <label className="min-w-0 text-[11px] text-[#7a847f]">
+                    <label className="min-w-0 text-[11px] text-[#69736e]">
                       方言或误识别
                       <input
                         value={entry.source}
@@ -93,7 +93,7 @@ export function MemoirDialectGlossaryTool({ projectId, canEdit }: MemoirDialectG
                         className="mt-1 h-10 w-full rounded-md border border-black/10 bg-white px-3 text-sm text-[#29322e] outline-none transition-[border-color,box-shadow] focus:border-[#3c7a67] focus:shadow-[0_0_0_3px_rgba(60,122,103,0.12)] disabled:bg-[#f5f6f5]"
                       />
                     </label>
-                    <label className="min-w-0 text-[11px] text-[#7a847f]">
+                    <label className="min-w-0 text-[11px] text-[#69736e]">
                       标准写法
                       <input
                         value={entry.target}
@@ -110,21 +110,21 @@ export function MemoirDialectGlossaryTool({ projectId, canEdit }: MemoirDialectG
                       saveMutation.reset();
                       setDraftOverride((current) => (current ?? draft).filter((_, itemIndex) => itemIndex !== index));
                     }}
-                    className="mt-5 inline-flex h-9 w-7 items-center justify-center rounded-md text-[#929b97] transition-[background-color,color,opacity,transform] hover:bg-[#fff0ee] hover:text-[#9b4646] active:scale-[0.96] disabled:opacity-40"
+                    className="mt-5 inline-flex h-9 w-7 items-center justify-center rounded-md text-[#69736e] transition-[background-color,color,opacity,transform] hover:bg-[#fff0ee] hover:text-[#9b4646] active:scale-[0.96] disabled:opacity-40"
                     title="删除词条"
                     aria-label="删除词条"
                   >
                     <Trash2 size={15} />
                   </button>
                 </div>
-                <label className="mt-2 block text-[11px] text-[#7a847f]">
+                <label className="mt-2 block text-[11px] text-[#69736e]">
                   备注
                   <input
                     value={entry.note ?? ''}
                     disabled={!canEdit}
                     onChange={(event) => updateEntry(index, { note: event.target.value })}
                     placeholder="人物、地点或使用场景，可不填"
-                    className="mt-1 h-10 w-full rounded-md border border-black/10 bg-white px-3 text-sm text-[#29322e] outline-none transition-[border-color,box-shadow] placeholder:text-[#a1aaa6] focus:border-[#3c7a67] focus:shadow-[0_0_0_3px_rgba(60,122,103,0.12)] disabled:bg-[#f5f6f5]"
+                    className="mt-1 h-10 w-full rounded-md border border-black/10 bg-white px-3 text-sm text-[#29322e] outline-none transition-[border-color,box-shadow] placeholder:text-[#69736e] focus:border-[#3c7a67] focus:shadow-[0_0_0_3px_rgba(60,122,103,0.12)] disabled:bg-[#f5f6f5]"
                   />
                 </label>
               </section>

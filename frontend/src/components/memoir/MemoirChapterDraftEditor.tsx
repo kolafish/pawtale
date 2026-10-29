@@ -1,6 +1,8 @@
 import { ChevronLeft, History, PanelRight, Volume2, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
+import { useDialogFocus } from '../../hooks/useDialogFocus';
+
 import { memoirMaterialEditorApi } from '../../api';
 import type { MemoirBookChapterDraft, MemoirBookChapterDraftVersion, MemoirBookPlanChapter, MemoirMaterialItem } from '../../types';
 
@@ -25,7 +27,7 @@ export function MemoirChapterDraftEditor({ chapter, draft, sources, onBack }: Me
               <h2 className="truncate text-lg font-semibold text-[#202824]">{chapter.title}</h2>
               <span className="rounded bg-[#eef0ef] px-2 py-0.5 text-[11px] text-[#69736e]">{draft?.status === 'confirmed' ? '已确认' : version ? '草稿' : '未生成'}</span>
             </div>
-            <p className="mt-0.5 text-xs text-[#7a847f] tabular-nums">{sources.length} 段素材 · {(version?.content.length ?? 0).toLocaleString('zh-CN')} 字</p>
+            <p className="mt-0.5 text-xs text-[#69736e] tabular-nums">{sources.length} 段素材 · {(version?.content.length ?? 0).toLocaleString('zh-CN')} 字</p>
           </div>
           <button type="button" onClick={() => setContextTab('sources')} className="inline-flex h-10 items-center gap-1.5 rounded-md px-2 text-sm text-[#59635e]"><PanelRight size={15} />素材</button>
           {version && <button type="button" onClick={() => setContextTab('versions')} className="inline-flex h-10 items-center gap-1.5 rounded-md px-2 text-sm text-[#59635e]"><History size={15} />版本 {version.version}</button>}
@@ -34,7 +36,7 @@ export function MemoirChapterDraftEditor({ chapter, draft, sources, onBack }: Me
       <div className="min-h-0 flex-1 p-3 sm:p-5">
         <textarea aria-label="章节正文" value={version?.content ?? ''} readOnly placeholder="本章尚未生成正文" className="h-full min-h-[420px] w-full resize-none rounded-md bg-white px-5 py-5 text-[16px] leading-8 text-[#29322e] outline-none shadow-[0_1px_4px_rgba(23,43,35,0.08),0_0_0_1px_rgba(0,0,0,0.05)] sm:px-8 sm:py-7 sm:text-[17px]" />
       </div>
-      <footer className="border-t border-black/6 bg-white px-4 py-3 text-xs text-[#8a948f] sm:px-5">{version ? `正在查看版本 ${version.version}` : '尚未生成稿件'}</footer>
+      <footer className="border-t border-black/6 bg-white px-4 py-3 text-xs text-[#69736e] sm:px-5">只读 · {version ? `正在查看版本 ${version.version}` : '尚未生成稿件'}</footer>
       {contextTab && (
         <ChapterContextDrawer
           tab={contextTab}
@@ -71,16 +73,18 @@ function ChapterContextDrawer({
   onClose: () => void;
 }) {
   const [openAudioId, setOpenAudioId] = useState<string | null>(null);
+  const dialogRef = useDialogFocus({ onClose });
   const reversedVersions = useMemo(() => [...versions].reverse(), [versions]);
   return (
     <div className="absolute inset-0 z-30 flex justify-end">
       <button
         type="button"
         aria-label="关闭参考面板"
+        tabIndex={-1}
         onClick={onClose}
         className="absolute inset-0 bg-black/15 backdrop-blur-[1px]"
       />
-      <aside className="relative flex h-full w-full max-w-[430px] flex-col bg-[#f7f8f7] shadow-[-8px_0_28px_rgba(23,43,35,0.16)]">
+      <aside ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="章节参考面板" className="relative flex h-full w-full max-w-[430px] flex-col bg-[#f7f8f7] shadow-[-8px_0_28px_rgba(23,43,35,0.16)]">
         <header className="border-b border-black/6 bg-white px-4 py-3">
           <div className="flex items-center gap-3">
             <div className="min-w-0 flex-1">
@@ -135,7 +139,7 @@ function ChapterContextDrawer({
                 ))}
               </div>
             ) : (
-              <p className="px-4 py-12 text-center text-sm text-[#8a948f]">本章暂无素材</p>
+              <p className="px-4 py-12 text-center text-sm text-[#69736e]">本章暂无素材</p>
             )
           ) : reversedVersions.length > 0 ? (
             <div className="space-y-2">
@@ -149,7 +153,7 @@ function ChapterContextDrawer({
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-semibold text-[#29322e] tabular-nums">版本 {version.version}</span>
                       {isLatest && <span className="rounded bg-[#eaf3ee] px-1.5 py-0.5 text-[10px] text-[#2d705b]">当前</span>}
-                      <span className="ml-auto text-[11px] text-[#8a948f]">
+                      <span className="ml-auto text-[11px] text-[#69736e]">
                         {version.created_by === 'user' ? '手工编辑' : 'AI 整理'}
                       </span>
                     </div>
@@ -168,7 +172,7 @@ function ChapterContextDrawer({
               })}
             </div>
           ) : (
-            <p className="px-4 py-12 text-center text-sm text-[#8a948f]">暂无历史版本</p>
+            <p className="px-4 py-12 text-center text-sm text-[#69736e]">暂无历史版本</p>
           )}
         </div>
       </aside>

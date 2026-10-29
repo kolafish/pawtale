@@ -11,7 +11,7 @@
   height: var(--ui-hit-size);
   border-radius: 18rpx;
   background: var(--ui-surface);
-  color: var(--ui-accent);
+  color: var(--ui-accent-strong);
   font-size: var(--ui-font-action);
   font-weight: 800;
   box-shadow: var(--ui-card-shadow);
@@ -81,7 +81,7 @@
 }
 
 .section-kicker {
-  color: var(--ui-accent);
+  color: var(--ui-accent-strong);
   font-size: var(--ui-font-meta);
   font-weight: 700;
   line-height: 36rpx;
@@ -231,7 +231,7 @@
   box-shadow: var(--ui-control-shadow);
 }
 
-.topic-start-action::after { content: "›"; color: var(--ui-accent); font-size: 36rpx; font-weight: 400; }
+.topic-start-action::after { content: "›"; color: var(--ui-accent-strong); font-size: 36rpx; font-weight: 400; }
 
 .topic-choice-action {
   margin-top: 14rpx;
