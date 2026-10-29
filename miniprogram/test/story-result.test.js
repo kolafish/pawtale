@@ -36,12 +36,14 @@ function setup(t, { celebrate = true, deferCanvas = false } = {}) {
     detach() { component.lifetimes.detached.call(context); } };
 }
 
-test("overlay waits until fully visible, holds one clear title and completes after six seconds", t => {
+test("overlay waits until fully visible, holds one clear title and fades in and out gradually around a clear reading interval", t => {
   const h = setup(t);
   h.visible(.6); h.advance(7000);
   assert.deepEqual(h.context.events, []);
   assert.equal(h.audioCalls.played, 0);
-  h.visible(); h.advance(1200);
+  h.visible(); h.advance(800);
+  assert.ok(h.context.data.opacity > .3 && h.context.data.opacity < .7);
+  h.advance(1000);
   assert.equal(h.context.data.title, "第一次离家");
   assert.equal(h.context.data.opacity, 1);
   assert.equal(h.context.data.textOpacity, 1);
@@ -55,7 +57,11 @@ test("overlay waits until fully visible, holds one clear title and completes aft
   assert.deepEqual(h.context.events, []);
   h.context.properties.result = { ...h.result };
   h.component.observers.result.call(h.context); // Polling the same result cannot restart it.
-  h.advance(1500);
+  h.advance(1700);
+  assert.ok(h.context.data.opacity > .3 && h.context.data.opacity < .7);
+  assert.deepEqual(h.context.events, []);
+  h.advance(1200);
+  assert.equal(h.context.data.opacity, 0);
   assert.deepEqual(h.context.events, [{ name: "complete", detail: { id: "result-1" } }]);
   h.visible(); h.advance(7000);
   assert.equal(h.context.events.length, 1);
@@ -73,7 +79,7 @@ test("background pauses reading and sound; returning never replays the chime", t
   assert.equal(h.context.data.count, count);
   assert.deepEqual(h.context.events, []);
   h.component.pageLifetimes.show.call(h.context);
-  h.advance(4700);
+  h.advance(6700);
   assert.equal(h.audioCalls.played, 1);
   assert.equal(h.context.events.length, 1);
   h.detach();
@@ -127,8 +133,28 @@ test("resizing the same result redraws it without replaying its sound", t => {
   const h = setup(t);
   h.visible(); h.advance(1500);
   h.component.pageLifetimes.resize.call(h.context);
-  h.visible(); h.advance(6200);
+  h.visible(); h.advance(8200);
   assert.equal(h.audioCalls.played, 1);
   assert.deepEqual(h.context.events, [{ name: "complete", detail: { id: "result-1" } }]);
   h.detach();
+});
+
+test("book pixels and particles honor the fade envelope, including the first and final frames", () => {
+  const { drawStoryBook } = require("../components/story-result/book-art.ts");
+  const alpha = [], stack = [];
+  const context = new Proxy({ globalAlpha: 1,
+    save() { stack.push(this.globalAlpha); }, restore() { this.globalAlpha = stack.pop(); },
+    createLinearGradient() { return { addColorStop() {} }; },
+    createRadialGradient() { return { addColorStop() {} }; },
+    fill() { alpha.push(this.globalAlpha); }, stroke() { alpha.push(this.globalAlpha); },
+    fillRect() { alpha.push(this.globalAlpha); },
+  }, { get(target, key) { return key in target ? target[key] : () => {}; } });
+  for (const opacity of [0, .5, 1, 0]) {
+    alpha.length = 0;
+    drawStoryBook(context, 320, 140, 2, 1.2, opacity);
+    assert.ok(alpha.length > 0);
+    assert.ok(alpha.every(value => value >= 0 && value <= opacity));
+    assert.ok(alpha.includes(opacity));
+    assert.equal(context.globalAlpha, 1);
+  }
 });

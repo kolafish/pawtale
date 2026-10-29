@@ -22,7 +22,7 @@ type Command = [
 ];
 export const ease = (t: number): number => { t = Math.min(1, Math.max(0, t)); return t * t * (3 - 2 * t); };
 const clamp = (t: number): number => Math.min(1, Math.max(0, t));
-export function drawStoryBook(ctx: CanvasRenderingContext2D, width: number, height: number, dpr: number, seconds: number): void {
+export function drawStoryBook(ctx: CanvasRenderingContext2D, width: number, height: number, dpr: number, seconds: number, opacity = 1): void {
     function shape(color: string | CanvasGradient | null, commands: Command[], stroke?: string) {
         ctx.beginPath();
         for (const command of commands) {
@@ -59,6 +59,7 @@ export function drawStoryBook(ctx: CanvasRenderingContext2D, width: number, heig
     const pageScale = scale * .82;
     ctx.setTransform(dpr * scale, 0, 0, dpr * pageScale, 0, dpr * (height - 290 * pageScale - 8));
     ctx.save();
+    ctx.globalAlpha = opacity;
     ctx.fillStyle = '#75634b18';
     ctx.beginPath();
     ctx.ellipse(205, 267, 154, 10, 0, 0, Math.PI * 2);
@@ -124,7 +125,7 @@ export function drawStoryBook(ctx: CanvasRenderingContext2D, width: number, heig
         const y = 184 - 43 * p + (i % 3) * 5;
         const radius = i % 3 === 0 ? 1.65 : 1.1;
         ctx.save();
-        ctx.globalAlpha = alpha;
+        ctx.globalAlpha = opacity * alpha;
         ctx.shadowColor = '#e8bb62';
         ctx.shadowBlur = 6;
         ctx.fillStyle = '#b98832';

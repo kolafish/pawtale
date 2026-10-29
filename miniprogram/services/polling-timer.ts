@@ -28,7 +28,7 @@ export class PollingTimer {
     return this.timer !== null;
   }
 
-  schedule(callback: () => void): boolean {
+  schedule(callback: () => void, delayMs = this.delayMs): boolean {
     if (this.timer !== null) {
       return false;
     }
@@ -38,7 +38,7 @@ export class PollingTimer {
       }
       this.timer = null;
       callback();
-    }, this.delayMs);
+    }, delayMs);
     this.timer = timer;
     return true;
   }

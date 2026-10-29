@@ -784,3 +784,65 @@ test("home shows settled chapter results during copy and review, without replayi
     assert.deepEqual(reviewOnly.data.growthResult.eventIds, ["review-ready"]);
   } finally { reviewOnly.onHide(); }
 });
+
+test("waiting home picks up results within one second without multiplying share refreshes", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1000 });
+  let current = snapshot({ progress: progress({ status: "idle", stage: "queued" }) });
+  let reads = 0, shareReads = 0;
+  const { page } = loadStoryPage({ getSnapshot: async () => { reads++; return current; } });
+  const context = pageContext(page);
+  context.refreshShareCandidate = async () => { shareReads++; };
+  context.refreshShareVideos = async () => {};
+  try {
+    await context.onShow();
+    t.mock.timers.tick(999); await flushAsyncWork();
+    assert.equal(reads, 1);
+    current = snapshot({ progress: progress({ status: "processing", stage: "writing_chapters" }) });
+    t.mock.timers.tick(1); await flushAsyncWork();
+    assert.equal(reads, 2);
+    assert.equal(shareReads, 1);
+    for (let i = 0; i < 4; i++) { t.mock.timers.tick(1000); await flushAsyncWork(); }
+    assert.equal(reads, 6);
+    assert.equal(shareReads, 2);
+    current = snapshot({ growth_events: [growth("ready-now")],
+      progress: progress({ status: "processing", stage: "writing_copy" }) });
+    t.mock.timers.tick(1000); await flushAsyncWork();
+    assert.deepEqual(context.data.growthResult.eventIds, ["ready-now"]);
+    const readyReads = reads;
+    t.mock.timers.tick(4999); await flushAsyncWork();
+    assert.equal(reads, readyReads);
+    t.mock.timers.tick(1); await flushAsyncWork();
+    assert.equal(reads, readyReads + 1);
+    context.onHide();
+    t.mock.timers.tick(10000); await flushAsyncWork();
+    assert.equal(reads, readyReads + 1);
+  } finally { context.onUnload(); }
+});
+
+test("exiting before results or during playback preserves the result across cold starts", async () => {
+  const storage = {};
+  const first = loadStoryPage({ storage, current: snapshot({ growth_events: [growth("saved-structure")],
+    progress: progress({ status: "processing", stage: "writing_chapters" }) }) });
+  const beforeReady = pageContext(first.page);
+  await beforeReady.onShow();
+  assert.equal(beforeReady.data.growthResult, null);
+  beforeReady.onUnload();
+  assert.deepEqual(first.calls.acknowledgedEventIds, []);
+  const current = snapshot({ growth_events: [growth("saved-structure"),
+    { ...growth("saved-draft", "chapter_updated", "chapter-1"), book_char_count_delta: 758 }] });
+  const second = loadStoryPage({ storage, current });
+  const beforeFinished = pageContext(second.page);
+  await beforeFinished.onShow();
+  assert.deepEqual(new Set(beforeFinished.data.growthResult.eventIds), new Set(["saved-structure", "saved-draft"]));
+  beforeFinished.onUnload();
+  assert.deepEqual(second.calls.acknowledgedEventIds, []);
+  const third = loadStoryPage({ storage, current });
+  const returned = pageContext(third.page);
+  try {
+    await returned.onShow();
+    assert.equal(returned.data.growthResult.celebrate, true);
+    assert.equal(returned.data.growthResult.wordDelta, 758);
+    await returned.completeGrowthResult({ detail: { id: returned.data.growthResult.id } });
+    assert.deepEqual(new Set(third.calls.acknowledgedEventIds), new Set(["saved-structure", "saved-draft"]));
+  } finally { returned.onUnload(); }
+});

@@ -96,7 +96,7 @@ Component({
             state.context = node.node.getContext("2d");
             state.width = node.width; state.height = node.height; state.dpr = Math.min(wx.getWindowInfo().pixelRatio || 1, 2);
             node.node.width = Math.round(node.width * state.dpr); node.node.height = Math.round(node.height * state.dpr);
-            drawStoryBook(state.context, state.width, state.height, state.dpr, 0);
+            drawStoryBook(state.context, state.width, state.height, state.dpr, 0, 0);
           }
           observe();
         }).exec();
@@ -115,7 +115,7 @@ Component({
     finishFrame() {
       const state = runtime(this), result = this.properties.result as HomeGrowthResult | null;
       if (!result || !state.attached || !state.pageVisible || !state.visible || state.completed) return;
-      if (state.elapsed >= (result.celebrate ? 6000 : 3200)) {
+      if (state.elapsed >= (result.celebrate ? 8000 : 3200)) {
         state.completed = true; state.observer?.disconnect(); state.audio.stop();
         this.triggerEvent("complete", { id: result.id });
       } else state.timer = setTimeout(() => this.tick(), 33);
@@ -124,11 +124,15 @@ Component({
       const state = runtime(this), result = this.properties.result as HomeGrowthResult | null;
       state.timer = null;
       if (!result || !state.attached || !state.pageVisible || !state.visible || state.completed) return;
-      const duration = result.celebrate ? 6000 : 3200, now = Date.now();
+      const duration = result.celebrate ? 8000 : 3200, now = Date.now();
       state.elapsed = Math.min(duration, state.elapsed + Math.min(80, now - state.lastTick)); state.lastTick = now;
       const seconds = state.elapsed / 1000;
-      const artSeconds = seconds < 1 ? seconds : seconds < 4.4 ? 1 + (seconds - 1) * 1.25 / 3.4 : 2.25 + (seconds - 4.4) * 1.55 / 1.6;
-      if (state.context) drawStoryBook(state.context, state.width, state.height, state.dpr, artSeconds);
+      const fadeIn = result.celebrate ? 1600 : 600, fadeOut = result.celebrate ? 2000 : 900;
+      const opacity = ease(state.elapsed / fadeIn) * (1 - ease((state.elapsed - duration + fadeOut) / fadeOut));
+      const artSeconds = seconds < 1.6 ? seconds / 2 : seconds < 6
+        ? .8 + (seconds - 1.6) * 1.45 / 4.4 : 2.25 + (seconds - 6) * 1.55 / 2;
+      // Fade the canvas pixels too, so the book and particles share the native text envelope.
+      if (state.context) drawStoryBook(state.context, state.width, state.height, state.dpr, artSeconds, opacity);
       if (result.celebrate && !state.soundPlayed && state.elapsed >= 400) {
         state.soundPlayed = true;
         void state.audio.playTempFile("/assets/audio/story-collected.wav").catch(error => console.warn("story result sound unavailable", error));
@@ -136,8 +140,8 @@ Component({
       if (state.elapsed - state.lastText >= 50 || state.elapsed === duration) {
         state.lastText = state.elapsed; state.rendering = true;
         const generation = state.generation, steps = Math.min(8, result.wordDelta);
-        this.setData({ opacity: ease(seconds / .6) * (1 - ease((state.elapsed - duration + 900) / 900)),
-          textOpacity: ease((seconds - .3) / .6), textOffset: 8 * (1 - ease((seconds - .3) / .6)),
+        const textEntrance = ease((state.elapsed - 300) / (result.celebrate ? 1300 : 600));
+        this.setData({ opacity, textOpacity: textEntrance, textOffset: 8 * (1 - textEntrance),
           count: result.wordDelta - steps + Math.floor(steps * ease((seconds - .8) / .8)) }, () => {
           if (!state.attached || generation !== state.generation) return;
           state.rendering = false;

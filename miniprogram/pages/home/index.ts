@@ -310,6 +310,7 @@ definePage<HomeData>()({
   shareLikeNoticeRequestSequence: 0,
   homeVisible: false,
   homeLaunchScope: "",
+  homeAuxRefreshedAt: 0,
   homeRefreshTimer: pageRuntime(() => new PollingTimer(5000)),
   storyNavigationTarget: null as HomeStoryTarget | null,
   voiceNavigationTarget: null as HomeVoiceTarget | null,
@@ -500,8 +501,12 @@ definePage<HomeData>()({
         if (!background) this.measureNarration();
         if (validTarget) this.openStoryProgress();
       });
-      void this.refreshShareCandidate(this.data.projectId);
-      void this.refreshShareVideos(this.data.projectId);
+      // Faster story polling must not multiply unrelated share requests.
+      if (!background || Date.now() - this.homeAuxRefreshedAt >= 5000) {
+        this.homeAuxRefreshedAt = Date.now();
+        void this.refreshShareCandidate(this.data.projectId);
+        void this.refreshShareVideos(this.data.projectId);
+      }
       if (!background) void this.refreshShareLikeNotice(this.data.userId, this.data.projectId);
       if (freshEvents.size) this.growthAnimationTimer.schedule(() => this.clearGrowthAnimation());
     } catch (error) {
@@ -556,7 +561,9 @@ definePage<HomeData>()({
       if (loadSequence === this.homeLoadSequence) {
         setHomeData(this, { loading: false });
         if (this.homeVisible && this.data.hasProject && !this.data.needsLogin) {
-          this.homeRefreshTimer.schedule(() => { void this.loadHome(true); });
+          const waitingForResult = !this.data.voiceEntry && !this.data.growthResult && !this.data.storyError
+            && (this.data.progress?.status === "processing" || this.data.progress?.stage === "queued");
+          this.homeRefreshTimer.schedule(() => { void this.loadHome(true); }, waitingForResult ? 1000 : 5000);
         }
       }
     }
