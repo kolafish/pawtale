@@ -25,7 +25,7 @@ from app.models.memoir import (
 )
 from app.models.projects import Project
 from app.schemas.memoir_book import (
-    MemoirBookOutputResponse, MemoirBookManuscriptIllustration,
+    MemoirBookOutputResponse, MemoirBookManuscriptIllustration, MemoirFeaturedBookResponse,
     MemoirExcerptSelection, MemoirExcerptTitle, MemoirExcerptReadingLink,
     MemoirExcerptShareRequest, MemoirExcerptShareResponse, MemoirExcerptShareCreated,
     MemoirBookOutputVersionSummaryResponse,
@@ -368,6 +368,33 @@ async def reading_like_target(db: AsyncSession, token: str) -> ShareLikeTarget:
     return _like_target(resource)
 
 
+async def featured_books(db: AsyncSession) -> list[MemoirFeaturedBookResponse]:
+    """The homepage lists existing public shares, in the configured order."""
+    result = []
+    project_ids = dict.fromkeys(value.strip() for value in get_settings().memoir_demo_project_ids.split(",") if value.strip())
+    for project_id in project_ids:
+        output = await db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id))
+        share = await db.get(MemoirBookShare, output.id) if output else None
+        if not _active(share):
+            continue
+        token = _stable_token(output.id, share.token_hash)
+        try:
+            book = await read_share(db, token)
+        except HTTPException as error:
+            if error.status_code not in (404, 409):
+                raise
+            continue  # Withdrawn or rebuilding shares leave the catalogue until readable again.
+        version = book.latest_version
+        if version is None or not version.content.strip():
+            continue
+        result.append(MemoirFeaturedBookResponse(
+            id=project_id, token=token, title=book.title,
+            book_chapter_count=len(version.manuscript.chapters) if version.manuscript else 0,
+            book_char_count=len(version.content.strip()),
+        ))
+    return result
+
+
 async def read_share(db: AsyncSession, token: str) -> MemoirBookOutputResponse:
     resource, version = await readable_share(db, token)
     return await _resource_reading_response(db, resource, version, token=token)
@@ -595,10 +622,9 @@ async def _resource_reading_response(
 def public_reading_response(
     output: MemoirBookOutput,
     version: MemoirBookOutputVersion,
-    chapter_ids: set[str] | None = None,
     *, include_book_details: bool = False,
 ) -> MemoirBookOutputResponse:
-    """A reader-only copy of a book version, optionally limited to some chapters."""
+    """A reader-only copy of the authorized book or chapter version."""
     reading_version = _output_version_response(version, fallback_title=output.title)
     manuscript = reading_version.manuscript
     if manuscript is not None:
@@ -613,9 +639,7 @@ def public_reading_response(
             "time_hint": "",
             "place_hint": "",
             "sections": [section.model_copy(update={"source_ref_ids": []}) for section in chapter.sections],
-        }) for chapter in manuscript.chapters if chapter_ids is None or chapter.chapter_id in chapter_ids]
-        if chapter_ids is not None:
-            chapters = [chapter.model_copy(update={"index": index}) for index, chapter in enumerate(chapters, 1)]
+        }) for chapter in manuscript.chapters]
         public_indices = {chapter.chapter_id: chapter.index for chapter in chapters}
         back_matter = manuscript.back_matter.model_copy(update={
             key: getattr(manuscript.back_matter, key).model_copy(update={"content": ""})
@@ -623,9 +647,6 @@ def public_reading_response(
             if key != "afterword" or not include_book_details or not manuscript.back_matter.afterword.enabled
         })
         reading_version = reading_version.model_copy(update={
-            **({} if chapter_ids is None else {
-                "content": "\n\n".join(chapter.content for chapter in chapters),
-            }),
             "manuscript": manuscript.model_copy(update={
                 "profile": manuscript.profile.model_copy(update={
                     "narrator_name": manuscript.profile.narrator_name if include_book_details else "",
@@ -644,9 +665,6 @@ def public_reading_response(
                 }),
             }),
         })
-    elif chapter_ids is not None:
-        # Without chapter structure the text cannot be limited, so nothing is shown.
-        reading_version = reading_version.model_copy(update={"content": ""})
     return MemoirBookOutputResponse(
         id=output.id,
         project_id=output.project_id,

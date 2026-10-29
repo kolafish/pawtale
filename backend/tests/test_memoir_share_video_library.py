@@ -9,7 +9,6 @@ import pytest
 from sqlalchemy import select
 
 from app.clock import utcnow_naive
-from app.config import get_settings
 from app.domain.memoir.types import MemoirShareVideoJobStatus
 from app.main import app
 from app.models.memoir import (
@@ -21,8 +20,8 @@ from app.models.memoir import (
 )
 from app.models.projects import Project
 from app.models.users import User
-from app.services.memoir import demo_story, share_video_jobs, share_video_shares
-from tests.memoir_helpers import create_test_book_plan_with_chapters, create_test_voice_transcript, ensure_mobile_memoir_project
+from app.services.memoir import share_video_jobs, share_video_shares
+from tests.memoir_helpers import create_test_voice_transcript, ensure_mobile_memoir_project
 
 
 async def _add_video_job(
@@ -430,46 +429,6 @@ async def test_video_delete_requires_confirmation_and_preserves_other_versions_a
     assert transcript.status_code == 200
     assert transcript.json()["audio_file_id"] == created["audio_file_id"]
     assert await test_db.scalar(select(MemoirShareVideoOutput).where(MemoirShareVideoOutput.job_id == chosen.id)) is None
-
-
-async def test_demo_videos_play_publicly_without_disclosing_the_full_book_link(
-    client, test_db, tmp_path, monkeypatch,
-):
-    monkeypatch.setattr(share_video_jobs, "MEMOIR_SHARE_VIDEO_DIR", tmp_path)
-    created = await create_test_voice_transcript(client, test_db)
-    _, chapters = await create_test_book_plan_with_chapters(
-        test_db, project_id=created["session"]["project_id"],
-        chapter_titles=["家里的人"], draft_contents=["家里的人。"],
-    )
-    jobs = [await _add_video_job(
-        test_db, created, job_id=job_id, status=MemoirShareVideoJobStatus.SUCCEEDED,
-        created_at=utcnow_naive(),
-    ) for job_id in ("demo-video", "unlisted-video")]
-    await test_db.commit()
-    selected, unlisted = jobs
-    for job in jobs:
-        path = share_video_jobs.share_video_file_path(job)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(b"demo video")
-    settings = get_settings().model_copy(update={
-        "memoir_demo_project_ids": created["session"]["project_id"],
-        "memoir_demo_video_codes": f"{selected.share_code},0123456789abcdef0123",
-    })
-    monkeypatch.setattr(demo_story, "get_settings", lambda: settings)
-
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as guest:
-        story = (await guest.get("/api/mobile/memoir/demo-story")).json()
-        assert [video["share_code"] for video in story["videos"]] == [selected.share_code]
-        assert "private-family-book-token" not in str(story)
-        # Forwarded cards use the ordinary public player endpoint too.
-        shared = await guest.post("/api/mobile/memoir/share-video/shares/read", json={"code": selected.share_code})
-        assert shared.status_code == 200
-        assert "book_share_token" not in shared.json()
-        ranged = await guest.get(shared.json()["video_url"], headers={"Range": "bytes=0-3"})
-        assert ranged.status_code == 206 and ranged.content == b"demo"
-        ordinary = await guest.post("/api/mobile/memoir/share-video/shares/read", json={"code": unlisted.share_code})
-        assert ordinary.status_code == 200
-        assert "book_share_token" not in ordinary.json()
 
 
 async def test_video_delete_rejects_foreign_owner_and_unfinished_job(client, test_db):

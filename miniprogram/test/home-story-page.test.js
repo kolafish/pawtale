@@ -205,20 +205,6 @@ test("story offers explicit retry and does not turn a refresh failure into job f
   context.onHide();
 });
 
-test("story opens the compact theme workspace", async () => {
-  const { page } = loadStoryPage();
-  const context = pageContext(page);
-  const urls = [];
-  global.wx.navigateTo = ({ url }) => urls.push(url);
-  await context.onShow();
-  context.setData({ loading: true });
-  context.openChapter({ detail: { chapterId: "chapter-1" } });
-  context.openChapter({ detail: { chapterId: "chapter-2" } });
-  assert.deepEqual(urls, ["/pages/chapter-workspace/index?projectId=project-1&chapterId=chapter-1",
-    "/pages/chapter-workspace/index?projectId=project-1&chapterId=chapter-2"]);
-  context.onHide();
-});
-
 test("story tree always opens the book workspace", async () => {
   const { page, calls } = loadStoryPage();
   const context = pageContext(page);

@@ -21,11 +21,10 @@ import {
   getMemoirBookOutputVersion,
   readMemoirBookShare, readMemoirSharedAudioPlan, downloadMemoirSharedAudio,
   previewMemoirBookShare,
-  readMemoirDemoBook,
 } from "../../services/memoir-book-api";
 import { getMemoirChapterWorkspace } from "../../services/memoir-chapter-workspace-api";
-import { navigateToLoginThenNarrate, returnToHomeThenNarrate, routeAuthError } from "../../services/navigation";
-import { ApiError, cleanBaseUrl, readBackendConfig, readSessionCookie } from "../../services/request";
+import { routeAuthError } from "../../services/navigation";
+import { ApiError, cleanBaseUrl, readBackendConfig } from "../../services/request";
 import { sharedReadingKey, readSharedReadingProgress, saveSharedReadingProgress, type SharedReadingProgress } from "../../stores/reading-progress";
 import { AudioPlaybackController } from "../../services/audio-playback";
 import { setPageNavigationTitle } from "../../services/page-navigation";
@@ -78,7 +77,6 @@ type BookReaderData = ReaderData & BookTTSState & ShareLikeData & typeof INITIAL
   versionId: string;
   readerMode: "book" | "chapter";
   readerShared: boolean;
-  readerDemo: boolean;
   sharePreview: boolean;
   shareScope: "book" | "chapter" | "story";
   shareImages: { id: string; chapterId: string; sectionId: string; paragraphBefore: number; paragraphCount: number; position: string; portrait: boolean; aspectRatio: number; galleryHeight: number; url: string; caption?: string; disclosure: string }[];
@@ -292,7 +290,6 @@ definePage<BookReaderData>()({
     versionId: "",
     readerMode: "book",
     readerShared: false,
-    readerDemo: false,
     sharePreview: false, shareScope: "book", shareImages: [], imageGallerySections: {}, shareCoverUrl: "", shareByline: "",
     sharePreface: "", shareAfterword: "", shareRetryable: false,
     readerChapterIndex: 0,
@@ -320,12 +317,6 @@ definePage<BookReaderData>()({
   ...shareLikeMethods,
   ...readingExcerptMethods,
 
-  startMyStory() {
-    if (!this.data.readerDemo) return;
-    if (readSessionCookie()) returnToHomeThenNarrate();
-    else navigateToLoginThenNarrate();
-  },
-
   async onLoad(query: PageQuery = {}) {
     const projectId = queryParam(query, "projectId");
     const chapterId = queryParam(query, "chapterId");
@@ -347,16 +338,14 @@ definePage<BookReaderData>()({
     this.readingToken = shareToken;
     this.sharedReadingShown = false;
     this.setData({ responseToken: shareToken });
-    // Visitors read the selected public memoir before logging in.
-    const demo = queryParam(query, "demo") === "1";
     const readerMode = chapterId ? "chapter" : "book";
-    this.setData({ projectId, chapterId, sectionId, versionId, readerMode, readerDemo: demo, sharePreview, readerShared: Boolean(shareToken) || demo || sharePreview });
+    this.setData({ projectId, chapterId, sectionId, versionId, readerMode, sharePreview, readerShared: Boolean(shareToken) || sharePreview });
     if (sharePreview) {
       await this.loadSharedBookReader(() => previewMemoirBookShare(projectId, chapterId || undefined, sectionId || undefined));
       return;
     }
-    if (shareToken || demo) {
-      await this.loadSharedBookReader(() => (demo ? readMemoirDemoBook(projectId) : readMemoirBookShare(shareToken)));
+    if (shareToken) {
+      await this.loadSharedBookReader(() => readMemoirBookShare(shareToken));
       // Family who open a forwarded link can like what they read.
       if (shareToken && !this.data.error) await this.loadShareLikes({ reading_token: shareToken });
       return;
@@ -405,7 +394,6 @@ definePage<BookReaderData>()({
 
   async retrySharedReading() {
     if (this.data.sharePreview) await this.loadSharedBookReader(() => previewMemoirBookShare(this.data.projectId, this.data.chapterId || undefined, this.data.sectionId || undefined));
-    else if (this.data.readerDemo) await this.loadSharedBookReader(() => readMemoirDemoBook(this.data.projectId));
     else if (this.readingToken) {
       await this.loadSharedBookReader(() => readMemoirBookShare(this.readingToken));
       if (!this.data.error) await this.loadShareLikes({ reading_token: this.readingToken });

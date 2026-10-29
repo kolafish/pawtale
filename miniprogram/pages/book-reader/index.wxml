@@ -112,7 +112,7 @@
         </text>
         <text wx:if="{{bookVersionNotice}}" class="reader-notice subtle">{{bookVersionNotice}}</text>
         <view
-          wx:if="{{!excerptMode && (!readerShared || (!sharePreview && !readerDemo))}}"
+          wx:if="{{!excerptMode && (!readerShared || (!sharePreview))}}"
           class="reader-audio-action ui-block-action ui-pressable {{bookViewingHistoricalVersion ? 'is-disabled' : ''}}"
           aria-role="button"
           aria-disabled="{{bookViewingHistoricalVersion}}"
@@ -274,16 +274,15 @@
         <view wx:if="{{excerptReadingLink && excerptReadingLink.scope === 'book'}}" class="excerpt-reading-link"><text class="excerpt-reading-label">继续阅读这本回忆录</text><text class="excerpt-reading-arrow" aria-hidden="true">→</text></view>
       </view>
     </block>
-    <template is="shareLikeBar" data="{{shareLikeVisible, shareLiked, shareCanLike, shareLikeBusy, shareLikeAvatars, shareLikeText, shareLikeProfileMissing, shareForward: readerShared && !sharePreview && !readerDemo}}" />
+    <template is="shareLikeBar" data="{{shareLikeVisible, shareLiked, shareCanLike, shareLikeBusy, shareLikeAvatars, shareLikeText, shareLikeProfileMissing, shareForward: readerShared && !sharePreview}}" />
   </block>
-  <view wx:if="{{readerShared && !excerptMode && !sharePreview && !readerDemo}}" hidden="{{loading || error}}">
+  <view wx:if="{{readerShared && !excerptMode && !sharePreview}}" hidden="{{loading || error}}">
     <share-response-form id="shared-response" reading-token="{{responseToken}}" active="{{!loading && !error}}" bindunavailable="onResponseUnavailable" />
   </view>
 
   <block wx:if="{{!loading && !error}}">
     <button wx:if="{{readerShared && !sharePreview}}" class="ui-share-more" bindtap="openShareHome">我也想讲故事</button>
     <view class="reader-top-action-shell">
-      <view wx:if="{{readerDemo}}" class="reader-top-action ui-pressable" aria-role="button" bindtap="startMyStory">种下我的故事</view>
       <view
         class="reader-top-action ui-pressable"
         aria-role="button"

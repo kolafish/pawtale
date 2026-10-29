@@ -7,6 +7,8 @@ from sqlalchemy import select
 
 from app.auth import session_token_hash
 from app.clock import utcnow_naive
+from app.config import get_settings
+from app.services.memoir import book_shares
 from app.main import app
 from app.models.projects import Project
 from app.models.memoir import (
@@ -20,6 +22,7 @@ from app.models.memoir import (
 )
 from app.services.memoir.book_output_snapshots import chapter_snapshot
 from tests.memoir_helpers import (
+    add_test_section_materials,
     create_test_book_plan,
     create_test_chapter_draft,
     create_test_voice_transcript,
@@ -415,15 +418,29 @@ async def test_friend_preview_and_public_media_have_identical_scope_without_publ
     await test_db.flush()
     placement = MemoirBookImagePlacement(project_id=project_id, image_asset_id=asset.id, placement_type="cover")
     test_db.add(placement)
+    source = await create_test_voice_transcript(client, test_db, project_id=project_id)
+    chapter_id = version.chapter_snapshot_json[0]["chapter_id"]
+    await add_test_section_materials(test_db, project_id=project_id, chapter_id=chapter_id,
+                                     source_refs=[memoir_source_ref(source)])
+    inline = MemoirImageAsset(project_id=project_id, user_id=user_id, source_type="manual_upload",
+        source_signature="inline", storage_path="inline.png", mime_type="image/png", status="ready")
+    test_db.add(inline)
+    await test_db.flush()
+    test_db.add(MemoirBookImagePlacement(project_id=project_id, image_asset_id=inline.id, chapter_id=chapter_id,
+        placement_type="chapter_inline", source_utterance_ids_json=[source["utterance_id"]]))
+    settings = get_settings().model_copy(update={"memoir_demo_project_ids": project_id})
+    monkeypatch.setattr(book_shares, "get_settings", lambda: settings)
     await test_db.commit()
     monkeypatch.setattr(image_assets, "DATA_DIR", tmp_path)
     Image.new("RGB", (2000, 1500), "white").save(tmp_path / "cover.png")
+    Image.new("RGB", (400, 300), "white").save(tmp_path / "inline.png")
     path = f"/api/mobile/memoir/projects/{project_id}/book-output/share"
     preview = await client.get(f"{path}/preview")
     assert preview.status_code == 200, preview.text
     assert preview.headers["cache-control"] == "no-store"
     assert (await client.get(path)).json()["active"] is False
     assert await test_db.get(MemoirBookShare, output.id) is None
+    assert (await client.get("/api/mobile/memoir/book-shares/featured")).json() == []
     book = preview.json()["latest_version"]["manuscript"]
     assert book["profile"]["narrator_name"] == "外婆"
     assert book["profile"]["prepared_by"] == "家人整理"
@@ -442,9 +459,16 @@ async def test_friend_preview_and_public_media_have_identical_scope_without_publ
     chapter_token = (await client.put(path, params={"chapter_id": chapter_id})).json()["token"]
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as guest:
         assert (await guest.get(f"{path}/preview")).status_code == 401
-        public = (await guest.post("/api/mobile/memoir/book-shares/read", json={"token": token})).json()
+        catalog = await guest.get("/api/mobile/memoir/book-shares/featured")
+        assert catalog.headers["cache-control"] == "no-store"
+        assert catalog.json()[0]["token"] == token
+        public = (await guest.post("/api/mobile/memoir/book-shares/read", json={"token": catalog.json()[0]["token"]})).json()
         public_book = public["latest_version"]["manuscript"]
-        assert public_book["chapters"] == book["chapters"]
+        assert public_book["chapters"][0]["content"] == book["chapters"][0]["content"]
+        illustration = public_book["chapters"][0]["illustrations"][0]
+        assert illustration["image_asset_id"] == inline.id
+        assert illustration["storage_path"] == illustration["source_quote"] == ""
+        assert (await guest.get(illustration["image_url"])).status_code == 200
         assert public_book["profile"] == book["profile"]
         manuscript.back_matter.afterword.enabled = False
         version.manuscript_json = manuscript.model_dump(mode="json")
@@ -467,3 +491,23 @@ async def test_friend_preview_and_public_media_have_identical_scope_without_publ
         await test_db.commit()
         await client.delete(path)
         assert (await guest.get(media_url)).status_code == 404
+        assert (await guest.get(illustration["image_url"])).status_code == 404
+        assert (await guest.get("/api/mobile/memoir/book-shares/featured")).json() == []
+
+
+async def test_featured_books_keep_order_and_only_list_configured_active_shares(client, test_db, monkeypatch):
+    projects = []
+    for title in ("我的奶奶—李桂芳", "余仲尤的往事", "未上首页的书"):
+        project_id = (await client.post("/api/mobile/memoir/projects", json={"title": title})).json()["id"]
+        await _shareable_output(test_db, project_id, title)
+        share = await client.put(f"/api/mobile/memoir/projects/{project_id}/book-output/share")
+        assert share.status_code == 200
+        projects.append(project_id)
+    settings = get_settings().model_copy(update={"memoir_demo_project_ids": f"{projects[0]},missing,{projects[1]},{projects[0]}"})
+    monkeypatch.setattr(book_shares, "get_settings", lambda: settings)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as guest:
+        listed = (await guest.get("/api/mobile/memoir/book-shares/featured")).json()
+        assert [book["id"] for book in listed] == projects[:2]
+        assert all(book["book_chapter_count"] == 1 for book in listed)
+        await client.delete(f"/api/mobile/memoir/projects/{projects[0]}/book-output/share")
+        assert [book["id"] for book in (await guest.get("/api/mobile/memoir/book-shares/featured")).json()] == [projects[1]]
