@@ -47,8 +47,13 @@ async def _access_token(client: httpx.AsyncClient) -> str:
         return token
 
 
-async def fetch_miniprogram_code(*, scene: str, page: str, width: int = 280) -> bytes:
-    """Return a transparent PNG mini program code that opens page with scene."""
+async def fetch_miniprogram_code(*, scene: str = "", page: str = "", path: str = "", width: int = 280) -> bytes:
+    """Return a transparent code for a scene, or an existing route with a long token."""
+    if path:
+        if scene or page or len(path.encode("utf-8")) > 128:
+            raise ValueError("A code path must be at most 128 bytes and cannot include scene/page")
+    elif not scene or not page:
+        raise ValueError("A code requires scene/page or path")
     if not miniprogram_code_configured():
         raise WeChatMiniProgramCodeError("微信小程序未配置")
     settings = get_settings()
@@ -56,13 +61,14 @@ async def fetch_miniprogram_code(*, scene: str, page: str, width: int = 280) -> 
         async with httpx.AsyncClient(timeout=10) as client:
             token = await _access_token(client)
             response = await client.post(
-                f"{_API_BASE_URL}/wxa/getwxacodeunlimit",
+                f"{_API_BASE_URL}/wxa/{'getwxacode' if path else 'getwxacodeunlimit'}",
                 params={"access_token": token},
                 json={
-                    "scene": scene,
-                    "page": page,
-                    # The page may ship in a release after the code is printed.
-                    "check_path": False,
+                    **({"path": path} if path else {
+                        "scene": scene, "page": page,
+                        # The page may ship in a release after the code is printed.
+                        "check_path": False,
+                    }),
                     "env_version": settings.wechat_miniprogram_code_env_version,
                     "width": width,
                     "is_hyaline": True,

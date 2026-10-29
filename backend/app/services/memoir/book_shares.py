@@ -502,6 +502,32 @@ async def excerpt_share_card(db: AsyncSession, token: str) -> bytes:
         image_content=image, ai_image=bool(asset and asset.provider != "user_upload"))
 
 
+async def excerpt_share_poster(db: AsyncSession, token: str, *, user_id: str, quote: str) -> bytes:
+    from app.services.memoir.reading_share_card import render_excerpt_share_poster
+    from app.services.wechat_miniprogram_code import fetch_miniprogram_code, WeChatMiniProgramCodeError
+
+    share = await _excerpt_share(db, token)
+    project = await db.get(Project, share.project_id)
+    if project is None or project.user_id != user_id:
+        raise HTTPException(404, "分享链接已失效")
+    quote = quote.strip()
+    if not quote or len(quote) > 120 or quote not in share.content:
+        raise HTTPException(422, "请从完整选文中保留一段 1–120 字的连续原文")
+    asset = await _excerpt_image(db, share)
+    picture = None
+    if asset:
+        # The poster supplies its own brand lockup; use the original managed image.
+        path = await asyncio.to_thread(image_asset_file_path, asset)
+        picture = await asyncio.to_thread(path.read_bytes)
+    try:
+        code = await fetch_miniprogram_code(path=f"pages/book-reader/index?excerptToken={token}", width=280)
+    except WeChatMiniProgramCodeError as exc:
+        raise HTTPException(503, "小程序码生成失败，请稍后重试") from exc
+    return await asyncio.to_thread(render_excerpt_share_poster, title=share.title or share.chapter_title,
+        book_title=share.book_title, quote=quote, code_content=code,
+        image_content=picture, ai_image=bool(asset and asset.provider != "user_upload"))
+
+
 async def shared_card(db: AsyncSession, token: str, *, version_id: str = "", excerpt_start: int = 0, excerpt_length: int = 0) -> bytes:
     from app.services.memoir.reading_share_card import render_reading_share_card
 

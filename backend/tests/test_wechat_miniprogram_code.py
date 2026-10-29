@@ -50,3 +50,13 @@ async def test_wechat_error_payload_is_reported(wechat):
 
     with pytest.raises(wechat_miniprogram_code.WeChatMiniProgramCodeError, match="41030"):
         await wechat_miniprogram_code.fetch_miniprogram_code(scene="b" * 20, page="pages/p/index")
+
+
+async def test_long_excerpt_token_uses_existing_route_without_scene(wechat):
+    requests, responses = wechat
+    responses["/wxa/getwxacode"] = httpx.Response(200, content=b"png", headers={"content-type": "image/png"})
+    path = "pages/book-reader/index?excerptToken=x1." + "a" * 43
+    assert await wechat_miniprogram_code.fetch_miniprogram_code(path=path) == b"png"
+    body = json.loads(requests[-1].content)
+    assert body["path"] == path and body["env_version"] == "trial"
+    assert "scene" not in body and "check_path" not in body

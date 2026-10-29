@@ -563,3 +563,5 @@
 .reading-image-gallery text {
   text-align: center;
 }
+
+.excerpt-poster-quote { box-sizing: border-box; width: 100%; min-height: 144rpx; padding: 24rpx; background: var(--ui-surface); color: var(--ui-text-primary); border-radius: var(--ui-radius-inner); font-size: var(--ui-font-body); line-height: 1.8; }

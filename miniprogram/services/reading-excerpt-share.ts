@@ -1,7 +1,8 @@
 import { createMemoirExcerptShare, readMemoirExcerptShare, suggestMemoirExcerptTitle, createMemoirExcerptImageJob, getMemoirIllustrationStyles } from "./memoir-book-api";
-import { excerptShareMessage, enableMiniProgramShareMenu, hideMiniProgramShareMenu } from "./share";
+import { excerptShareMessage, enableMiniProgramShareMenu, hideMiniProgramShareMenu, saveImageToAlbum, isShareFileMessageCancelError } from "./share";
 import type { MemoirShareLikeTarget } from "../domain/memoir-share-likes";
-import { ApiError } from "./request";
+import { downloadAuthenticatedFile } from "./authenticated-media";
+import { ApiError, cleanBaseUrl, readBackendConfig } from "./request";
 import type { MemoirExcerptShare } from "../domain/memoir-book";
 import { TranscriptMaterialImageController, initialTranscriptMaterialImageTaskState } from "./transcript-material-image";
 import { getMemoirMaterialImageGenerationJob } from "./memoir-transcript-api";
@@ -18,6 +19,9 @@ export const INITIAL_EXCERPT_DATA = {
   excerptContent: "", excerptBookTitle: "", excerptChapterTitle: "",
   excerptImageUrl: "", excerptImageReady: false, excerptBusy: false, excerptSelectionCount: 0,
   excerptReloadRequired: false,
+  excerptOutput: "card" as "card" | "poster",
+  excerptPosterQuote: "", excerptPosterPath: "", excerptPosterBusy: false,
+  excerptPosterError: "", excerptPosterSaving: false,
 };
 
 interface ExcerptHost {
@@ -42,7 +46,7 @@ export const readingExcerptMethods = methods({
     this.excerptGeneration++;
     this.sharedReadGeneration++;
     this.excerptImageController?.cancel();
-    this.setData({ excerptBusy: false, excerptTitleBusy: false, loading: false });
+    this.setData({ excerptBusy: false, excerptTitleBusy: false, loading: false, excerptPosterBusy: false, excerptPosterSaving: false });
   },
   onExcerptEditorReady() {
     const generation = this.excerptGeneration;
@@ -197,7 +201,9 @@ export const readingExcerptMethods = methods({
       this.excerptToken = share.token;
       this.setData({ excerptMode: "preview", excerptTitle: share.title, excerptSummary: share.summary, excerptContent: share.content,
         excerptBookTitle: share.book_title, excerptChapterTitle: share.chapter_title,
-        excerptImageUrl: excerptShareMessage(share.token, share.title).imageUrl || "", excerptImageReady: false },
+        excerptImageUrl: excerptShareMessage(share.token, share.title).imageUrl || "", excerptImageReady: false,
+        excerptOutput: "card", excerptPosterQuote: Array.from(share.content).slice(0, 120).join(""),
+        excerptPosterPath: "", excerptPosterError: "" },
         () => wx.pageScrollTo?.({ scrollTop: 0, duration: 0 }));
     } catch (error) {
       if (generation === this.excerptGeneration) this.setData({ error: error instanceof Error ? error.message : "分享卡片准备失败",
@@ -207,10 +213,60 @@ export const readingExcerptMethods = methods({
     }
   },
   editExcerptCard() {
+    this.invalidateExcerptRequests();
     this.excerptToken = "";
     this.setData({ excerptMode: "compose", excerptImageReady: false, error: "" },
       () => wx.pageScrollTo?.({ scrollTop: 0, duration: 0 }));
     this.resumeExcerptImage();
+  },
+  chooseExcerptOutput(event: { currentTarget: { dataset: { output: "card" | "poster" } } }) {
+    if (this.data.excerptPosterBusy || this.data.excerptPosterSaving) return;
+    this.setData({ excerptOutput: event.currentTarget.dataset.output });
+  },
+  changeExcerptPosterQuote(event: { detail: { value: string } }) {
+    if (this.data.excerptPosterBusy || this.data.excerptPosterSaving) return;
+    this.setData({ excerptPosterQuote: event.detail.value, excerptPosterPath: "", excerptPosterError: "" });
+  },
+  async generateExcerptPoster() {
+    if (this.data.excerptMode !== "preview" || !this.excerptToken || this.data.excerptPosterBusy) return;
+    const quote = this.data.excerptPosterQuote.trim();
+    if (!quote || Array.from(quote).length > 120 || !this.data.excerptContent.includes(quote)) {
+      this.setData({ excerptPosterError: "请从完整选文中保留一段 1–120 字的连续原文。" });
+      return;
+    }
+    const generation = this.excerptGeneration;
+    const token = this.excerptToken;
+    this.setData({ excerptPosterBusy: true, excerptPosterError: "", excerptPosterPath: "" });
+    try {
+      const base = cleanBaseUrl(readBackendConfig().httpBaseUrl);
+      const path = await downloadAuthenticatedFile(
+        `${base}/api/mobile/memoir/excerpt-shares/${encodeURIComponent(token)}/poster.jpg?quote=${encodeURIComponent(quote)}`,
+        { failureMessage: "图片生成失败，请稍后重试。", domainLabel: "分享图片" });
+      if (generation === this.excerptGeneration && token === this.excerptToken) this.setData({ excerptPosterPath: path });
+    } catch (error) {
+      if (generation === this.excerptGeneration) this.setData({ excerptPosterError: error instanceof Error ? error.message : "图片生成失败，请重试。" });
+    } finally {
+      if (generation === this.excerptGeneration) this.setData({ excerptPosterBusy: false });
+    }
+  },
+  previewExcerptPoster() {
+    const path = this.data.excerptPosterPath;
+    if (path) wx.previewImage({ urls: [path], current: path });
+  },
+  async saveExcerptPoster() {
+    if (!this.data.excerptPosterPath || this.data.excerptPosterSaving) return;
+    const generation = this.excerptGeneration;
+    this.setData({ excerptPosterSaving: true, excerptPosterError: "" });
+    try {
+      await saveImageToAlbum(this.data.excerptPosterPath);
+      if (generation === this.excerptGeneration) wx.showToast({ title: "已保存到相册", icon: "success" });
+    } catch (error) {
+      if (generation === this.excerptGeneration && !isShareFileMessageCancelError(error)) {
+        this.setData({ excerptPosterError: error instanceof Error ? error.message : "保存失败，请重试。" });
+      }
+    } finally {
+      if (generation === this.excerptGeneration) this.setData({ excerptPosterSaving: false });
+    }
   },
   openExcerptReading() {
     const link = this.data.excerptReadingLink;

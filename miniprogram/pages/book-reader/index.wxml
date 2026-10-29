@@ -46,12 +46,31 @@
   <block wx:elif="{{excerptMode === 'preview'}}">
     <text class="excerpt-eyebrow">选文分享</text>
     <text class="excerpt-help">请确认选中的文字没有不想公开的内容。</text>
-    <image class="excerpt-card-image" src="{{excerptImageUrl}}" data-url="{{excerptImageUrl}}" mode="widthFix" bindload="onExcerptImageLoad" binderror="onExcerptImageError" />
-    <text class="excerpt-help">已选 {{excerptSelectionCount}} 字 · 好友点开可读全部选文</text>
-    <view class="excerpt-actions">
-      <button class="ui-share-more" bindtap="editExcerptCard">修改卡片</button>
-      <button class="excerpt-share-button" open-type="{{excerptImageReady ? 'share' : ''}}" disabled="{{!excerptImageReady}}">分享给好友</button>
+    <view class="excerpt-style-choices" aria-role="radiogroup" aria-label="分享方式">
+      <button class="excerpt-style-choice {{excerptOutput === 'card' ? 'selected' : ''}}" data-output="card" bindtap="chooseExcerptOutput" disabled="{{excerptPosterBusy || excerptPosterSaving}}" aria-role="radio" aria-checked="{{excerptOutput === 'card'}}">小程序卡片<text>发给微信好友</text></button>
+      <button class="excerpt-style-choice {{excerptOutput === 'poster' ? 'selected' : ''}}" data-output="poster" bindtap="chooseExcerptOutput" disabled="{{excerptPosterBusy || excerptPosterSaving}}" aria-role="radio" aria-checked="{{excerptOutput === 'poster'}}">图文图片<text>保存后发朋友圈、小红书</text></button>
     </view>
+    <block wx:if="{{excerptOutput === 'card'}}">
+      <image class="excerpt-card-image" src="{{excerptImageUrl}}" data-url="{{excerptImageUrl}}" mode="widthFix" bindload="onExcerptImageLoad" binderror="onExcerptImageError" />
+      <text class="excerpt-help">已选 {{excerptSelectionCount}} 字 · 好友点开可读全部选文</text>
+      <view class="excerpt-actions">
+        <button class="ui-share-more" bindtap="editExcerptCard">修改卡片</button>
+        <button class="excerpt-share-button" open-type="{{excerptImageReady ? 'share' : ''}}" disabled="{{!excerptImageReady}}">分享给好友</button>
+      </view>
+    </block>
+    <block wx:else>
+      <text class="excerpt-summary-label">图片上的原文摘录</text>
+      <textarea class="excerpt-poster-quote" value="{{excerptPosterQuote}}" maxlength="120" auto-height disabled="{{excerptPosterBusy || excerptPosterSaving}}" bindinput="changeExcerptPosterQuote" />
+      <text class="excerpt-help">保留最想分享的两三句话，最多 120 字。扫码可读全部选文；图片沿用刚才选好的插图或照片。</text>
+      <image wx:if="{{excerptPosterPath}}" class="excerpt-card-image" src="{{excerptPosterPath}}" mode="widthFix" bindtap="previewExcerptPoster" aria-label="查看分享图片大图" />
+      <text wx:if="{{excerptPosterBusy}}" class="excerpt-help">正在排版并生成小程序码…</text>
+      <text wx:if="{{excerptPosterError}}" class="excerpt-selection-error">{{excerptPosterError}}</text>
+      <view class="excerpt-actions">
+        <button class="ui-share-more" bindtap="editExcerptCard" disabled="{{excerptPosterBusy || excerptPosterSaving}}">修改图文</button>
+        <button wx:if="{{!excerptPosterPath}}" class="excerpt-share-button" bindtap="generateExcerptPoster" loading="{{excerptPosterBusy}}" disabled="{{excerptPosterBusy}}">生成图文图片</button>
+        <button wx:else class="excerpt-share-button" bindtap="saveExcerptPoster" loading="{{excerptPosterSaving}}" disabled="{{excerptPosterSaving}}">保存到相册</button>
+      </view>
+    </block>
   </block>
   <view wx:if="{{error}}" class="reader-state error">
     <text>{{error}}</text>

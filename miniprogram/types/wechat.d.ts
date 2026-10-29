@@ -510,7 +510,7 @@ declare namespace WechatMiniprogram {
     complete?(result: GeneralCallbackResult): void;
   }
 
-  interface SaveVideoToPhotosAlbumOption {
+  interface SaveToPhotosAlbumOption {
     filePath: string;
     success?(result: GeneralCallbackResult): void;
     fail?(result: GeneralCallbackResult): void;
@@ -578,7 +578,8 @@ declare namespace WechatMiniprogram {
     showShareMenu?(option: ShowShareMenuOption): void;
     hideShareMenu?(): void;
     shareFileMessage?(option: ShareFileMessageOption): void;
-    saveVideoToPhotosAlbum?(option: SaveVideoToPhotosAlbumOption): void;
+    saveImageToPhotosAlbum(option: SaveToPhotosAlbumOption): void;
+    saveVideoToPhotosAlbum?(option: SaveToPhotosAlbumOption): void;
     previewImage(option: PreviewImageOption): void;
     enableAlertBeforeUnload?(option: { message: string }): void;
     disableAlertBeforeUnload?(option?: Record<string, never>): void;

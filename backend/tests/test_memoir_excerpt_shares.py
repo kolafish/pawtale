@@ -268,6 +268,7 @@ async def test_excerpt_image_reuses_jobs_styles_and_asset_management_with_single
     assert len(calls) == 1 and calls[0][0] == get_settings().memoir_excerpt_image_model
     assert payload["content"] in calls[0][1]
     assert background_note in calls[0][1]
+    assert "#fcf8f1" in calls[0][1]
     assert calls[0][0] != get_settings().volc_ark_image_model
     assets = (await client.get(f"/api/mobile/memoir/projects/{project_id}/image-assets")).json()["items"]
     assert len(assets) == 1
@@ -294,3 +295,61 @@ async def test_excerpt_image_reuses_jobs_styles_and_asset_management_with_single
     repeated = await client.post(path + "/image-jobs", json={**payload, "background_note": "  我们是我和妹妹，那年我十岁  " if background_note else "  "})
     assert repeated.json()["job_id"] == job["job_id"]
     assert (await client.post(path + "/image-jobs", json={**payload, "background_note": "我" * 301})).status_code == 422
+
+
+async def test_poster_uses_only_confirmed_quote_and_code_opens_same_excerpt(client, test_db, monkeypatch):
+    from app.services import wechat_miniprogram_code
+    project_id, chapter, _, version, _, _, _ = await saved_stories(client, test_db)
+    selected = "院子里的正文"
+    snapshot = (await client.post(f"/api/mobile/memoir/projects/{project_id}/chapters/{chapter.id}/excerpt-shares",
+                                 json={"version_id": version.id, "content": selected, "title": "一家人的院子"})).json()
+    code_calls = []
+    code = BytesIO()
+    Image.new("RGBA", (280, 280), "black").save(code, "PNG")
+
+    async def make_code(**kwargs):
+        code_calls.append(kwargs)
+        return code.getvalue()
+
+    monkeypatch.setattr(wechat_miniprogram_code, "fetch_miniprogram_code", make_code)
+    path = f'/api/mobile/memoir/excerpt-shares/{snapshot["token"]}/poster.jpg'
+    params = {"quote": selected}
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as guest:
+        assert (await guest.get(path, params=params)).status_code == 401
+    async with await _family_member(test_db, "另一位用户") as other:
+        assert (await other.get(path, params=params)).status_code == 404
+    for quote in ("", "改写后的句子", "字" * 121):
+        assert (await client.get(path, params={"quote": quote})).status_code == 422
+    assert not code_calls
+    drawn = []
+    original = reading_share_card._text
+    monkeypatch.setattr(reading_share_card, "_text", lambda image, text, box, **kwargs: drawn.append(text) or original(image, text, box, **kwargs))
+    response = await client.get(path, params=params)
+    assert response.status_code == 200, response.text if response.status_code != 200 else ""
+    assert response.headers["cache-control"] == "no-store"
+    with Image.open(BytesIO(response.content)) as poster:
+        assert poster.size == (1200, 1600) and poster.format == "JPEG"
+    assert selected in drawn and "一家人的院子" in drawn
+    assert "另一则私密正文" not in "".join(drawn)
+    assert code_calls == [{"path": f'pages/book-reader/index?excerptToken={snapshot["token"]}', "width": 280}]
+    assert (await client.post("/api/mobile/memoir/excerpt-shares/read", json={"token": snapshot["token"]})).json()["content"] == selected
+
+    async def unavailable(**kwargs):
+        raise wechat_miniprogram_code.WeChatMiniProgramCodeError("upstream unavailable")
+
+    monkeypatch.setattr(wechat_miniprogram_code, "fetch_miniprogram_code", unavailable)
+    assert (await client.get(path, params=params)).status_code == 503
+
+
+def test_poster_preserves_photo_frame_and_fades_only_illustration_edges():
+    picture, code = BytesIO(), BytesIO()
+    Image.new("RGB", (600, 400), "#243c74").save(picture, "PNG")
+    Image.new("RGB", (280, 280), "black").save(code, "PNG")
+    posters = [reading_share_card.render_excerpt_share_poster(title="长标题" * 13, book_title="长书名" * 20,
+        quote="原文" * 60, image_content=picture.getvalue(), code_content=code.getvalue(), ai_image=ai) for ai in (False, True)]
+    with Image.open(BytesIO(posters[0])) as photo, Image.open(BytesIO(posters[1])) as illustration:
+        assert photo.size == illustration.size == (1200, 1600)
+        assert max(abs(a-b) for a,b in zip(photo.getpixel((600, 650)), (36, 60, 116))) < 5
+        # Both preserve the image center; only the illustration fades at its top edge.
+        assert max(abs(a-b) for a,b in zip(illustration.getpixel((600, 650)), (36, 60, 116))) < 5
+        assert sum(illustration.getpixel((600, 412))) > sum(photo.getpixel((600, 412))) + 200
