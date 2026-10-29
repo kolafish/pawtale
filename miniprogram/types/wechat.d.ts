@@ -72,6 +72,7 @@ declare function Component<
 declare namespace WechatMiniprogram {
   interface BoundingClientRectResult { top: number; bottom: number; left: number; right: number; width: number; height: number }
   interface NodesRef {
+    fields(options: { size?: boolean; computedStyle?: string[] }, callback: (result: { width?: number; height?: number; top?: string } | null) => void): SelectorQuery;
     context(callback: (result: { context: EditorContext } | null) => void): SelectorQuery;
     boundingClientRect(callback: (rect: BoundingClientRectResult | null) => void): SelectorQuery;
     scrollOffset(callback: (offset: { scrollTop: number; scrollLeft: number }) => void): SelectorQuery;
@@ -580,7 +581,7 @@ declare namespace WechatMiniprogram {
     switchTab(option: NavigateOption): void;
     navigateBack(option?: NavigateBackOption): void;
     createSelectorQuery(): SelectorQuery;
-    pageScrollTo(option: { scrollTop?: number; selector?: string; duration?: number }): void;
+    pageScrollTo(option: { scrollTop?: number; selector?: string; offsetTop?: number; duration?: number }): void;
     showActionSheet(option: ActionSheetOption): void;
     showModal(option: ModalOption): void;
     showToast(option: ToastOption): void;
