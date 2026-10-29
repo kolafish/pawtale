@@ -355,8 +355,62 @@ def test_poster_preserves_photo_frame_and_fades_only_illustration_edges():
     posters = [reading_share_card.render_excerpt_share_poster(title="长标题" * 13, book_title="长书名" * 20,
         quote="原文" * 60, image_content=picture.getvalue(), code_content=code.getvalue(), ai_image=ai) for ai in (False, True)]
     with Image.open(BytesIO(posters[0])) as photo, Image.open(BytesIO(posters[1])) as illustration:
-        assert photo.size == illustration.size == (1200, 1600)
+        assert photo.size == illustration.size
+        assert photo.width == 1200 and photo.height > 1600
         assert max(abs(a-b) for a,b in zip(photo.getpixel((600, 650)), (36, 60, 116))) < 5
         # Both preserve the image center; only the illustration fades at its top edge.
         assert max(abs(a-b) for a,b in zip(illustration.getpixel((600, 650)), (36, 60, 116))) < 5
         assert sum(illustration.getpixel((600, 412))) > sum(photo.getpixel((600, 412))) + 200
+
+
+@pytest.mark.parametrize("with_image", [False, True])
+def test_long_posters_grow_without_shrinking_text_or_the_scan_code(monkeypatch, with_image):
+    from PIL import ImageDraw
+
+    picture, code = BytesIO(), BytesIO()
+    Image.new("RGB", (600, 400), "#b5a38f").save(picture, "PNG")
+    Image.new("RGB", (280, 280), "black").save(code, "PNG")
+    drawn = []
+    original = ImageDraw.ImageDraw.text
+
+    def draw_text(self, xy, text, **kwargs):
+        if text and set(text) == {"忆"}:
+            drawn.append((text, kwargs["font"].size))
+        return original(self, xy, text, **kwargs)
+
+    monkeypatch.setattr(ImageDraw.ImageDraw, "text", draw_text)
+    sizes, code_boxes, font_sizes = [], [], []
+    for quote in ["忆" * 20, "忆" * 120]:
+        drawn.clear()
+        result = reading_share_card.render_excerpt_share_poster(
+            title="家里的往事", book_title="回忆录", quote=quote, code_content=code.getvalue(),
+            image_content=picture.getvalue() if with_image else None,
+        )
+        assert "".join(line for line, _ in drawn) == quote
+        font_sizes.append({size for _, size in drawn})
+        with Image.open(BytesIO(result)) as poster:
+            sizes.append(poster.size)
+            # The test's solid black code lets us check its actual exported footprint.
+            top = poster.height // 2  # Exclude the black portrait in the brand lockup.
+            box = poster.crop((0, top, poster.width, poster.height)).convert("L").point(lambda value: 255 if value < 10 else 0).getbbox()
+            assert box is not None
+            box = (box[0], box[1] + top, box[2], box[3] + top)
+            assert (box[2] - box[0], box[3] - box[1]) == (220, 220)
+            assert box[0] + box[2] == poster.width
+            assert box[3] < poster.height
+            code_boxes.append(box)
+    assert font_sizes[0] == font_sizes[1]
+    assert sizes[0][0] == sizes[1][0] == 1200
+    assert sizes[1][1] > sizes[0][1]
+    assert code_boxes[1][1] - code_boxes[0][1] == sizes[1][1] - sizes[0][1]
+
+
+def test_poster_quote_wraps_punctuation_with_its_words():
+    from PIL import ImageFont
+
+    font = ImageFont.truetype(str(reading_share_card._ASSETS / "fonts" / "NotoSerifSC-Regular.ttf"), 48)
+    quote = '小时候，夏夜的路总是很长。我们追着萤火虫，走过一块又一块石板，觉得只要牵着手，就永远不会走散。他说：“回家吧。”'
+    lines = reading_share_card._wrapped_lines(quote, font, 984, book_typography=True)
+    assert "".join(lines) == quote
+    assert all(line[0] not in '，。！？；：、”’）' and line[-1] not in '“‘（' for line in lines)
+    assert all(font.getlength(line) <= 984 for line in lines)

@@ -9,23 +9,36 @@ _ASSETS = Path(__file__).resolve().parents[2] / "assets"
 _INK = "#614b39"
 
 
-def _text(image: Image.Image, text: str, box: tuple[int, int, int, int], *, size: int, minimum: int = 22, align: str = "center", bold: bool = False) -> None:
+def _wrapped_lines(text: str, font: ImageFont.FreeTypeFont, width: int, *, book_typography: bool = False) -> list[str]:
+    if book_typography:
+        from app.services.memoir.book_output_pdf_renderer import LINE_START_FORBIDDEN_CHARS, LINE_END_FORBIDDEN_CHARS
+
+    lines: list[str] = []
+    line = ""
+    for char in " ".join(text.split()):
+        if line and font.getlength(line + char) > width:
+            next_line = char
+            if book_typography:
+                while len(line) > 1 and (next_line[0] in LINE_START_FORBIDDEN_CHARS or line[-1] in LINE_END_FORBIDDEN_CHARS):
+                    next_line = line[-1] + next_line
+                    line = line[:-1]
+            lines.append(line)
+            line = next_line
+            continue
+        line += char
+    if line:
+        lines.append(line)
+    return lines
+
+
+def _text(image: Image.Image, text: str, box: tuple[int, int, int, int], *, size: int, minimum: int = 22, align: str = "center", bold: bool = False, line_spacing: float = 1.55, color: str = _INK, book_typography: bool = False) -> None:
     """Wrap by measured glyph width, shrinking before truncating very long titles."""
     left, top, right, bottom = box
     draw = ImageDraw.Draw(image)
-    text = " ".join(text.split())
     for font_size in range(size, minimum - 1, -2):
         font = ImageFont.truetype(str(_ASSETS / "fonts" / ("NotoSerifSC-Bold.ttf" if bold else "NotoSerifSC-Regular.ttf")), font_size)
-        lines: list[str] = []
-        line = ""
-        for char in text:
-            if line and draw.textlength(line + char, font=font) > right - left:
-                lines.append(line)
-                line = ""
-            line += char
-        if line:
-            lines.append(line)
-        height = round(font_size * 1.55)
+        lines = _wrapped_lines(text, font, right - left, book_typography=book_typography)
+        height = round(font_size * line_spacing)
         if len(lines) * height <= bottom - top:
             break
     limit = max(1, (bottom - top) // height)
@@ -37,7 +50,7 @@ def _text(image: Image.Image, text: str, box: tuple[int, int, int, int], *, size
     y = top + (bottom - top - len(lines) * height) / 2
     for line in lines:
         x = left if align == "left" else (left + right - draw.textlength(line, font=font)) / 2
-        draw.text((x, y), line, font=font, fill=_INK, anchor="lt")
+        draw.text((x, y), line, font=font, fill=color, anchor="lt")
         y += height
 
 
@@ -45,13 +58,7 @@ def _caption_height(text: str, *, width: int) -> int:
     if not text:
         return 0
     font = ImageFont.truetype(str(_ASSETS / "fonts" / "NotoSerifSC-Regular.ttf"), 22)
-    lines, line = 1, ""
-    for char in text:
-        if line and font.getlength(line + char) > width:
-            lines += 1
-            line = ""
-        line += char
-    return lines * 34 + 8
+    return len(_wrapped_lines(text, font, width)) * 34 + 8
 
 
 @lru_cache(maxsize=64)
@@ -102,17 +109,25 @@ def render_excerpt_share_card(*, book_title: str, chapter_title: str, content: s
 
 def render_excerpt_share_poster(*, title: str, book_title: str, quote: str, code_content: bytes,
                                 image_content: bytes | None = None, ai_image: bool = False, caption: str = "") -> bytes:
-    """A 3:4 story print. The quote is validated against the published selection by the caller."""
+    """A story print that grows for long quotes, keeping the type and code readable."""
     from PIL import ImageChops
 
     paper = "#fcf8f1"
-    image = Image.new("RGB", (1200, 1600), paper)
+    quote_top = 930 if image_content else 490
+    quote_size = 48 if image_content else 66
+    quote_spacing = 1.65
+    quote_font = ImageFont.truetype(str(_ASSETS / "fonts" / "NotoSerifSC-Regular.ttf"), quote_size)
+    quote_height = len(_wrapped_lines(quote, quote_font, 984, book_typography=True)) * round(quote_size * quote_spacing)
+    # Grow the paper instead of shrinking or truncating the author's excerpt.
+    quote_bottom = max(1200, quote_top + quote_height + 48)
+    footer_top = quote_bottom + 20
+    image = Image.new("RGB", (1200, footer_top + 380), paper)
     draw = ImageDraw.Draw(image)
     with Image.open(_ASSETS / "branding" / "laoyu-portrait.png") as source:
         mark = source.convert("RGBA")
         mark = ImageOps.contain(mark.crop(mark.getbbox()), (104, 116))
     image.paste(mark, (80, 44), mark)
-    _text(image, "老余口述", (210, 48, 500, 110), size=42, align="left", bold=True)
+    _text(image, "老余口述", (210, 40, 500, 116), size=46, minimum=46, align="left", bold=True)
     _text(image, "把家人的故事，慢慢写成一本书", (210, 116, 1120, 158), size=25, align="left")
     _text(image, title, (80, 187, 1120, 368), size=76, minimum=44, align="left", bold=True)
     draw.line((82, 388, 172, 388), fill="#b9785c", width=4)
@@ -136,20 +151,16 @@ def render_excerpt_share_poster(*, title: str, book_title: str, quote: str, code
         image.paste(picture, ((1200 - picture.width) // 2, 410 + (picture_height - picture.height) // 2), picture)
         if label:
             _text(image, label, (80, 930 - caption_height, 1120, 930), size=22)
-        quote_top = 930
-    else:
-        quote_top = 490
-    # 120 Chinese glyphs fit at the minimum readable size, including long unbroken text.
-    _text(image, quote, (108, quote_top, 1092, 1200), size=38 if image_content else 52,
-          minimum=34, align="left")
-    draw.line((80, 1220, 1120, 1220), fill="#decfbd", width=1)
-    _text(image, f"选自《{book_title}》", (80, 1230, 1120, 1292), size=28, minimum=22)
+    _text(image, quote, (108, quote_top, 1092, quote_bottom), size=quote_size,
+          minimum=quote_size, align="left", line_spacing=quote_spacing, book_typography=True)
+    draw.line((80, footer_top, 1120, footer_top), fill="#decfbd", width=1)
+    _text(image, f"选自《{book_title}》", (80, footer_top + 10, 1120, footer_top + 72), size=28, minimum=22)
     # A quiet centered paper panel; never cover or redraw the official code/avatar.
-    draw.rounded_rectangle((480, 1300, 720, 1540), radius=26, fill="#f3ebdf")
+    draw.rounded_rectangle((480, footer_top + 80, 720, footer_top + 320), radius=26, fill="#f3ebdf")
     with Image.open(BytesIO(code_content)) as source:
         code = ImageOps.contain(source.convert("RGBA"), (220, 220))
-    image.paste(code, ((1200 - code.width) // 2, 1310 + (220 - code.height) // 2), code)
-    _text(image, "微信扫码 · 阅读这段回忆", (80, 1548, 1120, 1590), size=24)
+    image.paste(code, ((1200 - code.width) // 2, footer_top + 90 + (220 - code.height) // 2), code)
+    _text(image, "微信扫码 · 阅读这段回忆", (80, footer_top + 324, 1120, footer_top + 376), size=28, minimum=28, color="#49382b")
     output = BytesIO()
     image.save(output, "JPEG", quality=94, optimize=True)
     return output.getvalue()
