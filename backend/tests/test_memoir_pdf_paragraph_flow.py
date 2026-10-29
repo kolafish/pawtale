@@ -133,3 +133,63 @@ def test_multiple_portraits_share_the_text_flow_across_pages(tmp_path):
             beside = [line for line in page.commands if line.y + line.font_size > image.y and line.y < image.y + image.height]
             assert beside
             assert all(line.x + _estimated_text_width(line.text, line.font_size) < image.x for line in beside)
+
+
+@pytest.mark.parametrize("edition", list(MemoirBookOutputExportLayout))
+@pytest.mark.parametrize("short_tail", [False, True])
+def test_short_prose_groups_portraits_below_text_in_rows(tmp_path, monkeypatch, edition, short_tail):
+    from app.services.memoir import book_output_export
+    monkeypatch.setattr(book_output_export, "DATA_DIR", tmp_path)
+    for index in range(3):
+        Image.new("RGB", (600, 1000), "#789081").save(tmp_path / f"{index}.jpg")
+    text = "我那年开始工作，后来回到村里。" * 6
+    if short_tail:
+        text = "我常常回想当时的经历。" * 100 + "\n" + text
+    layout = PDF_LAYOUTS[edition]
+    builder = PDFBookBuilder(title="往事", layout=layout)
+    _add_chapters(builder, [{"title": "工作经历", "sections": [{"section_id": "s", "title": "村里的日子", "content": text}],
+        "illustrations": [{"storage_path": f"{i}.jpg", "placement": "chapter_inline", "section_id": "s",
+                           "inline_position": "after" if short_tail else "before"} for i in range(3)]}])
+    images = [(page, image) for page in builder.pages for image in page.images if image.path.name in {"0.jpg", "1.jpg", "2.jpg"}]
+    assert len(images) == 3
+    first_page, first = images[0]
+    second_page, second = images[1]
+    assert first_page is second_page
+    assert first.y + first.height == pytest.approx(second.y + second.height)
+    assert first.x + first.width < second.x
+    assert images[2][1].x + images[2][1].width / 2 == pytest.approx(builder._content_left() + (layout.page_width - 2 * layout.margin_x) / 2)
+    for page, image in images:
+        assert image.width / image.height == pytest.approx(0.6)
+        assert image.y >= layout.margin_bottom
+        assert image.y + image.height <= layout.page_height - layout.margin_top
+        assert all(line.y > image.y + image.height for line in page.commands if line.font_size == layout.font_size)
+    assert "".join(line.text for page in builder.pages for line in page.commands if line.font_size == layout.font_size) == text.replace("\n", "")
+
+
+@pytest.mark.parametrize("remaining_height", [200, 310])
+def test_image_gallery_breaks_by_row_instead_of_moving_the_whole_group(tmp_path, remaining_height):
+    path = tmp_path / "image.jpg"
+    Image.new("RGB", (600, 1000), "#789081").save(path)
+    layout = PDF_LAYOUTS[MemoirBookOutputExportLayout.STANDARD]
+    builder = PDFBookBuilder(title="往事", layout=layout)
+    builder.new_page("正文", body_numbering=True)
+    builder.y = layout.margin_bottom + remaining_height
+    builder.add_image_gallery([path] * 7)
+    rows_per_page = [len(page.images) for page in builder.pages]
+    assert rows_per_page[0] == 2
+    assert sum(rows_per_page) == 7
+    assert all(image.y >= layout.margin_bottom for page in builder.pages for image in page.images)
+
+
+def test_long_prose_keeps_multiple_portraits_in_text_flow(tmp_path, monkeypatch):
+    from app.services.memoir import book_output_export
+    monkeypatch.setattr(book_output_export, "DATA_DIR", tmp_path)
+    Image.new("RGB", (600, 1000), "#789081").save(tmp_path / "portrait.jpg")
+    builder = PDFBookBuilder(title="往事", layout=PDF_LAYOUTS[MemoirBookOutputExportLayout.STANDARD])
+    _add_chapters(builder, [{"title": "工作经历", "sections": [{"section_id": "s", "title": "村里的日子", "content": "我那年开始工作，后来回到村里。" * 160}],
+        "illustrations": [{"storage_path": "portrait.jpg", "placement": "chapter_inline", "section_id": "s", "inline_position": "before"}] * 3}])
+    images = [(page, image) for page in builder.pages for image in page.images if image.path.name == "portrait.jpg"]
+    assert len(images) == 3
+    for page, image in images:
+        assert any(line.y > image.y and line.y < image.y + image.height and line.x < image.x
+                   for line in page.commands if line.font_size == builder.layout.font_size)

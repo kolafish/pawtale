@@ -944,7 +944,8 @@ for (const shared of [false, true]) test(`${shared ? "shared" : "owner"} chapter
   const context = pageContext(page);
   await context.onLoad(shared ? { shareToken: "family" } : { projectId: "p", chapterId: "chapter-1" });
   assert.deepEqual(context.data.bookPreviewChapters[0].sections[0].paragraphs, ["开头。", "中间。", "结尾。"]);
-  assert.deepEqual(context.data.shareImages.map(image => image.paragraphBefore), [0, 2, 3]);
+  assert.deepEqual(context.data.shareImages.map(image => image.paragraphBefore), [0, 1, 2]);
+  assert.equal(context.data.imageGallerySections["section-1"], true, "short prose groups all images below the text");
   assert.equal(context.data.shareImages.every(image => image.chapterId === "chapter-1" && image.sectionId === "section-1" && image.url), true);
   assert.equal(downloads.length, shared ? 0 : 3);
   for (const image of context.data.shareImages) {
@@ -1314,4 +1315,26 @@ test("excerpt image notes reach generation and changing them requires a fresh im
   context.changeExcerptBackgroundNote({ detail: { value: "  " } });
   await context.generateExcerptImage();
   assert.equal(requests[2].background_note, "");
+});
+
+for (const [label, paragraphs, ratio, position, grouped] of [
+  ["short story and several portraits", ["我那年开始工作。".repeat(12)], 1.8, "before", true],
+  ["enough prose for several portraits", ["我那年开始工作。".repeat(100)], 1.8, "before", false],
+  ["short ending despite long opening", ["我那年开始工作。".repeat(100), "后来回家了。"], 1.8, "after", true],
+  ["very tall portraits", ["我那年开始工作。".repeat(60)], 8, "before", true],
+  ["landscapes preserve their placement", ["后来回家了。"], 0.6, "after", false],
+]) test(`reading images choose a gallery for ${label}`, () => {
+  const { page } = loadBookReaderPage();
+  const context = pageContext(page);
+  context.bookChapters = [{ chapterId: "c", sections: [{ id: "s", paragraphs }] }];
+  const images = Array.from({ length: 3 }, (_, i) => ({ id: `image-${i}`, chapterId: "c", sectionId: "s",
+    paragraphCount: paragraphs.length, paragraphBefore: 0, position, portrait: ratio > 1, aspectRatio: ratio,
+    url: `image-${i}.jpg`, disclosure: "AI" }));
+  context.layoutReadingImages(images);
+  assert.equal(Boolean(context.data.imageGallerySections.s), grouped);
+  assert.equal(context.data.shareImages.length, images.length);
+  assert.deepEqual(context.bookChapters[0].sections[0].paragraphs, paragraphs);
+  context.data.pageClass = "book-reader-page large-text";
+  context.layoutReadingImages(context.data.shareImages);
+  assert.equal(Boolean(context.data.imageGallerySections.s), grouped);
 });

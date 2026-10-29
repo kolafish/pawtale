@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta, timezone
@@ -1147,6 +1148,29 @@ def _add_illustrations(
         _add_illustration(builder, illustration, wrap_max_height=wrap_max_height)
 
 
+def _add_illustration_gallery(builder: PDFBookBuilder, illustrations: list[dict[str, Any]]) -> None:
+    builder.add_image_gallery([path for image in illustrations if (path := _illustration_file_path(image))])
+
+
+def _needs_illustration_gallery(builder: PDFBookBuilder, paragraphs: list[str], images_before: dict[int, list[dict[str, Any]]]) -> bool:
+    """Each insertion point needs enough remaining prose for all later portraits."""
+    layout = builder.layout
+    content_width = layout.page_width - layout.margin_x * 2
+    line_units = (content_width * 0.62 - layout.font_size) / layout.font_size
+    max_height = layout.page_height - layout.margin_top - layout.margin_bottom - layout.line_height
+    required_units = 0.0
+    for index in sorted(images_before, reverse=True):
+        for image in images_before[index]:
+            ratio = _illustration_aspect_ratio(image)
+            if ratio > 1:
+                height = min(content_width * 0.38 * ratio, max_height) + layout.line_height
+                required_units += math.ceil(height / layout.line_height) * line_units
+        remaining_units = sum(0.55 if char.isascii() else 1 for text in paragraphs[index:] for char in text if not char.isspace())
+        if remaining_units < required_units:
+            return True
+    return False
+
+
 def _add_chapter_artwork(builder: PDFBookBuilder, *, template: str, centered: bool) -> bool:
     layout = builder.layout
     if builder.y - 32 < layout.margin_bottom:
@@ -1361,6 +1385,12 @@ def _add_chapters(builder: PDFBookBuilder, chapters: list[Any]) -> None:
                         if index == 0:
                             first_image_height = max(first_image_height, (builder.layout.page_width - builder.layout.margin_x * 2) * 0.38 * aspect_ratio)
                     images_before.setdefault(index, []).append(image)
+                if _needs_illustration_gallery(builder, paragraphs, images_before):
+                    builder.add_section_heading(_str(section.get("title")))
+                    for paragraph in paragraphs:
+                        builder.add_body_text(paragraph)
+                    _add_illustration_gallery(builder, [image for index in sorted(images_before) for image in images_before[index]])
+                    continue
                 first_image_height = builder.add_section_heading(_str(section.get("title")), following_image_height=first_image_height)
                 for index in range(len(paragraphs) + 1):
                     _add_illustrations(builder, images_before.get(index, []), wrap_max_height=first_image_height if index == 0 and first_image_height else None)
@@ -1377,7 +1407,7 @@ def _add_chapters(builder: PDFBookBuilder, chapters: list[Any]) -> None:
                     for section in sections
                 )
             ]
-            _add_illustrations(builder, unanchored_illustrations)
+            _add_illustration_gallery(builder, unanchored_illustrations)
             builder.finish_image_wrap()
             continue
         content = _without_leading_quote_overlap(
@@ -1386,7 +1416,7 @@ def _add_chapters(builder: PDFBookBuilder, chapters: list[Any]) -> None:
         )
         if content:
             builder.add_body_text(content)
-        _add_illustrations(builder, inline_illustrations)
+        _add_illustration_gallery(builder, inline_illustrations)
         builder.finish_image_wrap()
 
 
