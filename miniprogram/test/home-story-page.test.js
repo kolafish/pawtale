@@ -140,7 +140,7 @@ test("refreshing the same home preserves its active voice entry; a project switc
   assert.equal(context.data.voiceEntry, null);
 });
 
-test("added chapters, sections and words, first readability and aggregated likes enter the shared queue", async () => {
+test("one completed result consumes all shown growth and readability without consuming likes", async () => {
   const { page, calls } = loadStoryPage({ current: snapshot({ growth_events: [
     { ...growth("later", "chapter_updated", "chapter-1"), created_at: "2026-09-05T01:00:00Z", book_char_count_delta: 386 },
     growth("earlier"),
@@ -149,18 +149,15 @@ test("added chapters, sections and words, first readability and aggregated likes
   try {
     await context.onShow();
     await flushAsyncWork();
-    assert.equal(context.data.notice.text, "新增 1 小节");
+    assert.deepEqual(context.data.growthResult.eventIds, ["earlier", "later"]);
+    assert.equal(context.data.growthResult.wordDelta, 386);
     assert.equal(context.data.story.chapters[1].sections[0].highlighted, true);
-    await context.dismissNotice();
-    assert.deepEqual(calls.acknowledgedEventIds, ["earlier"]);
-    assert.equal(context.data.notice.text, "新增 386 字");
-    await context.dismissNotice();
-    assert.equal(context.data.notice.kind, "readable");
-    // A response fetched before acknowledgement must not reinsert an already read event.
-    await context.loadHome(true);
-    assert.deepEqual(calls.acknowledgedEventIds, ["earlier", "later"]);
-    assert.equal(context.data.notice.text, "书稿已可阅读");
-    await context.dismissNotice();
+    assert.deepEqual(calls.acknowledgedEventIds, []);
+    await context.completeGrowthResult({ detail: { id: context.data.growthResult.id } });
+    assert.deepEqual(calls.acknowledgedEventIds, ["later", "earlier"]);
+    assert.equal(context.data.growthResult, null);
+    await context.loadHome(true); // A stale snapshot cannot replay acknowledged events.
+    assert.equal(context.data.growthResult, null);
     assert.equal(context.data.notice.kind, "like");
     await context.dismissNotice();
     assert.deepEqual(calls.seenLikes, [["user-1", "project-1", "2026-09-05T02:00:00Z"]]);
@@ -286,7 +283,8 @@ test("home shows a later readable draft after an earlier structure event was ack
 });
 
 function growth(id, kind = "section_added", chapterId = "chapter-2", sectionId = "section-2") {
-  return { event_id: id, summary_text: "已整理", created_at: "2026-09-05T00:00:00Z", book_char_count_delta: 0, changes: [{ kind, chapter_id: chapterId, section_id: sectionId }] };
+  return { event_id: id, summary_text: "已整理", created_at: "2026-09-05T00:00:00Z", book_char_count_delta: 0,
+    changes: [{ kind, chapter_id: chapterId, ...(kind.startsWith("section_") ? { section_id: sectionId } : {}) }] };
 }
 
 test("growth animates once after initial data and never scrolls during a refresh", async () => {
@@ -320,7 +318,7 @@ test("updating an existing section leaves tree counts unchanged and deleted targ
   assert.equal(context.data.story.chapters.length, 2);
   assert.equal(context.data.story.chapters[1].sections.length, 1);
   assert.equal(context.data.story.chapters[1].sections[0].growthLabel, "已补充");
-  assert.equal(context.data.growthNotices.length, 0);
+  assert.equal(context.data.growthResult, null);
   context.onHide();
 });
 
@@ -396,7 +394,7 @@ test("story keeps readable chapter drafts available while the assembled book awa
   assert.equal(view.memoir.bookMetaText, "1 章 · 200 字");
 });
 
-const { homeStorySnapshotData } = require("../pages/home/home-story-state.ts");
+const { homeStorySnapshotData, homeGrowthResult } = require("../pages/home/home-story-state.ts");
 
 test("home leaves candidate state inside the theme workspace", async () => {
   const current = snapshot({book_issues: {review_count: 1, supplement_count: 0}});
@@ -438,7 +436,10 @@ test("growth messages combine added chapters, sections and words while ignoring 
   const view = storyViewData(current);
   const data = homeStorySnapshotData(current);
   assert.equal(view.memoir.bookMetaText, "1 章 · 约 1.2 万字");
-  assert.deepEqual(data.growthNotices.map(notice => notice.text), ["新增 1 章，1 小节，426 字", "新增 286 字"]);
+  const result = homeGrowthResult([...current.growth_events, current.growth_events[0]], data.story);
+  assert.equal(result.wordDelta, 632); // 426 + 286 - 80; repeated event IDs count once.
+  assert.deepEqual(result.titles.map(item => item.title), ["章节 1", "小节 2"]);
+  assert.equal(result.celebrate, true);
 });
 
 test("closed issues disappear despite an old needs_input job; five readable drafts are independent of one book decision", () => {
@@ -456,44 +457,90 @@ test("closed issues disappear despite an old needs_input job; five readable draf
 
 test("home binds the shared notice queue and keeps the memoir card as the book entry", () => {
   const template = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
+  const config = JSON.parse(fs.readFileSync(path.join(__dirname, "../pages/home/index.json"), "utf8"));
+  assert.equal(config.usingComponents["story-result"], "/components/story-result/index");
+  assert.match(template, /<story-result[^>]+bindcomplete="completeGrowthResult"/);
   assert.match(template, /bindtap="dismissNotice"/);
   assert.match(template, /bindtap="openBook"/);
   assert.doesNotMatch(template, /growthNoticeTitle|growthNoticeContext|viewStoryGrowth|dismissShareLikeNotice|home-story-progress/);
 });
 
-test("polling appends growth messages without replacing the current card, including bounded history", async () => {
-  let current = snapshot({ progress: null, book_readable: false,
+test("processing updates merge across bounded snapshots; playback freezes its own event set", async () => {
+  let current = snapshot({ progress: progress({ status: "processing" }), book_readable: false,
     chapters: snapshot().chapters.map(chapter => ({ ...chapter, readable: false })),
     growth_events: [{ ...growth("first", "chapter_updated", "chapter-1"), book_char_count_delta: 386 }] });
-  const { page } = loadStoryPage({ getSnapshot: async () => current });
+  const { page, calls } = loadStoryPage({ getSnapshot: async () => current });
   const context = pageContext(page);
   try {
     await context.onShow();
-    current = { ...current, growth_events: [{ ...growth("second"), created_at: "2026-09-05T01:00:00Z" }] };
+    assert.equal(context.data.growthResult, null);
+    current = { ...current, progress: progress(), growth_events: [{ ...growth("second"), created_at: "2026-09-05T01:00:00Z" }] };
     await context.loadHome(true);
-    assert.equal(context.data.notice.eventId, "first");
-    assert.deepEqual(context.data.notices.map(item => item.eventId), ["first", "second"]);
-    await context.dismissNotice();
-    assert.equal(context.data.notice.eventId, "second");
+    assert.deepEqual(context.data.growthResult.eventIds, ["first", "second"]);
+    const result = context.data.growthResult;
+    current = { ...current, growth_events: [growth("third")] };
+    await context.loadHome(true);
+    assert.deepEqual(context.data.growthResult, result);
+    await context.completeGrowthResult({ detail: { id: result.id } });
+    assert.deepEqual(calls.acknowledgedEventIds, ["first", "second"]);
+    await context.loadHome(true);
+    assert.deepEqual(context.data.growthResult.eventIds, ["third"]);
   } finally { context.onHide(); }
 });
 
-test("a failed acknowledgement keeps the current notification available for an explicit retry", async () => {
-  let shouldFail = true;
-  const { page } = loadStoryPage({ current: snapshot({ progress: null, growth_events: [growth("first"), growth("second")] }),
-    acknowledge: async () => { if (shouldFail) throw Error("offline"); } });
-  const context = pageContext(page);
+test("a failed receipt retries after recreation without replaying or surfacing a story failure", async () => {
+  const storage = {}, current = snapshot({ growth_events: [growth("first"), growth("second")] });
+  const first = loadStoryPage({ current, storage, acknowledge: async () => { throw Error("offline"); } });
+  const context = pageContext(first.page);
+  await context.onShow();
+  await context.completeGrowthResult({ detail: { id: context.data.growthResult.id } });
+  assert.equal(context.data.growthResult, null);
+  assert.equal(context.data.storyError, "");
+  context.onUnload();
+  const second = loadStoryPage({ current, storage });
+  const recreated = pageContext(second.page);
   try {
-    await context.onShow();
-    await context.dismissNotice();
-    assert.equal(context.data.notice.eventId, "first");
-    assert.equal(context.data.dismissingGrowth, false);
-    assert.equal(context.data.storyError, "offline");
-    shouldFail = false;
-    await context.dismissNotice();
-    assert.equal(context.data.notice.eventId, "second");
-    assert.equal(context.data.storyError, "");
-  } finally { context.onHide(); }
+    await recreated.onShow();
+    await flushAsyncWork();
+    assert.equal(recreated.data.growthResult, null);
+    assert.deepEqual(second.calls.acknowledgedEventIds, ["first", "second"]);
+    assert.equal(recreated.data.notice, null);
+  } finally { recreated.onHide(); }
+});
+
+test("hidden home and embedded narration never consume an unfinished result", async () => {
+  const { page, calls } = loadStoryPage({ current: snapshot({ growth_events: [growth("unseen")] }) });
+  const context = pageContext(page);
+  await context.onShow();
+  const id = context.data.growthResult.id;
+  context.onHide();
+  await context.completeGrowthResult({ detail: { id } });
+  assert.deepEqual(calls.acknowledgedEventIds, []);
+  await context.onShow();
+  context.setData({ voiceEntry: { voiceSessionId: "session-1", projectId: "project-1" } });
+  await context.completeGrowthResult({ detail: { id } });
+  assert.deepEqual(calls.acknowledgedEventIds, []);
+  context.setData({ voiceEntry: null });
+  await context.completeGrowthResult({ detail: { id } });
+  assert.deepEqual(calls.acknowledgedEventIds, ["unseen"]);
+  context.onHide();
+});
+
+test("small edits stay quiet and large batches keep all event IDs without inventing section counts", () => {
+  const story = storyViewData(snapshot());
+  const small = homeGrowthResult([{ ...growth("small", "chapter_updated", "chapter-1"), book_char_count_delta: 4 }], story);
+  assert.equal(small.celebrate, false);
+  assert.equal(small.wordDelta, 4);
+  const sectionEdit = homeGrowthResult([{ ...growth("section-edit", "section_updated"), book_char_count_delta: 6 }], story);
+  assert.equal(sectionEdit.titles[0].title, "小节 2");
+  assert.equal(homeGrowthResult([{ ...growth("deleted", "chapter_updated", "missing"), book_char_count_delta: 100 }], story), null);
+  const result = homeGrowthResult([growth("section-one", "section_added", "chapter-1", "section-1"),
+    growth("chapter-two", "chapter_added", "chapter-2"), growth("section-two")], story);
+  assert.equal(result.celebrate, true);
+  assert.equal(result.titles.length, 2);
+  assert.equal(result.moreCount, 1);
+  assert.equal(result.eventIds.length, 3);
+  assert.equal(result.wordDelta, 0);
 });
 
 test("reused editorial events stay silent before, during and after being requeued", async () => {
@@ -506,8 +553,11 @@ test("reused editorial events stay silent before, during and after being requeue
     await context.dismissNotice(); // First readability only.
     current = snapshot({ progress: progress({ status: "processing" }), growth_events: [growth("other-update")] });
     await context.loadHome(true);
-    assert.equal(context.data.notice.eventId, "other-update");
-    await context.dismissNotice();
+    assert.equal(context.data.growthResult, null); // Wait for the processing round to settle.
+    current = snapshot({ growth_events: [growth("other-update")] });
+    await context.loadHome(true);
+    assert.deepEqual(context.data.growthResult.eventIds, ["other-update"]);
+    await context.completeGrowthResult({ detail: { id: context.data.growthResult.id } });
     assert.equal(context.data.notice, null);
     current = snapshot({ growth_events: [editorial] });
     await context.loadHome(true);
@@ -576,14 +626,16 @@ test("an acknowledgement completed after an account switch cannot remove the new
   const context = pageContext(page);
   try {
     await context.onShow();
-    const pending = context.dismissNotice();
+    const oldId = context.data.growthResult.id;
+    const pending = context.completeGrowthResult({ detail: { id: oldId } });
     current = snapshot({ ...current, identity: { ...current.identity, id: "user-2" } });
     await context.loadHome(true);
     finishAcknowledgement();
     await pending;
     assert.equal(context.data.userId, "user-2");
-    assert.equal(context.data.notice.eventId, "same-event");
-    assert.equal(context.data.dismissingGrowth, false);
+    assert.deepEqual(context.data.growthResult.eventIds, ["same-event"]);
+    await context.completeGrowthResult({ detail: { id: oldId } });
+    assert.deepEqual(context.data.growthResult.eventIds, ["same-event"]);
   } finally { context.onHide(); }
 });
 
@@ -614,7 +666,7 @@ test("normal narration, saved returns, updates without word growth and optional 
       assert.equal(context.data.notice, null, `${status}/${stage} must stay silent`);
     }
     assert.deepEqual(calls.acknowledgedEventIds, []);
-    assert.deepEqual(context.growthTracker.pending([]), []);
+    assert.equal(context.data.growthResult, null);
   } finally { context.onHide(); }
 });
 
