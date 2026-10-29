@@ -1,4 +1,10 @@
 <import src="../../templates/share-likes.wxml" />
+<template name="readerHighlightedText">
+  <block wx:if="{{active}}">
+    <text selectable>{{before}}</text><text id="reader-spoken-sentence" class="reader-sentence-highlight" selectable>{{current}}</text><text selectable>{{after}}</text>
+  </block>
+  <text wx:else selectable>{{text}}</text>
+</template>
 <view wx:if="{{excerptMode === 'compose' || excerptMode === 'preview' || excerptMode === 'shared'}}" class="ui-page-shell {{pageClass}} excerpt-page">
   <view wx:if="{{loading}}" class="reader-state">正在打开选文…</view>
   <block wx:elif="{{excerptMode === 'compose'}}">
@@ -139,9 +145,6 @@
         phase="{{ttsBusyTarget ? 'preparing' : (playingTarget ? 'playing' : 'completed')}}"
         preparing-text="{{bookTTSPreparingText || ''}}"
         progress="{{bookTTSProgressPercent}}"
-        spoken-text="{{readerMode === 'chapter' ? '' : bookTTSSpokenText}}"
-        current-text="{{readerMode === 'chapter' ? '' : bookTTSCurrentText}}"
-        remaining-text="{{readerMode === 'chapter' ? '' : bookTTSRemainingText}}"
         bindstop="stopPlayback"
       />
     </view>
@@ -237,12 +240,7 @@
                   </view>
                 </block>
                 <view class="small-section-content">
-                  <block wx:if="{{readerMode === 'chapter' && section.id === readerHighlightSectionId && paragraphIndex === readerHighlightParagraphIndex}}">
-                    <text selectable>{{readerHighlightBefore}}</text>
-                    <text class="reader-sentence-highlight" selectable>{{readerHighlightCurrent}}</text>
-                    <text selectable>{{readerHighlightAfter}}</text>
-                  </block>
-                  <text wx:else selectable>{{paragraph}}</text>
+                  <template is="readerHighlightedText" data="{{text: paragraph, active: readerChapterIndex === readerHighlightChapterIndex && section.id === readerHighlightSectionId && paragraphIndex === readerHighlightParagraphIndex, before: readerHighlightBefore, current: readerHighlightCurrent, after: readerHighlightAfter}}" />
                 </view>
               </block>
               <block wx:for="{{shareImages}}" wx:key="id" wx:for-item="illustration">
@@ -254,14 +252,14 @@
             </view>
           </view>
         </view>
-        <text wx:else class="chapter-content" selectable>{{chapter.content}}</text>
+        <view wx:else class="chapter-content"><template is="readerHighlightedText" data="{{text: chapter.content, active: readerChapterIndex === readerHighlightChapterIndex && readerHighlightSectionId === '', before: readerHighlightBefore, current: readerHighlightCurrent, after: readerHighlightAfter}}" /></view>
         </block>
       </view>
     </view>
 
     <view wx:else id="reader-body" class="reader-section ui-card">
       <text class="section-label">正文</text>
-      <text class="book-content" selectable>{{bookContent}}</text>
+      <view class="book-content"><template is="readerHighlightedText" data="{{text: bookContent, active: readerChapterIndex === readerHighlightChapterIndex && readerHighlightSectionId === '', before: readerHighlightBefore, current: readerHighlightCurrent, after: readerHighlightAfter}}" /></view>
     </view>
 
     <view wx:if="{{readerMode === 'book' && readerChapterTotal > 1}}" class="reader-pagination">

@@ -14,7 +14,7 @@
     >{{phase === "completed" ? "收起" : "停止"}}</view>
   </view>
 
-  <block wx:if="{{phase !== 'preparing'}}">
+  <block wx:if="{{phase !== 'preparing' || progress > 0}}">
     <view class="book-tts-track" aria-label="朗读进度 {{progress}}%">
       <view class="book-tts-progress" style="width: {{progress}}%;"></view>
     </view>

@@ -132,6 +132,8 @@ test("stopping after an audio segment ends prevents late preparation from advanc
 test("the player rejects another book version and reports failures without automatic retries", async () => {
   for (const mismatch of [true, false]) {
     const h = host();
+    let currentHighlight = "previous sentence";
+    h.context.onBookTTSProgressPatch = patch => { currentHighlight = patch.ttsCurrentText; };
     let requests = 0;
     const playback = playBookAudioPlan(h.context, plan(), 1, text, async () => {
       requests += 1;
@@ -144,6 +146,7 @@ test("the player rejects another book version and reports failures without autom
     await flushAsyncWork();
     h.finish();
     await rejected;
+    assert.equal(currentHighlight, "", "failed audio clears the inline reader highlight");
     assert.equal(requests, 1);
     assert.deepEqual(h.played, ["audio-1"]);
   }

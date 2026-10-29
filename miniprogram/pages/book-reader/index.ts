@@ -54,6 +54,8 @@ import {
   type BookTTSState,
 } from "../book/book-tts-player";
 
+import { readerParagraphRanges, sentenceHighlight, textLength, type ReaderParagraphRange } from "./reader-highlight";
+
 type BookReaderTocItem = BookReadingData["bookPreviewTocItems"][number] & {
   expanded: boolean;
   storyCountText: string;
@@ -89,6 +91,7 @@ type BookReaderData = ReaderData & BookTTSState & ShareLikeData & typeof INITIAL
   readerSubtitle: string;
   readerMetaText: string;
   readerUpdateNotice: string;
+  readerHighlightChapterIndex: number;
   readerHighlightSectionId: string;
   readerHighlightParagraphIndex: number;
   readerHighlightBefore: string;
@@ -102,16 +105,6 @@ type ReaderDatasetEvent = PageDatasetEvent<{
   sectionId?: string;
 }>;
 
-interface ChapterParagraphRange {
-  sectionId: string;
-  paragraphIndex: number;
-  text: string;
-  start: number;
-  end: number;
-}
-
-const SENTENCE_ENDINGS = "。！？!?";
-const SENTENCE_CLOSERS = "”’\"'」』】）)";
 const PAGE_CLASS = "book-reader-page ui-page-shell ui-accessible-page";
 const FLAT_READER_PAGE_CHARS = 6000;
 
@@ -152,76 +145,6 @@ function flatReaderPages(content: string): string[] {
     pages.push(characters.slice(index, index + FLAT_READER_PAGE_CHARS).join(""));
   }
   return pages;
-}
-
-function textLength(value: string): number {
-  return Array.from(value).length;
-}
-
-function chapterParagraphRanges(
-  sections: BookOutputChapterPreviewView["sections"],
-): ChapterParagraphRange[] {
-  const ranges: ChapterParagraphRange[] = [];
-  let chapterOffset = 0;
-  sections.forEach((section, sectionIndex) => {
-    chapterOffset += textLength(section.title) + 2;
-    let searchOffset = 0;
-    section.paragraphs.forEach((paragraph, paragraphIndex) => {
-      const startInContent = section.content.indexOf(paragraph, searchOffset);
-      if (startInContent < 0) {
-        return;
-      }
-      const start = chapterOffset + textLength(section.content.slice(0, startInContent));
-      ranges.push({
-        sectionId: section.id,
-        paragraphIndex,
-        text: paragraph,
-        start,
-        end: start + textLength(paragraph),
-      });
-      searchOffset = startInContent + paragraph.length;
-    });
-    chapterOffset += textLength(section.content);
-    if (sectionIndex < sections.length - 1) {
-      chapterOffset += 2;
-    }
-  });
-  return ranges;
-}
-
-function sentenceHighlight(
-  range: ChapterParagraphRange,
-  currentTextStart: number,
-): { before: string; current: string; after: string } {
-  const characters = Array.from(range.text);
-  const currentIndex = currentTextStart - range.start;
-  let sentenceStart = 0;
-  for (let index = 0; index < characters.length; index += 1) {
-    if (!SENTENCE_ENDINGS.includes(characters[index])) {
-      continue;
-    }
-    let sentenceEnd = index + 1;
-    while (
-      sentenceEnd < characters.length
-      && SENTENCE_CLOSERS.includes(characters[sentenceEnd])
-    ) {
-      sentenceEnd += 1;
-    }
-    if (currentIndex < sentenceEnd) {
-      return {
-        before: characters.slice(0, sentenceStart).join(""),
-        current: characters.slice(sentenceStart, sentenceEnd).join(""),
-        after: characters.slice(sentenceEnd).join(""),
-      };
-    }
-    sentenceStart = sentenceEnd;
-    index = sentenceEnd - 1;
-  }
-  return {
-    before: characters.slice(0, sentenceStart).join(""),
-    current: characters.slice(sentenceStart).join(""),
-    after: "",
-  };
 }
 
 function readerData(
@@ -329,8 +252,9 @@ definePage<BookReaderData>()({
   audioPlayback: pageRuntime(() => new AudioPlaybackController()),
   ttsProgress: pageRuntime(() => new VoiceAssistantTTSProgressRuntime()),
   playToken: 0,
-  chapterParagraphRanges: [] as ChapterParagraphRange[],
+  readerParagraphRanges: [] as ReaderParagraphRange[],
   readerHighlightKey: "",
+  readerLocatePlayback: false,
   readerText: "",
   readerAudioVersionId: "",
   bookChapters: [] as BookOutputChapterPreviewView[],
@@ -363,6 +287,7 @@ definePage<BookReaderData>()({
     sharePreface: "", shareAfterword: "", shareRetryable: false,
     readerChapterIndex: 0,
     readerChapterTotal: 0,
+    readerHighlightChapterIndex: -1,
     readerHighlightSectionId: "",
     readerHighlightParagraphIndex: -1,
     readerHighlightBefore: "",
@@ -487,7 +412,6 @@ definePage<BookReaderData>()({
     this.readerAudioVersionId = "";
     this.bookChapters = [];
     this.flatPages = [];
-    this.chapterParagraphRanges = [];
     hideMiniProgramShareMenu();
     this.setData({ ...readerData(null), readerChapterIndex: 0, readerChapterTotal: 0,
       shareImages: [], shareCoverUrl: "", shareByline: "", sharePreface: "", shareAfterword: "",
@@ -537,12 +461,18 @@ definePage<BookReaderData>()({
     if (index < 0 || index >= this.data.readerChapterTotal) return;
     this.stopPlayback();
     this.readingScrollTop = 0;
+    this.setData(this.readerChapterPatch(index), () => scrollReader({
+      selector: sectionIndex === undefined ? "#reader-body" : `#reader-section-${sectionIndex}`,
+    }));
+  },
+
+  readerChapterPatch(index: number) {
     const chapter = this.bookChapters[index];
-    this.setData({
+    return {
       readerChapterIndex: index,
-      bookPreviewChapters: chapter ? [chapter] : [],
+      bookPreviewChapters: chapter ? [compactReaderChapter(chapter)] : [],
       bookContent: chapter ? "" : this.flatPages[index] || "",
-    }, () => scrollReader({ selector: sectionIndex === undefined ? "#reader-body" : `#reader-section-${sectionIndex}` }));
+    };
   },
 
   previousReaderChapter() {
@@ -612,6 +542,7 @@ definePage<BookReaderData>()({
           chapterIndex: this.data.readerChapterIndex, scrollTop: this.readingScrollTop,
           audioChapterId: chapterId || "", audioHash: plan.source_text_hash, audioIndex: resume.index, audioSeconds: resume.seconds };
         try {
+          this.prepareReaderHighlight(plan.content, this.bookChapters.length ? this.data.readerChapterIndex : undefined);
           await playBookAudioPlan(this, plan, playbackToken, plan.content, prepare, target, resume);
           if (playbackToken === this.playToken) this.onBookAudioPosition(0, 0);
         } catch (error) {
@@ -624,7 +555,10 @@ definePage<BookReaderData>()({
         : { kind: "chapter" as const, chapterId: this.data.chapterId, versionId: this.readerAudioVersionId || undefined };
       const prepare = memoirAudioPlanLoader(this.data.projectId, source, readBookTTSRequest());
       const plan = await prepare();
-      if (token === this.playToken) await playBookAudioPlan(this, plan, token, this.readerText, prepare, target);
+      if (token === this.playToken) {
+        this.prepareReaderHighlight(this.readerText);
+        await playBookAudioPlan(this, plan, token, this.readerText, prepare, target);
+      }
     } catch (error) {
       if (this.readingToken) {
         if (token === this.playToken) await this.handleSharedAudioError(error);
@@ -706,13 +640,18 @@ definePage<BookReaderData>()({
     this.readingProgress.audioSeconds = seconds;
   },
 
+  prepareReaderHighlight(text: string, onlyChapter?: number) {
+    this.readerLocatePlayback = true;
+    this.readerParagraphRanges = readerParagraphRanges(text, this.bookChapters, this.flatPages, onlyChapter);
+  },
+
   onBookTTSProgressPatch(patch: VoiceAssistantTTSProgressPatch) {
-    if (this.data.readerMode !== "chapter" || !patch.ttsCurrentText) {
+    if (!patch.ttsCurrentText) {
       this.clearReaderHighlight();
       return;
     }
     const currentTextStart = textLength(patch.ttsSpokenText);
-    const range = this.chapterParagraphRanges.find(
+    const range = this.readerParagraphRanges.find(
       (item) => currentTextStart >= item.start && currentTextStart < item.end,
     );
     if (!range) {
@@ -721,6 +660,7 @@ definePage<BookReaderData>()({
     }
     const highlight = sentenceHighlight(range, currentTextStart);
     const key = [
+      range.chapterIndex,
       range.sectionId,
       range.paragraphIndex,
       highlight.before.length,
@@ -730,12 +670,22 @@ definePage<BookReaderData>()({
       return;
     }
     this.readerHighlightKey = key;
+    const changedChapter = range.chapterIndex !== this.data.readerChapterIndex;
+    const locatePlayback = this.readerLocatePlayback || changedChapter;
+    const playbackToken = this.playToken;
+    this.readerLocatePlayback = false;
     this.setData({
+      ...(changedChapter ? this.readerChapterPatch(range.chapterIndex) : {}),
+      readerHighlightChapterIndex: range.chapterIndex,
       readerHighlightSectionId: range.sectionId,
       readerHighlightParagraphIndex: range.paragraphIndex,
       readerHighlightBefore: highlight.before,
       readerHighlightCurrent: highlight.current,
       readerHighlightAfter: highlight.after,
+    }, () => {
+      if (locatePlayback && this.playToken === playbackToken && this.readerHighlightKey === key) {
+        scrollReader({ selector: "#reader-spoken-sentence" });
+      }
     });
   },
 
@@ -745,6 +695,7 @@ definePage<BookReaderData>()({
     }
     this.readerHighlightKey = "";
     this.setData({
+      readerHighlightChapterIndex: -1,
       readerHighlightSectionId: "",
       readerHighlightParagraphIndex: -1,
       readerHighlightBefore: "",
@@ -756,12 +707,12 @@ definePage<BookReaderData>()({
   stopPlayback() {
     if (this.readingProgress && this.data.playingTarget) this.saveReadingProgress();
     stopBookPlayback(this);
-    this.clearReaderHighlight();
+    this.readerParagraphRanges = [];
+    this.readerLocatePlayback = false;
   },
 
   async loadBookReader(projectId: string, versionId = "") {
     this.stopPlayback();
-    this.chapterParagraphRanges = [];
     this.setData({ loading: true, error: "", playbackError: "" });
     try {
       const output = await getMemoirBookOutput(projectId);
@@ -784,12 +735,12 @@ definePage<BookReaderData>()({
     const data = readerData(output, version);
     this.readerText = trimText(data.bookContent);
     this.readerAudioVersionId = (version || output.latest_version)?.id || "";
-    this.bookChapters = data.bookPreviewChapters.map(compactReaderChapter);
+    this.bookChapters = data.bookPreviewChapters;
     this.flatPages = this.bookChapters.length ? [] : flatReaderPages(data.bookContent);
     this.setData({
       ...data,
       bookContent: this.bookChapters.length ? "" : this.flatPages[0] || "",
-      bookPreviewChapters: this.bookChapters.slice(0, 1),
+      bookPreviewChapters: this.bookChapters.slice(0, 1).map(compactReaderChapter),
       readerChapterIndex: 0,
       readerChapterTotal: this.bookChapters.length || this.flatPages.length,
     });
@@ -876,15 +827,12 @@ definePage<BookReaderData>()({
       this.excerptVersionId = workspace.draft_version_id || "";
       this.readerAudioVersionId = workspace.draft_version_id || "";
       this.readerText = trimText(data.bookContent);
-      this.chapterParagraphRanges = chapterParagraphRanges(
-        data.bookPreviewChapters[0]?.sections || [],
-      );
-      this.bookChapters = data.bookPreviewChapters.map(compactReaderChapter);
+      this.bookChapters = data.bookPreviewChapters;
       this.flatPages = [];
       this.setData({
         ...data,
         bookContent: this.bookChapters.length ? "" : data.bookContent,
-        bookPreviewChapters: this.bookChapters,
+        bookPreviewChapters: this.bookChapters.map(compactReaderChapter),
         readerChapterIndex: 0,
         readerChapterTotal: 1,
       });
