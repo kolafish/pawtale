@@ -1,11 +1,8 @@
 @import "../../styles/support-forms.wxss";
 
 .project-edit-page {
-  padding: 28rpx 36rpx 120rpx;
-}
-
-.error {
-  margin-bottom: 24rpx;
+  --ui-fixed-action-space: max(244rpx, 152px);
+  padding: 28rpx 36rpx 0;
 }
 
 .form-panel {
@@ -159,9 +156,26 @@
 }
 
 .actions {
-  margin-top: 28rpx;
+  --ui-fixed-action-inline: 36rpx;
+  --ui-fixed-action-background: var(--ui-page-background);
+  border-top: 1rpx solid var(--ui-divider);
+}
+
+.save-error {
+  margin-bottom: 16rpx;
+}
+
+.save-status {
+  display: block;
+  margin-bottom: 16rpx;
+  color: var(--ui-text-secondary);
+  font-size: var(--ui-font-meta);
+  line-height: var(--ui-line-meta);
+}
+
+.action-buttons {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 0.72fr) minmax(0, 1.28fr);
   gap: 14rpx;
 }
 
@@ -170,7 +184,10 @@
   width: 100%;
   min-width: 0;
   max-width: 100%;
-  min-height: 88rpx;
+  min-height: var(--ui-hit-size);
+  padding: 12rpx 8rpx;
+  white-space: normal;
+  line-height: 1.4;
   border-radius: var(--ui-radius-control);
   background: transparent;
   color: var(--ui-text-secondary);
@@ -178,9 +195,8 @@
 }
 
 .primary-button {
-  background: var(--ui-surface);
-  color: var(--ui-accent-strong);
-  box-shadow: inset 0 0 0 2rpx var(--ui-accent-border);
+  background: var(--ui-accent-strong);
+  color: var(--ui-on-accent);
 }
 
 .ghost-button[disabled],
@@ -190,3 +206,4 @@
 
 .large-text .field-label { font-size: var(--ui-font-large-list-title); }
 .large-text .field-hint { font-size: var(--ui-font-large-body); }
+.large-text .save-status { font-size: var(--ui-font-large-meta); }
