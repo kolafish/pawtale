@@ -22,7 +22,7 @@ type Command = [
 ];
 export const ease = (t: number): number => { t = Math.min(1, Math.max(0, t)); return t * t * (3 - 2 * t); };
 const clamp = (t: number): number => Math.min(1, Math.max(0, t));
-export function drawStoryBook(ctx: CanvasRenderingContext2D, width: number, height: number, dpr: number, seconds: number, opacity = 1): void {
+export function drawStoryBook(ctx: CanvasRenderingContext2D, width: number, height: number, dpr: number, seconds: number, opacity = 1, particleRise = 65): void {
     function shape(color: string | CanvasGradient | null, commands: Command[], stroke?: string) {
         ctx.beginPath();
         for (const command of commands) {
@@ -121,8 +121,8 @@ export function drawStoryBook(ctx: CanvasRenderingContext2D, width: number, heig
         if (p <= 0 || p >= 1)
             continue;
         const alpha = Math.sin(p * Math.PI) * .48;
-        const x = 120 + i * 160 / 14 + Math.sin(p * 2.4 + i) * 6;
-        const y = 184 - 65 * p + (i % 3) * 5;
+        const x = 120 + ((i * 7) % 15) * 160 / 14 + Math.sin(p * 2.4 + i) * 6;
+        const y = 184 - particleRise * p + (i % 3) * 5;
         const radius = i % 3 === 0 ? 1.65 : 1.1;
         ctx.save();
         ctx.globalAlpha = opacity * alpha;

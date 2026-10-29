@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const { componentContext, loadComponentModule } = require("./page-harness");
 
-function setup(t, { celebrate = true, deferCanvas = false } = {}) {
+function setup(t, { celebrate = true, deferCanvas = false, withCanvas = false, width = 320, titleHeight = 42 } = {}) {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1000 });
   const audioCalls = { played: 0, stopped: 0, options: [], contexts: [] };
   global.wx = {
@@ -25,9 +25,30 @@ function setup(t, { celebrate = true, deferCanvas = false } = {}) {
   context.createIntersectionObserver = () => ({
     relativeToViewport() { return this; }, observe(_, callback) { intersect = callback; }, disconnect() {},
   });
-  context.createSelectorQuery = () => ({ select: () => ({ fields: (_, callback) => {
-    canvasCallback = callback; return { exec: () => { if (!deferCanvas) callback(null); } };
-  } }) });
+  const canvasContext = new Proxy({ globalAlpha: 1,
+    createLinearGradient: () => ({ addColorStop() {} }),
+    createRadialGradient: () => ({ addColorStop() {} }),
+  }, { get: (target, key) => key in target ? target[key] : () => {} });
+  context.createSelectorQuery = () => {
+    const callbacks = [];
+    const query = { select(selector) { return {
+      boundingClientRect(callback) {
+        callbacks.push(() => callback(withCanvas ? {
+          top: selector === "#result-book" ? 0 : 54,
+          height: selector === ".result-copy" ? titleHeight + 41 : titleHeight,
+          width,
+        } : null)); return query;
+      },
+      fields(_, callback) {
+        callbacks.push(() => callback(withCanvas ? { node: { getContext: () => canvasContext }, width, height: 326 } : null));
+        return query;
+      },
+    }; }, exec(callback) {
+      canvasCallback = () => { callbacks.forEach(run => run()); callback?.([]); };
+      if (!deferCanvas) canvasCallback();
+    } };
+    return query;
+  };
   component.lifetimes.ready.call(context);
   return { component, context, result, audioCalls,
     visible: (ratio = 1) => intersect({ intersectionRatio: ratio }),
@@ -157,4 +178,59 @@ test("book pixels and particles honor the fade envelope, including the first and
     assert.ok(alpha.includes(opacity));
     assert.equal(context.globalAlpha, 1);
   }
+});
+
+test("title and total remain readable before shrinking into the book, including wrapped large text", t => {
+  const h = setup(t, { withCanvas: true, width: 280, titleHeight: 90 });
+  h.visible(); h.advance(2500);
+  assert.equal(h.context.data.textScale, 1);
+  assert.equal(h.context.data.textOffset, 0);
+  assert.equal(h.context.data.textOpacity, 1);
+  h.advance(1800);
+  const middle = { ...h.context.data };
+  assert.ok(middle.textScale > .1 && middle.textScale < 1);
+  assert.ok(middle.textOffset > 0);
+  assert.equal(middle.count, 644);
+  h.component.pageLifetimes.hide.call(h.context);
+  h.advance(5000);
+  assert.equal(h.context.data.textOffset, middle.textOffset);
+  h.component.pageLifetimes.show.call(h.context);
+  h.advance(1800);
+  assert.ok(h.context.data.textScale < middle.textScale);
+  assert.ok(h.context.data.textOffset > middle.textOffset);
+  assert.equal(h.context.data.textOpacity, 0);
+  assert.deepEqual(h.context.events, []);
+  h.advance(1300);
+  assert.equal(h.context.events.length, 1);
+  h.detach();
+});
+
+test("font is preloaded once; a late load never changes lettering during an active receipt", t => {
+  delete require.cache[require.resolve("../components/story-result/font.ts")];
+  const h = setup(t);
+  const font = require("../components/story-result/font.ts");
+  let finish, requests = 0;
+  global.wx.loadFontFace = options => { requests++; finish = options.success; };
+  font.preloadStoryResultFont(); font.preloadStoryResultFont();
+  assert.equal(requests, 1);
+  h.visible(); h.advance(1800);
+  assert.equal(h.context.data.calligraphyReady, false);
+  finish();
+  h.advance(1000);
+  assert.equal(h.context.data.calligraphyReady, false);
+  h.context.properties.result = { ...h.result, id: "next" };
+  h.component.observers.result.call(h.context);
+  assert.equal(h.context.data.calligraphyReady, true);
+  h.detach();
+});
+
+test("unavailable font does not delay playback or its final receipt", t => {
+  delete require.cache[require.resolve("../components/story-result/font.ts")];
+  const h = setup(t);
+  global.wx.loadFontFace = options => options.fail();
+  require("../components/story-result/font.ts").preloadStoryResultFont();
+  h.visible(); h.advance(7400);
+  assert.equal(h.context.data.calligraphyReady, false);
+  assert.equal(h.context.events.length, 1);
+  h.detach();
 });
