@@ -191,7 +191,9 @@ test.each(['heritage_classic', 'warm_journal', 'modern_minimal'] as const)('read
   currentOutput = output(style);
   const page = workspace(<MemoirBookWorkspace project={project} onOpenChapters={vi.fn()} onOpenDrafts={vi.fn()} />);
   expect(await page.findByText('这是小程序已经组装的全书正文。')).toBeTruthy();
-  expect(page.getByDisplayValue('家人的故事')).toBeTruthy();
+  const bookInfo = page.getByRole('complementary');
+  expect(within(bookInfo).getByText('家人的故事')).toBeTruthy();
+  expect(within(bookInfo).queryByRole('textbox')).toBeNull();
   expect(transport.mock.calls.map(([config]) => config.url)).toEqual([`/mobile/memoir/projects/${project.id}/book-output`]);
   expect(page.getByRole('button', { name: 'PDF' })).toBeTruthy();
 });

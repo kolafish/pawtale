@@ -72,7 +72,7 @@ export function MemoirBookPreview({
                 <span className="tabular-nums">{item.index}.</span>
                 <span>{item.title}</span>
                 <span className="mb-1 min-w-4 flex-1 border-b border-dotted border-[#c8c1b8]" />
-                <span className="text-xs text-[#8b847c] tabular-nums">{item.char_count} 字</span>
+                <span className="text-xs text-[#69736e] tabular-nums">{item.char_count} 字</span>
               </li>
             ))}
           </ol>
@@ -84,7 +84,7 @@ export function MemoirBookPreview({
           <article key={chapter.chapter_id} className="border-t border-[#e7e1d9] px-6 py-12 sm:px-14 sm:py-16">
             <div className="flex items-start gap-3">
               <div className="min-w-0 flex-1">
-                <p className="text-xs text-[#9b8d7d] tabular-nums">第 {chapter.index} 章</p>
+                <p className="text-xs text-[#69736e] tabular-nums">第 {chapter.index} 章</p>
                 <h2 className="mt-2 text-2xl font-semibold leading-tight text-[#2f2a25] [font-family:'Noto_Serif_SC','Songti_SC',serif] [text-wrap:balance]">
                   {chapter.title}
                 </h2>

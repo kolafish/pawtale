@@ -22,9 +22,9 @@ export function MemoirChapterList({ chapters, selectedChapterId, onSelect }: Mem
           }`}
         >
           <span className="min-w-0 flex-1">
-            <span className="block text-[11px] font-medium text-[#8a948f] tabular-nums">第 {index + 1} 章</span>
+            <span className="block text-[11px] font-medium text-[#69736e] tabular-nums">第 {index + 1} 章</span>
             <span className="mt-1 block truncate text-sm font-semibold text-[#29322e]">{chapter.title}</span>
-            <span className="mt-1 block text-[11px] text-[#7a847f] tabular-nums">
+            <span className="mt-1 block text-[11px] text-[#69736e] tabular-nums">
               {chapter.include_in_book === false ? '不收入本书 · ' : ''}
               {chapter.sections.length} 小节 · {chapter.sections.reduce((count, section) => count + section.material_count, 0)} 段素材
             </span>

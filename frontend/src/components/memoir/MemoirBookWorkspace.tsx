@@ -53,7 +53,7 @@ export function MemoirBookWorkspace({ project, onOpenChapters, onOpenDrafts }: M
             <h1 className="truncate text-base font-semibold text-[#202824]">{output.title}</h1>
             <span className="rounded bg-[#eef0ef] px-2 py-0.5 text-[11px] text-[#69736e]">版本 {output.latest_version.version}</span>
           </div>
-          <p className="mt-0.5 truncate text-xs text-[#8a948f]">{output.is_stale ? `章节稿已更新：${output.stale_chapter_titles.join('、')}` : '全书内容与章节稿一致'}</p>
+          <p className="mt-0.5 truncate text-xs text-[#69736e]">{output.is_stale ? `章节稿已更新：${output.stale_chapter_titles.join('、')}` : '全书内容与章节稿一致'}</p>
         </div>
         <div className="inline-flex rounded-md bg-[#eef0ef] p-0.5 lg:hidden">
           <button type="button" onClick={() => setMobilePanel('settings')} aria-pressed={mobilePanel === 'settings'} className="inline-flex h-9 items-center gap-1 rounded px-2 text-xs"><Settings2 size={14} />设置</button>

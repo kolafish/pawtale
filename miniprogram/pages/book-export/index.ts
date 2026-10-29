@@ -441,6 +441,12 @@ definePage<BookExportData>()({
     this.flushBookDesignAutosave();
   },
 
+  async retryLoad() {
+    if (!this.data.loading && this.data.projectId) {
+      await this.loadBookExportPage(this.data.projectId);
+    }
+  },
+
   async loadBookExportPage(projectId: string) {
     this.setData({ loading: true, loadError: "", error: "" });
     try {

@@ -490,7 +490,7 @@
 
 .row-chevron {
   flex: 0 0 auto;
-  color: var(--ui-accent);
+  color: var(--ui-accent-strong);
   font-size: 42rpx;
   font-weight: 500;
   line-height: 1;
@@ -694,13 +694,16 @@
 
 .credit-sheet-close {
   flex: 0 0 auto;
-  width: 64rpx;
-  height: 64rpx;
+  width: var(--ui-hit-size);
+  height: var(--ui-hit-size);
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 50%;
   background: var(--ui-surface-subtle);
   color: var(--ui-text-secondary);
   font-size: 40rpx;
-  line-height: 60rpx;
+  line-height: 1;
   text-align: center;
 }
 

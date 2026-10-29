@@ -1,6 +1,9 @@
 <view class="ui-page-shell {{pageClass}}">
   <view wx:if="{{loading}}" class="state-card ui-card">正在打开这本书…</view>
-  <view wx:elif="{{loadError}}" class="state-card error ui-card">{{loadError}}</view>
+  <view wx:elif="{{loadError}}" class="state-card error ui-card">
+    <text>{{loadError}}</text>
+    <button wx:if="{{projectId}}" class="ui-button ui-share-more" bindtap="retryLoad">重新读取</button>
+  </view>
   <block wx:else>
     <view wx:if="{{error}}" class="notice warn">{{error}}</view>
     <view wx:if="{{bookStaleNotice}}" class="notice warn">{{bookStaleNotice}}</view>

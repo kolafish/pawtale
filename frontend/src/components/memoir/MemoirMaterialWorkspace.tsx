@@ -271,7 +271,7 @@ export function MemoirMaterialWorkspace({
       </button>
     </div>
   ) : (
-    <div className="flex h-full flex-col items-center justify-center px-6 text-center text-[#7a847f]">
+    <div className="flex h-full flex-col items-center justify-center px-6 text-center text-[#69736e]">
       <Headphones size={28} strokeWidth={1.5} aria-hidden="true" />
       <p className="mt-3 text-sm font-medium text-[#46504b]">选择一段素材开始校对</p>
     </div>
@@ -309,9 +309,11 @@ export function MemoirMaterialWorkspace({
       </div>
       {advancedToolsOpen && (
         <Suspense fallback={(
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 text-sm text-white backdrop-blur-[1px]">
-            <Loader2 size={17} className="mr-2 animate-spin" />
-            正在打开高级工具
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-[1px]">
+            <div role="status" className="flex items-center gap-2 rounded-md bg-white px-5 py-4 text-sm text-[#29322e] shadow-lg">
+              <Loader2 size={17} className="animate-spin" />
+              正在打开高级工具
+            </div>
           </div>
         )}>
           <MemoirAdvancedToolsDrawer

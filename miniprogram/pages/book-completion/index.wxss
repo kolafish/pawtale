@@ -54,7 +54,7 @@
 }
 
 .page-kicker {
-  color: var(--ui-accent);
+  color: var(--ui-accent-strong);
   font-size: var(--ui-font-meta);
   font-weight: 700;
   line-height: 38rpx;
@@ -330,7 +330,7 @@
 
 .book-review .book-ready-action + .recheck-book-action {
   background: var(--ui-surface-soft);
-  color: var(--ui-accent);
+  color: var(--ui-accent-strong);
 }
 
 .book-ready-action:active,
@@ -353,7 +353,7 @@
 
 .row-action-mark {
   flex: 0 0 auto;
-  color: var(--ui-accent);
+  color: var(--ui-accent-strong);
   font-family: var(--ui-font-sans);
   font-size: 40rpx;
   font-weight: 400;
@@ -400,7 +400,7 @@
 }
 
 .chapter-state {
-  color: var(--ui-accent);
+  color: var(--ui-accent-strong);
   font-weight: 700;
 }
 
@@ -448,7 +448,7 @@
   gap: 8rpx;
   box-sizing: border-box;
   border-top: 1rpx solid var(--ui-divider);
-  color: var(--ui-accent);
+  color: var(--ui-accent-strong);
   font-size: var(--ui-font-action);
   font-weight: 600;
   line-height: 38rpx;

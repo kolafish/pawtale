@@ -44,7 +44,7 @@
 }
 
 .ai-task-cancel {
-  min-height: 88rpx;
+  min-height: var(--ui-hit-size);
   margin-top: 12rpx;
   padding: 10rpx 20rpx;
   box-sizing: border-box;
@@ -55,7 +55,7 @@
   color: var(--ui-accent-strong);
   font-size: var(--ui-font-meta);
   font-weight: 700;
-  line-height: 38rpx;
+  line-height: 1.5;
   transition-property: transform, opacity;
   transition-duration: 120ms;
   transition-timing-function: ease-out;

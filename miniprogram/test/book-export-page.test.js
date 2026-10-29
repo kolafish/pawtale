@@ -91,6 +91,23 @@ function loadBookExportPage(voiceApiExports = {}) {
   return loadPageModule("../pages/book-export/index.ts");
 }
 
+test("book export can recover its initial load failure without leaving the page", async () => {
+  let attempts = 0;
+  const { page } = loadBookExportPage({
+    getMemoirBookOutput: async () => {
+      if (++attempts === 1) throw new Error("网络暂不可用");
+      return sampleBookOutput();
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { projectId: "project-1" });
+  assert.equal(context.data.loadError, "网络暂不可用");
+  await context.retryLoad();
+  assert.equal(context.data.loadError, "");
+  assert.equal(context.data.bookContent, "全书第二版正文");
+  assert.equal(context.data.loading, false);
+});
+
 test("book export page is registered", () => {
   const appJson = JSON.parse(fs.readFileSync(path.join(__dirname, "../app.json"), "utf8"));
   const pageJson = JSON.parse(fs.readFileSync(path.join(__dirname, "../pages/book-export/index.json"), "utf8"));

@@ -25,7 +25,7 @@
   color: var(--ui-text-secondary);
   font-size: var(--ui-font-meta);
   font-weight: 650;
-  line-height: 34rpx;
+  line-height: 1.5;
 }
 
 .friendly-issue-card {
@@ -70,13 +70,13 @@
   font-family: var(--ui-font-editorial);
   font-size: var(--ui-font-action);
   font-weight: 650;
-  line-height: 46rpx;
+  line-height: 1.5;
   text-wrap: pretty;
 }
 
 .friendly-primary-action {
   width: 100%;
-  min-height: 88rpx;
+  min-height: var(--ui-hit-size);
   margin-top: 22rpx;
   padding: 14rpx 22rpx 14rpx 26rpx;
   display: flex;
@@ -91,7 +91,7 @@
     0 6rpx 18rpx rgba(91, 63, 48, 0.04);
   font-size: var(--ui-font-action);
   font-weight: 700;
-  line-height: 40rpx;
+  line-height: 1.5;
   transition-property: transform, opacity;
   transition-duration: 150ms;
   transition-timing-function: ease-out;
@@ -110,7 +110,7 @@
 }
 
 .friendly-secondary-actions {
-  min-height: 80rpx;
+  min-height: var(--ui-hit-size);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -118,13 +118,13 @@
 }
 
 .friendly-secondary-action {
-  min-height: 80rpx;
+  min-height: var(--ui-hit-size);
   padding: 0 8rpx;
   display: flex;
   align-items: center;
   color: var(--ui-text-secondary);
   font-size: var(--ui-font-meta);
-  line-height: 34rpx;
+  line-height: 1.5;
   transition-property: opacity;
   transition-duration: 150ms;
   transition-timing-function: ease-out;
@@ -152,7 +152,7 @@
 }
 
 .optional .group-title {
-  color: var(--ui-accent);
+  color: var(--ui-accent-strong);
 }
 
 .group-detail,
@@ -177,7 +177,7 @@
 .question {
   font-size: var(--ui-font-action);
   font-weight: 650;
-  line-height: 42rpx;
+  line-height: 1.5;
 }
 
 .state {
@@ -199,23 +199,28 @@
   color: var(--ui-text-primary);
   font-size: var(--ui-font-meta);
   font-weight: 700;
-  line-height: 38rpx;
+  line-height: 1.5;
 }
 
 .action {
-  min-height: 88rpx;
+  min-height: var(--ui-hit-size);
   margin-top: 18rpx;
   display: flex;
   align-items: center;
   justify-content: center;
   border: 1rpx solid var(--ui-accent);
-  color: var(--ui-accent);
+  color: var(--ui-accent-strong);
   font-size: var(--ui-font-action);
   font-weight: 700;
 }
 
 .action.compact {
   flex: 1;
+  min-width: 0;
+  padding: 12rpx 8rpx;
+  line-height: 1.5;
+  text-align: center;
+  overflow-wrap: anywhere;
 }
 
 .required-actions .action:first-child {

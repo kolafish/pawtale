@@ -193,7 +193,7 @@
   text-wrap: balance;
 }
 .section-count {
-  color: var(--ui-accent);
+  color: var(--ui-accent-strong);
   font-size: var(--ui-font-caption);
   font-weight: 700;
   line-height: 1.3;
@@ -423,7 +423,7 @@
   display: block;
 }
 .source-ref-label {
-  color: var(--ui-accent);
+  color: var(--ui-accent-strong);
   font-size: var(--ui-font-caption);
   font-weight: 700;
   line-height: 1.25;
@@ -722,7 +722,7 @@
 }
 .book-row-arrow {
   flex: 0 0 auto;
-  color: var(--ui-accent);
+  color: var(--ui-accent-strong);
   font-size: 38rpx;
   line-height: 1;
 }
@@ -743,7 +743,7 @@
 .chapter-directory-index {
   flex: 0 0 44rpx;
   padding-top: 3rpx;
-  color: var(--ui-accent);
+  color: var(--ui-accent-strong);
   font-size: var(--ui-font-meta);
   line-height: 1.5;
   font-variant-numeric: tabular-nums;

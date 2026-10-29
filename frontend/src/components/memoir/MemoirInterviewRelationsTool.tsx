@@ -54,7 +54,7 @@ function AnswerRelationRow({
       <p className="text-xs leading-5 text-[#59635e]">
         {compactText(answer.display_text) || '暂无识别文字'}
       </p>
-      <label className="mt-2 flex items-center gap-2 text-[11px] text-[#7a847f]">
+      <label className="mt-2 flex items-center gap-2 text-[11px] text-[#69736e]">
         归属问题
         <select
           value={answer.parent_question_message_id ?? ''}
@@ -169,7 +169,7 @@ export function MemoirInterviewRelationsTool({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="space-y-3 border-b border-black/6 bg-[#f7f8f7] px-4 py-3 sm:px-5">
-        <label className="block text-[11px] text-[#7a847f]">
+        <label className="block text-[11px] text-[#69736e]">
           访谈场次
           <select
             value={selectedSessionId ?? ''}
@@ -192,7 +192,7 @@ export function MemoirInterviewRelationsTool({
             disabled={!canEdit || !selectedSessionId || isSaving}
             onChange={(event) => setNewQuestionText(event.target.value)}
             placeholder="补充一个整理问题"
-            className="h-10 min-w-0 flex-1 rounded-md border border-black/10 bg-white px-3 text-sm text-[#29322e] outline-none transition-[border-color,box-shadow] placeholder:text-[#a1aaa6] focus:border-[#3c7a67] focus:shadow-[0_0_0_3px_rgba(60,122,103,0.12)] disabled:opacity-50"
+            className="h-10 min-w-0 flex-1 rounded-md border border-black/10 bg-white px-3 text-sm text-[#29322e] outline-none transition-[border-color,box-shadow] placeholder:text-[#69736e] focus:border-[#3c7a67] focus:shadow-[0_0_0_3px_rgba(60,122,103,0.12)] disabled:opacity-50"
           />
           <button
             type="button"
@@ -259,7 +259,7 @@ export function MemoirInterviewRelationsTool({
                     ) : (
                       <p className="text-sm font-medium leading-6 text-[#29322e]">{question.text}</p>
                     )}
-                    <p className="mt-1 text-[11px] text-[#929b97] tabular-nums">{question.answer_count} 段回答</p>
+                    <p className="mt-1 text-[11px] text-[#69736e] tabular-nums">{question.answer_count} 段回答</p>
                   </div>
                   {editingQuestion?.id !== question.id && (
                     <div className="flex flex-shrink-0 gap-1">
@@ -282,7 +282,7 @@ export function MemoirInterviewRelationsTool({
                         type="button"
                         disabled={!canEdit || isSaving}
                         onClick={() => setEditingQuestion({ id: question.id, text: question.text })}
-                        className="inline-flex h-9 w-9 items-center justify-center rounded-md text-[#7a847f] transition-[background-color,color,transform] hover:bg-[#f1f3f2] hover:text-[#29322e] active:scale-[0.96] disabled:opacity-40"
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-md text-[#69736e] transition-[background-color,color,transform] hover:bg-[#f1f3f2] hover:text-[#29322e] active:scale-[0.96] disabled:opacity-40"
                         title="编辑问题"
                         aria-label="编辑问题"
                       >
@@ -315,7 +315,7 @@ export function MemoirInterviewRelationsTool({
               <section className="overflow-hidden rounded-md bg-white shadow-[0_1px_7px_rgba(23,43,35,0.08)]">
                 <div className="px-3 py-3">
                   <h3 className="text-sm font-medium text-[#8a5a20]">未归属回答</h3>
-                  <p className="mt-1 text-[11px] text-[#929b97] tabular-nums">
+                  <p className="mt-1 text-[11px] text-[#69736e] tabular-nums">
                     {detail.unassigned_answers.length} 段
                   </p>
                 </div>
@@ -337,7 +337,7 @@ export function MemoirInterviewRelationsTool({
               </section>
             )}
 
-            <p className="text-center text-xs text-[#929b97]">
+            <p className="text-center text-xs text-[#69736e]">
               共 {detail.questions.length} 个问题，{allAnswers(detail).length} 段回答
             </p>
           </div>

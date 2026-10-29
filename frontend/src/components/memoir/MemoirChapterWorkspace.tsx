@@ -29,7 +29,7 @@ export function MemoirChapterWorkspace({ project }: { project: Project }) {
   }
   if (planQuery.isError || materialsQuery.isError) {
     return (
-      <div className="flex h-full flex-col items-center justify-center bg-[#f7f8f7] px-6 text-center text-[#7a847f]">
+      <div className="flex h-full flex-col items-center justify-center bg-[#f7f8f7] px-6 text-center text-[#69736e]">
         <BookOpen size={24} />
         <p className="mt-3 text-sm">{getErrorMessage(planQuery.error ?? materialsQuery.error, '章节目录读取失败')}</p>
         <button type="button" onClick={() => { planQuery.refetch(); materialsQuery.refetch(); }} className="mt-4 inline-flex h-10 items-center gap-2 rounded-md bg-white px-3 text-sm text-[#46504b]">
@@ -41,7 +41,7 @@ export function MemoirChapterWorkspace({ project }: { project: Project }) {
   if (!plan || !selectedChapter) {
     return (
       <div className="flex h-full flex-col items-center justify-center bg-[#f7f8f7] px-6 text-center">
-        <BookOpen size={24} className="text-[#7a847f]" />
+        <BookOpen size={24} className="text-[#69736e]" />
         <h1 className="mt-5 text-xl font-semibold text-[#202824]">还没有章节目录</h1>
         <p className="mt-2 text-sm text-[#69736e]">当前共有 {materials.length} 段访谈素材，可在素材校对中查看。</p>
       </div>
@@ -55,7 +55,7 @@ export function MemoirChapterWorkspace({ project }: { project: Project }) {
             <h1 className="truncate text-base font-semibold text-[#202824]">章节目录</h1>
             <span className="rounded bg-[#eef0ef] px-2 py-0.5 text-[11px] text-[#69736e]">{plan.status === 'confirmed' ? '已确认' : '草稿'}</span>
           </div>
-          <p className="mt-0.5 truncate text-xs text-[#7a847f]">{plan.title || project.title} · {chapters.length} 章 · 已归入 {materials.length - uncoveredCount}/{materials.length} 段</p>
+          <p className="mt-0.5 truncate text-xs text-[#69736e]">{plan.title || project.title} · {chapters.length} 章 · 已归入 {materials.length - uncoveredCount}/{materials.length} 段</p>
         </div>
       </div>
       <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[360px_minmax(0,1fr)] lg:overflow-hidden">

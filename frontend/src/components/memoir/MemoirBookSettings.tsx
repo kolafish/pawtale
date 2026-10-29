@@ -15,7 +15,8 @@ export function MemoirBookSettings({ form }: { form: MemoirBookOutputForm }) {
   return (
     <aside className="flex h-full min-h-0 flex-col bg-white">
       <div className="flex min-h-14 items-center border-b border-black/6 px-4 py-2">
-        <h1 className="text-base font-semibold text-[#202824]">全书设置</h1>
+        <h1 className="text-base font-semibold text-[#202824]">全书信息</h1>
+        <span className="ml-auto text-xs text-[#69736e]">只读</span>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
         <SettingsSection title="书名与署名">
@@ -27,9 +28,9 @@ export function MemoirBookSettings({ form }: { form: MemoirBookOutputForm }) {
           </div>
         </SettingsSection>
         <SettingsSection title="前后文案">
-          <TextField label="前言" value={form.preface} multiline />
-          <TextField label="后记" value={form.afterword} multiline />
-          <TextField label="封底语" value={form.back_cover_quote} multiline />
+          <TextField label="前言" value={form.preface} />
+          <TextField label="后记" value={form.afterword} />
+          <TextField label="封底语" value={form.back_cover_quote} />
         </SettingsSection>
         <SettingsSection title="封面风格">
           <p className="text-sm text-[#69736e]">{COVER_STYLES[form.cover_style]}</p>
@@ -48,15 +49,11 @@ function SettingsSection({ title, children }: { title: string; children: React.R
   );
 }
 
-function TextField({ label, value, multiline = false }: { label: string; value: string; multiline?: boolean }) {
+function TextField({ label, value }: { label: string; value: string }) {
   return (
-    <label className="block text-xs text-[#69736e]">
-      {label}
-      {multiline ? (
-        <textarea aria-label={label} value={value} readOnly rows={5} className="mt-1.5 w-full rounded-md border border-black/10 bg-[#f7f8f7] px-3 py-2 text-sm leading-6 text-[#29322e]" />
-      ) : (
-        <input aria-label={label} value={value} readOnly className="mt-1.5 h-10 w-full rounded-md border border-black/10 bg-[#f7f8f7] px-3 text-sm text-[#29322e]" />
-      )}
-    </label>
+    <dl className="text-xs text-[#69736e]">
+      <dt>{label}</dt>
+      <dd className="mt-1.5 whitespace-pre-wrap break-words text-sm leading-6 text-[#29322e]">{value || '未填写'}</dd>
+    </dl>
   );
 }

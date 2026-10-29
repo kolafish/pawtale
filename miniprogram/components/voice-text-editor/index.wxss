@@ -16,7 +16,7 @@
   background: var(--ui-success-surface);
   color: var(--ui-success-text);
   font-size: var(--ui-font-caption);
-  line-height: 34rpx;
+  line-height: 1.5;
 }
 
 .voice-text-status-dot {
@@ -41,7 +41,7 @@
   color: var(--ui-text-primary);
   box-shadow: var(--ui-control-shadow);
   font-size: var(--ui-font-body);
-  line-height: 42rpx;
+  line-height: 1.5;
 }
 
 .voice-text-hint,
@@ -70,7 +70,8 @@
 .submit-action,
 .cancel-action {
   min-height: 96rpx;
-  padding: 0 16rpx;
+  min-width: 0;
+  padding: 12rpx 16rpx;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -78,7 +79,9 @@
   font-size: var(--ui-font-action);
   font-weight: 700;
   text-align: center;
-  white-space: nowrap;
+  line-height: 1.5;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .voice-action {
