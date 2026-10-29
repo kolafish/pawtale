@@ -26,3 +26,5 @@
 .large-text .result-label, .large-text .result-more { font-size: var(--ui-font-large-meta); }
 .large-text .result-count { font-size: 40rpx; }
 .large-text.quiet-result .result-title { font-size: var(--ui-font-large-list-title); }
+
+.reading-band { position: absolute; left: 0; width: 100%; pointer-events: none; }
