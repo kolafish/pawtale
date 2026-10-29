@@ -583,21 +583,27 @@ class PDFBookBuilder:
             width_ratio = 0.82
         box_width = int((self.layout.page_width - self.layout.margin_x * 2) * width_ratio)
         box_height = max_height or min(220, int(self.layout.page_height * 0.34))
+        page_height = self.layout.page_height - self.layout.margin_top - self.layout.margin_bottom
         caption_height = self._image_caption_height(caption, box_width)
-        box_height = min(box_height, self.layout.page_height - self.layout.margin_top - self.layout.margin_bottom - caption_height - 18)
         if caption:
             with Image.open(image_path) as source:
                 width, height = ImageOps.exif_transpose(source).size
             box_height = min(box_height, box_width * height / width)
-        self._ensure_space_height(box_height + caption_height + 18)
+        # Keep short notes together with a modest image reduction. Long notes
+        # continue at their chosen font size, with at least two lines by the photo.
+        first_caption_height = min(caption_height, 6 + self.layout.small_font_size * 3)
+        box_height = min(box_height, page_height - first_caption_height - 18)
+        fitting_height = page_height - caption_height - 18
+        if fitting_height >= box_height * 0.75:
+            box_height = min(box_height, fitting_height)
+        self._ensure_space_height(min(box_height + caption_height + 18, page_height))
         page = self._ensure_page()
         x = self._content_left() + int(
             (self.layout.page_width - self.layout.margin_x * 2 - box_width) / 2
         )
         y = self.y - box_height
         page.images.append(PDFImageCommand(path=image_path, x=x, y=y, width=box_width, height=box_height))
-        self._add_image_caption(caption, x, y, box_width)
-        self.y = y - caption_height - 15
+        self.y = self._add_image_caption(caption, x, y, box_width, paginate=True) - 15
         return True
 
     def _add_pending_image(self) -> None:
@@ -611,14 +617,24 @@ class PDFBookBuilder:
         lines = self._image_caption_lines(caption, width)
         return len(lines) * (self.layout.small_font_size * 1.5) + 6 if lines else 0
 
-    def _add_image_caption(self, caption: str, x: float, bottom: float, width: float) -> None:
+    def _add_image_caption(self, caption: str, x: float, bottom: float, width: float, *, paginate: bool = False) -> float:
         size = self.layout.small_font_size
-        for index, line in enumerate(self._image_caption_lines(caption, width)):
+        lines = self._image_caption_lines(caption, width)
+        cursor = bottom - 6 if lines else bottom
+        for line in lines:
+            if paginate and cursor - size < self.layout.margin_bottom:
+                content_left = self._content_left()
+                self.y = cursor
+                self._ensure_space_height(size)
+                x += self._content_left() - content_left
+                cursor = self.y
             self._ensure_page().commands.append(PDFTextCommand(
                 text=line, x=x + (width - _estimated_text_width(line, size)) / 2,
-                y=bottom - 6 - size - index * size * 1.5, font_size=size,
+                y=cursor - size, font_size=size,
                 color=(0.416, 0.376, 0.349),
             ))
+            cursor -= size * 1.5
+        return cursor
 
     def add_image_gallery(self, paths: list[Path], *, captions: list[str] | None = None) -> None:
         """Keep every caption with its image; paginate complete rows."""
