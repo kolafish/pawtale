@@ -1,5 +1,5 @@
 require("./register-ts");
-const { memoirAudioPlanLoader } = require("../services/memoir-book-api.ts");
+const { memoirAudioPlanLoader, memoirImageAssetFileUrl } = require("../services/memoir-book-api.ts");
 const { sampleAudioPlan } = require("./book-fixtures");
 
 const assert = require("node:assert/strict");
@@ -31,6 +31,7 @@ function loadBookReaderPage(voiceApiExports = {}, ttsExports = {}) {
   global.wx ||= { getStorageSync: () => "", setStorageSync() {} };
   global.wx.createSelectorQuery ||= playerMeasurement();
   mockMemoirApiModules({
+    memoirImageAssetFileUrl,
     memoirAudioPlanLoader: (...args) => memoirAudioPlanLoader(...args, voiceApiExports.prepareMemoirAudio || unmockedAsync("prepareMemoirAudio")),
     getMemoirChapterWorkspace: unmockedAsync("getMemoirChapterWorkspace"),
     getMemoirBookOutput: async () => sampleFinishedBook(),
@@ -103,6 +104,50 @@ test("book reader page loads the finished book by project id", async () => {
     ["我小时候常在院子里晒太阳。"],
   );
   assert.equal(context.data.error, "");
+});
+
+for (const historical of [false, true]) {
+  test(`owner ${historical ? "historical" : "latest"} book loads saved illustrations and cover by asset ID`, async () => {
+    const downloads = [];
+    mockModule("../services/authenticated-media.ts", { downloadAuthenticatedFile: async url => {
+      downloads.push(url);
+      return `local-image-${downloads.length}`;
+    } });
+    const output = sampleFinishedBook();
+    const version = structuredClone(output.latest_version);
+    version.id = historical ? "saved-history" : output.latest_version.id;
+    const image = { image_asset_id: "saved-picture", section_id: "section-1", placement: "chapter_inline",
+      inline_position: "before", disclosure: "AI", storage_path: "/private/storage/picture.jpg" };
+    version.manuscript.chapters[0].illustrations = [image];
+    version.manuscript.render_settings.cover_image = { ...image, image_asset_id: "saved-cover", placement: "cover" };
+    if (!historical) output.latest_version = version;
+    else output.latest_version.manuscript.chapters[0].illustrations = [{ ...image, image_asset_id: "new-picture" }];
+    const { page } = loadBookReaderPage({ getMemoirBookOutput: async () => output,
+      getMemoirBookOutputVersion: async () => version });
+    const context = pageContext(page);
+    await context.onLoad({ projectId: "project/1", ...(historical ? { versionId: version.id } : {}) });
+    assert.equal(context.data.error, "");
+    assert.equal(context.data.bookViewingHistoricalVersion, historical);
+    assert.deepEqual(context.data.shareImages.map(image => image.id), ["saved-picture"]);
+    assert.equal(context.data.shareImages[0].url, "local-image-1");
+    assert.equal(context.data.shareCoverUrl, "local-image-2");
+    assert.ok(downloads[0].endsWith("/projects/project%2F1/image-assets/saved-picture/file?variant=reading"));
+    assert.ok(downloads[1].endsWith("/image-assets/saved-cover/file?variant=reading"));
+    assert.equal(context.data.sharePreface, "这些故事来自家里的讲述。");
+  });
+}
+
+test("a historical book without illustrations does not borrow the latest images", async () => {
+  const output = sampleFinishedBook();
+  const version = structuredClone(output.latest_version);
+  version.id = "saved-history";
+  output.latest_version.manuscript.chapters[0].illustrations = [{ image_asset_id: "new-picture" }];
+  const { page } = loadBookReaderPage({ getMemoirBookOutput: async () => output,
+    getMemoirBookOutputVersion: async () => version });
+  const context = pageContext(page);
+  await context.onLoad({ projectId: "p", versionId: version.id });
+  assert.equal(context.data.error, "");
+  assert.deepEqual(context.data.shareImages, []);
 });
 
 test("shared reader opens without owner access", async () => {
@@ -1004,15 +1049,23 @@ test("excerpt selection previews only the chosen text and forwards the same immu
 
 test("excerpt recipient reads only the snapshot and uses its token for the chapter likes", async () => {
   const context = excerptContext({
-    readMemoirExcerptShare: async () => ({ title: "一个故事", book_title: "原书名", chapter_title: "原章名", content: "只公开这句话。" }),
+    readMemoirExcerptShare: async () => ({ title: "一个故事", book_title: "原书名", chapter_title: "原章名", content: "只公开这句话。",
+      image_url: "/api/mobile/memoir/excerpt-shares/x1.token/image", image_disclosure: "AI" }),
     readMemoirBookShare: async () => assert.fail("must not load a whole chapter"),
   });
   await context.onLoad({ excerptToken: "x1.token", projectId: "ignored", chapterId: "ignored" });
   assert.equal(context.data.excerptMode, "shared");
   assert.equal(context.data.excerptContent, "只公开这句话。");
   assert.equal(context.readerText, "");
-  assert.equal(context.data.bookPreviewChapters.length, 0);
+  assert.equal(context.data.bookPreviewChapters.length, 1);
+  assert.deepEqual(context.data.bookPreviewChapters[0].sections[0].paragraphs, ["只公开这句话。"]);
+  assert.equal(context.data.bookPreviewTocItems.length, 0);
   assert.equal(context.data.responseToken, "");
+  assert.equal(context.data.shareImages.length, 1);
+  assert.ok(context.data.shareImages[0].url.endsWith("/excerpt-shares/x1.token/image"));
+  assert.equal(context.data.imageGallerySections.excerpt, true);
+  await context.playReaderAudio(); // A unified renderer must not enable whole-chapter audio.
+  assert.equal(context.data.ttsBusyTarget, "");
   assert.deepEqual(context.likeTarget, { reading_token: "x1.token" });
   assert.equal(context.onShareAppMessage().path, "/pages/book-reader/index?excerptToken=x1.token");
   assert.ok(!context.onShareAppMessage().path.includes("chapterId"));
@@ -1051,10 +1104,10 @@ for (const leave of ["onHide", "onUnload"]) {
 
 test("excerpt viewer only exposes an authorized continuation link and no audio or response entry points", () => {
   const template = fs.readFileSync(path.join(__dirname, "../pages/book-reader/index.wxml"), "utf8");
-  const excerptBranch = template.split('<view wx:else class="ui-page-shell')[0];
   assert.match(template, /read-only="\{\{true\}\}"/);
   assert.match(template, /catchtouchend="previewExcerptSelection"/);
-  assert.ok(!/openReaderChapter|playReaderAudio|share-response-form|分享整章|阅读整章/.test(excerptBranch));
+  assert.match(template, /wx:if="\{\{!excerptMode &&[^"\n]+"[\s\S]*?bindtap="playReaderAudio"/);
+  assert.match(template, /wx:if="\{\{readerShared && !excerptMode &&[^"\n]+"[^>]*>\s*<share-response-form/);
 });
 
 test("excerpt editor readiness ignores missing or detached nodes after page exit", () => {
