@@ -89,7 +89,7 @@ declare namespace WechatMiniprogram {
     boundingClientRect(callback: (rect: BoundingClientRectResult | null) => void): SelectorQuery;
     scrollOffset(callback: (offset: { scrollTop: number; scrollLeft: number }) => void): SelectorQuery;
   }
-  interface SelectorQuery { select(selector: string): NodesRef; selectViewport(): NodesRef; exec(): void }
+  interface SelectorQuery { select(selector: string): NodesRef; selectViewport(): NodesRef; exec(callback?: (results: unknown[]) => void): void }
   interface EditorContext {
     setContents(options: { delta: { ops: { insert: string }[] }; success?: () => void; fail?: () => void }): void;
     getSelectionText(options: { success: (result: { text: string }) => void; fail?: () => void }): void;
@@ -548,6 +548,7 @@ declare namespace WechatMiniprogram {
   }
 
   interface Wx {
+    loadFontFace?(option: { global?: boolean; family: string; source: string; success?: () => void; fail?: () => void }): void;
     env: {
       USER_DATA_PATH: string;
     };

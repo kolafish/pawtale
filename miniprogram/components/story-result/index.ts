@@ -1,6 +1,7 @@
 import type { HomeGrowthResult } from "../../pages/home/home-story-state";
 import { AudioPlaybackController } from "../../services/audio-playback";
 import { drawStoryBook, ease } from "./book-art";
+import { storyResultFontReady } from "./font";
 
 interface ResultRuntime {
   attached: boolean;
@@ -19,6 +20,8 @@ interface ResultRuntime {
   width: number;
   height: number;
   dpr: number;
+  textTravel: number;
+  particleRise: number;
   generation: number;
   resultId: string;
 }
@@ -32,7 +35,7 @@ function runtime(owner: object): ResultRuntime {
         wx.setInnerAudioOption?.({ obeyMuteSwitch: true, mixWithOther: true });
         audio.obeyMuteSwitch = true; audio.volume = .22;
       } }),
-      timer: null, context: null, observer: null, width: 0, height: 0, dpr: 1, generation: 0, resultId: "" };
+      timer: null, context: null, observer: null, width: 0, height: 0, dpr: 1, textTravel: 0, particleRise: 65, generation: 0, resultId: "" };
     runtimes.set(owner, state);
   }
   return state;
@@ -41,7 +44,7 @@ function runtime(owner: object): ResultRuntime {
 Component({
   options: { addGlobalClass: true },
   properties: { result: { type: Object, value: null }, largeText: { type: Boolean, value: false } },
-  data: { title: "", count: 0, opacity: 0, textOpacity: 0, textOffset: 8, summary: "", structureLabel: "" },
+  data: { title: "", count: 0, opacity: 0, textOpacity: 0, textOffset: 0, textScale: 1, calligraphyReady: false, summary: "", structureLabel: "" },
   observers: { result() {
     const state = runtime(this), result = this.properties.result as HomeGrowthResult | null;
     if (state.attached && state.resultId !== (result?.id || "")) this.prepare();
@@ -68,7 +71,7 @@ Component({
       state.resultId = result?.id || "";
       state.observer?.disconnect(); state.generation += 1;
       state.elapsed = 0; state.visible = false; state.lastText = -100;
-      state.context = null; state.completed = false; state.rendering = false; state.soundPlayed = soundPlayed;
+      state.context = null; state.textTravel = 0; state.particleRise = 65; state.completed = false; state.rendering = false; state.soundPlayed = soundPlayed;
       if (!result) return;
       const generation = state.generation;
       const mainTitle = result.titles.find(row => row.label === "新增小节") || result.titles[0];
@@ -76,7 +79,7 @@ Component({
       // The overlay is a short receipt; complete titles and content remain in the book.
       this.setData({ title: characters.length > 14 ? `${characters.slice(0, 13).join("")}…` : characters.join(""),
         structureLabel: mainTitle?.label || "已收录", count: result.wordDelta,
-        opacity: 0, textOpacity: 0, textOffset: 8,
+        opacity: 0, textOpacity: 0, textOffset: 0, textScale: 1, calligraphyReady: storyResultFontReady(),
         summary: [...result.titles.map(row => `${row.label}：${row.title}`),
           result.wordDelta ? `本次新增 ${result.wordDelta} 字` : "", result.moreCount ? `另有 ${result.moreCount} 处更新` : ""].filter(Boolean).join("，") }, () => {
         if (!state.attached || generation !== state.generation) return;
@@ -90,7 +93,14 @@ Component({
           });
         };
         if (!result.celebrate) { observe(); return; }
-        this.createSelectorQuery().select("#result-book").fields({ node: true, size: true }, node => {
+        let copy: WechatMiniprogram.BoundingClientRectResult | null = null;
+        let title: WechatMiniprogram.BoundingClientRectResult | null = null;
+        let canvas: WechatMiniprogram.BoundingClientRectResult | null = null;
+        const query = this.createSelectorQuery();
+        query.select(".result-copy").boundingClientRect(rect => { copy = rect; });
+        query.select(".result-title").boundingClientRect(rect => { title = rect; });
+        query.select("#result-book").boundingClientRect(rect => { canvas = rect; });
+        query.select("#result-book").fields({ node: true, size: true }, node => {
           if (!state.attached || generation !== state.generation) return;
           if (node?.node && node.width && node.height) {
             state.context = node.node.getContext("2d");
@@ -98,8 +108,18 @@ Component({
             node.node.width = Math.round(node.width * state.dpr); node.node.height = Math.round(node.height * state.dpr);
             drawStoryBook(state.context, state.width, state.height, state.dpr, 0, 0);
           }
+        });
+        query.exec(() => {
+          if (!state.attached || generation !== state.generation) return;
+          if (state.context && copy && title && canvas) {
+            const pageScale = state.width / 400 * .82;
+            const artTop = canvas.top + state.height - 290 * pageScale - 8;
+            state.textTravel = Math.max(0, artTop + 216 * pageScale - copy.top - copy.height / 2);
+            // Reach the original title height while particles still have a visible glow.
+            state.particleRise = Math.max(65, (artTop + 184 * pageScale - title.top - title.height / 2) / (.84 * pageScale));
+          }
           observe();
-        }).exec();
+        });
       });
     },
     pause() {
@@ -132,7 +152,7 @@ Component({
       const artSeconds = seconds < 1.6 ? seconds / 2 : seconds < 6
         ? .8 + (seconds - 1.6) * 1.45 / 4.4 : 2.25 + (seconds - 6) * 1.55 / 1.2;
       // Fade the canvas pixels too, so the book and particles share the native text envelope.
-      if (state.context) drawStoryBook(state.context, state.width, state.height, state.dpr, artSeconds, opacity);
+      if (state.context) drawStoryBook(state.context, state.width, state.height, state.dpr, artSeconds, opacity, state.particleRise);
       if (result.celebrate && !state.soundPlayed && state.elapsed >= 400) {
         state.soundPlayed = true;
         void state.audio.playTempFile("/assets/audio/story-collected.wav").catch(error => console.warn("story result sound unavailable", error));
@@ -141,7 +161,10 @@ Component({
         state.lastText = state.elapsed; state.rendering = true;
         const generation = state.generation, steps = Math.min(8, result.wordDelta);
         const textEntrance = ease((state.elapsed - 300) / (result.celebrate ? 1300 : 600));
-        this.setData({ opacity, textOpacity: textEntrance, textOffset: 8 * (1 - textEntrance),
+        const descent = result.celebrate && state.textTravel > 0 ? ease((seconds - 2.8) / 3.1) : 0;
+        this.setData({ opacity, textOpacity: textEntrance * (1 - ease((descent - .72) / .28)),
+          textOffset: result.celebrate ? state.textTravel * descent : 8 * (1 - textEntrance),
+          textScale: 1 - .92 * descent,
           count: result.wordDelta - steps + Math.floor(steps * ease((seconds - .8) / .8)) }, () => {
           if (!state.attached || generation !== state.generation) return;
           state.rendering = false;

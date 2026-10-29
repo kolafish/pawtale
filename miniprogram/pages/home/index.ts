@@ -24,6 +24,7 @@ import {
 import { createMemoirProject } from "../../services/memoir";
 import { getMemoirDemoStory, getMemoirStorySnapshot, retryMemoirDraftProgress } from "../../services/memoir-snapshot-api";
 import { storyViewData } from "../../components/story-tree/story-view-adapter";
+import { preloadStoryResultFont } from "../../components/story-result/font";
 import {
   dismissMemoirShareVideoCandidate,
   downloadMemoirShareVideoThumbnail,
@@ -371,6 +372,7 @@ definePage<HomeData>()({
   },
 
   onLoad(query?: { section?: string; projectId?: string }) {
+    preloadStoryResultFont();
     if (query?.section === "story") this.storyNavigationTarget = { projectId: query.projectId || "", narrationSaved: false };
   },
 
