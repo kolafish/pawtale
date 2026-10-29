@@ -1113,6 +1113,10 @@ def _illustration_file_path(illustration: dict[str, Any]) -> Path | None:
     return resolved
 
 
+def _illustration_caption(illustration: dict[str, Any]) -> str:
+    return "AI 意象插图" if _str(illustration.get("disclosure")) else _str(illustration.get("caption"))
+
+
 def _add_illustration(builder: PDFBookBuilder, illustration: dict[str, Any], *, wrap_max_height: float | None = None) -> None:
     path = _illustration_file_path(illustration)
     if not path:
@@ -1122,6 +1126,7 @@ def _add_illustration(builder: PDFBookBuilder, illustration: dict[str, Any], *, 
         display_size=_str(illustration.get("display_size")) or "full_width",
         wrap_right=illustration.get("placement") == "chapter_inline",
         wrap_max_height=wrap_max_height,
+        caption=_illustration_caption(illustration),
     )
 
 
@@ -1149,7 +1154,8 @@ def _add_illustrations(
 
 
 def _add_illustration_gallery(builder: PDFBookBuilder, illustrations: list[dict[str, Any]]) -> None:
-    builder.add_image_gallery([path for image in illustrations if (path := _illustration_file_path(image))])
+    images = [(path, _illustration_caption(image)) for image in illustrations if (path := _illustration_file_path(image))]
+    builder.add_image_gallery([path for path, _ in images], captions=[caption for _, caption in images])
 
 
 def _needs_illustration_gallery(builder: PDFBookBuilder, paragraphs: list[str], images_before: dict[int, list[dict[str, Any]]]) -> bool:

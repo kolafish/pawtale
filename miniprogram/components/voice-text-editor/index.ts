@@ -58,6 +58,7 @@ Component({
     hint: { type: String, value: "" },
     ariaLabel: { type: String, value: "文字或语音输入" },
     maxlength: { type: Number, value: 1000 },
+    allowEmpty: { type: Boolean, value: false },
     disabled: { type: Boolean, value: false },
     busy: { type: Boolean, value: false },
     automaticVoiceCommand: { type: Boolean, value: false },
@@ -332,8 +333,8 @@ Component({
 
     submit() {
       const value = voiceRuntime(this).text.trim();
-      if (!value || !this.canEdit()) {
-        if (!value) {
+      if ((!value && !this.properties.allowEmpty) || !this.canEdit()) {
+        if (!value && !this.properties.allowEmpty) {
           wx.showToast({ title: "请先输入或说出内容", icon: "none" });
         }
         return;

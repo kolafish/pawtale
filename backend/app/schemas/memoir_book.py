@@ -746,6 +746,7 @@ class MemoirExcerptShareResponse(BaseModel):
     is_owner: bool = False
     image_url: str = ""
     image_disclosure: str = ""
+    image_caption: str = ""
     reading_link: MemoirExcerptReadingLink | None = None
     book_title: str
     chapter_title: str

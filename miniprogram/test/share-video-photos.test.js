@@ -66,3 +66,23 @@ test("dragging a photo moves it to the slot under the finger", () => {
   component.methods.endDrag.call(context);
   assert.deepEqual(changes(context), [["b", "c", "a"]]);
 });
+
+test("caption editing reads uploaded photo notes and blocks export while saving", async () => {
+  const { component } = loadPhotos({ library: [
+    { id: "photo", source_type: "manual_upload", caption: "奶奶，1982 年" },
+    { id: "ai", source_type: "chapter", caption: "生成时的原文" },
+  ] });
+  const context = componentContext(component, { projectId: "p", photoIds: ["photo", "ai"], editCaptions: true });
+  component.observers.photoIds.call(context, ["photo", "ai"]);
+  await flushAsyncWork();
+  assert.equal(context.data.photos[0].caption, "奶奶，1982 年");
+  assert.equal(context.data.photos[0].uploaded, true);
+  assert.equal(context.data.photos[1].uploaded, false);
+  context.onPhotoCaptionBusy({ detail: { busy: true } });
+  assert.equal(context.data.busy, true);
+  assert.equal(context.events.at(-1).detail.busy, true);
+  context.onPhotoCaptionSaved({ detail: { asset: { id: "photo", source_type: "manual_upload", caption: "" } } });
+  context.onPhotoCaptionBusy({ detail: { busy: false } });
+  assert.equal(context.data.photos[0].caption, "");
+  assert.equal(context.data.busy, false);
+});

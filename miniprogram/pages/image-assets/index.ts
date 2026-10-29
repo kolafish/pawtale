@@ -323,6 +323,11 @@ definePage<ImageAssetsData>()({
     this.loadToken += 1;
   },
 
+  onPhotoCaptionSaved(event: { detail: { asset: MemoirImageAsset } }) {
+    const asset = event.detail.asset;
+    this.setData({ items: this.data.items.map(item => item.id === asset.id ? { ...item, caption: asset.caption } : item) });
+  },
+
   async ensureProjectId(): Promise<string> {
     if (this.data.projectId) {
       return this.data.projectId;

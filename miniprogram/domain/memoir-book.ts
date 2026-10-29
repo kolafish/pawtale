@@ -576,6 +576,7 @@ export interface MemoirExcerptShare {
   is_owner: boolean;
   image_url: string;
   image_disclosure: string;
+  image_caption: string;
   reading_link: { scope: "book"; token: string } | null;
   book_title: string;
   chapter_title: string;

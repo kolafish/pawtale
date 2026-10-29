@@ -1,0 +1,15 @@
+<view class="photo-caption-editor">
+  <block wx:if="{{editing}}">
+    <text class="caption-label">{{label}}（可不填）</text>
+    <voice-text-editor value="{{value}}" voice-enabled="{{false}}" allow-empty="{{true}}" maxlength="500"
+      placeholder="例如：爸爸和奶奶，1982 年春天摄于老家" aria-label="照片里是谁，拍于何时、何地"
+      hint="用一句话记下照片里的人、拍摄时间或地点。" submit-text="保存说明" busy-text="正在保存…" cancel-text="取消"
+      disabled="{{disabled}}" busy="{{busy}}" bindchange="change" bindsubmit="save" bindcancel="cancel" />
+    <text wx:if="{{error}}" class="caption-error" aria-live="polite">{{error}}</text>
+  </block>
+  <block wx:else>
+    <text wx:if="{{caption}}" class="caption-copy">{{caption}}</text>
+    <button class="caption-action text-action-button" disabled="{{disabled}}" bindtap="edit">{{caption ? '修改' : '添加'}}{{label}}</button>
+    <text wx:if="{{saved}}" class="caption-saved" aria-live="polite">照片说明已保存</text>
+  </block>
+</view>

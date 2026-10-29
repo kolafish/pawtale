@@ -473,7 +473,15 @@
 .share-reading-image { clear: both; text-indent: 0; }
 .share-cover-image, .share-reading-image image { width: 100%; border-radius: 28rpx; }
 .share-reading-image image { display: block; outline: 1px solid rgba(0, 0, 0, .1); outline-offset: -1px; }
-.share-reading-image text { display: block; color: var(--ui-text-muted); font-size: var(--ui-font-caption); line-height: 1.5; margin-top: 8rpx; }
+.share-reading-image text {
+  text-align: center;
+  overflow-wrap: anywhere;
+  display: block;
+  color: var(--ui-text-muted);
+  font-size: var(--ui-font-caption);
+  line-height: 1.5;
+  margin-top: 8rpx;
+}
 .small-section-content, .chapter-content, .book-content { font-size: 32rpx; line-height: 1.8; }
 .large-text .small-section-content, .large-text .chapter-content, .large-text .book-content { font-size: 36rpx; }
 /* Selected stories share the card's warm paper and editorial typography. */

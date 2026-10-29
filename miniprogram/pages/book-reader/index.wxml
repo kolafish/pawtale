@@ -35,7 +35,7 @@
         <text class="excerpt-help">{{materialImageError || materialImageStatusText || 'AI 意象插图，不是真实历史照片；图片会保存到插图管理。'}}</text>
       </block>
       <block wx:else>
-        <share-video-photos project-id="{{projectId}}" photo-ids="{{excerptPhotoIds}}" max-count="1" disabled="{{excerptBusy}}" bindchange="changeExcerptPhotos" bindbusy="onExcerptPhotoBusy" binderror="onExcerptPhotoError" />
+        <share-video-photos project-id="{{projectId}}" photo-ids="{{excerptPhotoIds}}" max-count="1" edit-captions="{{true}}" disabled="{{excerptBusy}}" bindchange="changeExcerptPhotos" bindbusy="onExcerptPhotoBusy" binderror="onExcerptPhotoError" />
         <text class="excerpt-help">从手机上传或从图片素材选择，统一保存在插图管理中。</text>
       </block>
     </block>
@@ -209,7 +209,7 @@
 <view wx:for="{{shareImages}}" wx:key="id" wx:for-item="illustration" class="share-reading-image">
           <block wx:if="{{illustration.chapterId === chapter.chapterId && !illustration.sectionId}}">
             <image src="{{illustration.url}}" mode="widthFix" />
-            <text wx:if="{{illustration.disclosure}}">AI背景图</text>
+            <text wx:if="{{illustration.caption}}">{{illustration.caption}}</text>
           </block>
         </view>
         <view wx:if="{{chapter.sections.length}}" class="reader-small-section-list">
@@ -227,7 +227,7 @@
                 <block wx:for="{{shareImages}}" wx:key="id" wx:for-item="illustration">
                   <view wx:if="{{illustration.chapterId === chapter.chapterId && illustration.sectionId === section.id && !imageGallerySections[section.id] && illustration.paragraphBefore === paragraphIndex}}" class="share-reading-image {{illustration.portrait ? 'portrait' : ''}}">
                     <image src="{{illustration.url}}" mode="widthFix" data-id="{{illustration.id}}" data-url="{{illustration.url}}" bindload="onReadingImageLoad" />
-                    <text wx:if="{{illustration.disclosure}}">AI背景图</text>
+                    <text wx:if="{{illustration.caption}}">{{illustration.caption}}</text>
                   </view>
                 </block>
                 <view class="small-section-content">
@@ -238,7 +238,7 @@
                 <block wx:for="{{shareImages}}" wx:key="id" wx:for-item="illustration">
                   <view wx:if="{{illustration.chapterId === chapter.chapterId && illustration.sectionId === section.id && (imageGallerySections[section.id] || illustration.paragraphBefore === section.paragraphs.length)}}" class="share-reading-image">
                     <image src="{{illustration.url}}" mode="{{imageGallerySections[section.id] ? 'aspectFit' : 'widthFix'}}" style="{{imageGallerySections[section.id] ? 'height: ' + illustration.galleryHeight + 'rpx; width: ' + (illustration.galleryHeight / illustration.aspectRatio) + 'rpx;' : ''}}" data-id="{{illustration.id}}" data-url="{{illustration.url}}" bindload="onReadingImageLoad" />
-                    <text wx:if="{{illustration.disclosure}}">AI背景图</text>
+                    <text wx:if="{{illustration.caption}}">{{illustration.caption}}</text>
                   </view>
                 </block>
               </view>
