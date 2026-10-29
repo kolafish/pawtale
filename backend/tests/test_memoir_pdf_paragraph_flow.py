@@ -239,3 +239,51 @@ def test_book_export_shows_photo_notes_and_ai_source_labels(tmp_path, monkeypatc
     assert "爸爸，1982 年" in text
     assert "AI 意象插图" in text
     assert "生成插图使用的故事原文" not in text
+
+
+@pytest.mark.parametrize("edition", list(MemoirBookOutputExportLayout))
+@pytest.mark.parametrize("template", [
+    "classic_family", "photo_memory", "oral_archive", "heritage_classic",
+    "warm_journal", "modern_minimal", "custom",
+])
+@pytest.mark.parametrize("mode", ["full", "half_width", "inline", "float", "gallery"])
+def test_max_length_photo_caption_paginates_in_large_type_with_wide_margins(tmp_path, edition, template, mode):
+    path = tmp_path / "family.jpg"
+    Image.new("RGB", (600, 900), "#eee3ce").save(path)
+    layout = configured_pdf_layout(
+        PDF_LAYOUTS[edition], template=template,
+        custom_layout={"font_scale": "large", "page_margin": "wide"},
+    )
+    builder = PDFBookBuilder(title="家人", layout=layout)
+    builder.new_page("正文", body_numbering=True)
+    builder.add_body_text("前面的回忆。")
+    builder.y = layout.margin_bottom + 55
+    caption = "这张照片里是奶奶和爸爸，摄于家门口的院子里。" * 25
+    caption = caption[:497] + "说明完"
+    assert len(caption) == 500
+    if mode == "gallery":
+        builder.add_image_gallery([path, path], captions=[caption, "下一张照片"])
+    else:
+        builder.add_image(path, caption=caption, wrap_right=mode == "float", display_size=mode)
+    builder.finish_image_wrap()
+    body = "这些是家里的旧照片。" * 30
+    builder.add_body_text(body)
+    text = "".join(command.text for page in builder.pages for command in page.commands)
+    assert text == "前面的回忆。" + caption + ("下一张照片" if mode == "gallery" else "") + body
+    notes = "".join(line.text for page in builder.pages for line in page.commands if line.font_size == layout.small_font_size)
+    assert notes == caption + ("下一张照片" if mode == "gallery" else "")
+    assert sum(len(page.images) for page in builder.pages) == (2 if mode == "gallery" else 1)
+    image_page = next(page for page in builder.pages if page.images)
+    assert any(line.font_size == layout.small_font_size for line in image_page.commands)
+    for page in builder.pages:
+        offset = layout.inner_margin_delta * (1 if page.body_page_number % 2 else -1) if layout.mirror_body_pages else 0
+        for image in page.images:
+            assert image.height > 0 and image.width > 0
+            assert layout.margin_bottom <= image.y < image.y + image.height <= layout.page_height - layout.margin_top
+        for line in page.commands:
+            assert layout.margin_bottom <= line.y <= layout.page_height - layout.margin_top
+            if line.font_size == layout.small_font_size:
+                center = line.x + _estimated_text_width(line.text, line.font_size) / 2
+                assert center == pytest.approx(layout.page_width / 2 + offset, abs=0.5)
+            for image in page.images:
+                assert line.y >= image.y + image.height or line.y + line.font_size <= image.y
