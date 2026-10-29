@@ -70,6 +70,8 @@ interface ProjectEditData {
   pageClass: string;
   loading: boolean;
   saving: boolean;
+  hasUnsavedChanges: boolean;
+  actionDockHeight: number;
   error: string;
   projectId: string;
   pageTitle: string;
@@ -98,7 +100,19 @@ const NARRATION_VALUES: readonly DefaultNarrationMode[] = [
   "book_completion",
   "human_interview",
 ];
-const PAGE_CLASS = "project-edit-page ui-page-shell ui-accessible-page";
+type ProjectEditForm = Pick<ProjectEditData,
+  "title" | "narratorName" | "narratorGender" | "narratorOrigin" | "narratorAgeText"
+  | "defaultNarrationMode" | "transcriptPolishLevel" | "shareVideoStyle"
+>;
+
+const PAGE_CLASS = "project-edit-page ui-page-shell ui-accessible-page ui-fixed-action-page";
+
+function formSnapshot(form: ProjectEditForm): string {
+  return JSON.stringify([
+    form.title, form.narratorName, form.narratorGender, form.narratorOrigin,
+    form.narratorAgeText, form.defaultNarrationMode, form.transcriptPolishLevel, form.shareVideoStyle,
+  ]);
+}
 
 function ageFromText(value: string): number | null {
   const trimmed = value.trim();
@@ -114,10 +128,15 @@ function ageFromText(value: string): number | null {
 
 definePage<ProjectEditData>()({
   pendingCreatedProject: null as { id: string; title: string; input: MemoirProjectInput } | null,
+  savedFormSnapshot: "",
+  unloadAlertEnabled: false,
+  unloaded: false,
   data: {
     pageClass: accessibilityPageClass(PAGE_CLASS),
     loading: false,
     saving: false,
+    hasUnsavedChanges: false,
+    actionDockHeight: 0,
     error: "",
     projectId: "",
     pageTitle: "新建回忆录",
@@ -145,12 +164,14 @@ definePage<ProjectEditData>()({
   },
 
   onShow() {
-    this.setData(accessibilityPagePatch(PAGE_CLASS));
+    this.setData(accessibilityPagePatch(PAGE_CLASS), () => this.measureActionDock());
     if (this.data.projectId && !this.data.loading && !this.data.bookShareBusy) return this.loadBookShareSetting();
   },
 
   async onLoad(query?: PageQuery) {
+    this.unloaded = false;
     this.pendingCreatedProject = null;
+    this.markFormSaved();
     const projectId = queryParam(query, "projectId");
     if (projectId) {
       this.setData({ projectId, pageTitle: "编辑回忆录" });
@@ -171,6 +192,64 @@ definePage<ProjectEditData>()({
       shareVideoStyle: "illustrated",
     });
     setPageNavigationTitle("新建回忆录");
+    this.markFormSaved();
+  },
+
+  onUnload() {
+    this.unloaded = true;
+    this.disableUnloadAlert();
+  },
+
+  onReady() {
+    this.measureActionDock();
+  },
+
+  onResize() {
+    this.measureActionDock();
+  },
+
+  measureActionDock() {
+    if (this.unloaded) return;
+    wx.createSelectorQuery?.().select("#project-edit-actions").boundingClientRect((rect) => {
+      if (rect && !this.unloaded) this.setData({ actionDockHeight: Math.ceil(rect.height) + 16 });
+    }).exec();
+  },
+
+  setFormError(error: string) {
+    this.setData({ error }, () => this.measureActionDock());
+  },
+
+  markFormSaved() {
+    this.savedFormSnapshot = formSnapshot(this.data);
+    this.setData({ hasUnsavedChanges: false });
+    this.disableUnloadAlert();
+  },
+
+  disableUnloadAlert() {
+    if (!this.unloadAlertEnabled) return;
+    wx.disableAlertBeforeUnload?.();
+    this.unloadAlertEnabled = false;
+  },
+
+  syncUnloadAlert() {
+    if (this.data.hasUnsavedChanges === this.unloadAlertEnabled) return;
+    if (this.data.hasUnsavedChanges) {
+      if (!wx.enableAlertBeforeUnload) return;
+      wx.enableAlertBeforeUnload({ message: "当前修改尚未完成保存，确定离开吗？" });
+      this.unloadAlertEnabled = true;
+    } else {
+      this.disableUnloadAlert();
+    }
+  },
+
+  updateForm(patch: Partial<ProjectEditForm>) {
+    if (this.data.loading || this.data.saving) return;
+    const hadError = Boolean(this.data.error);
+    const hasUnsavedChanges = formSnapshot({ ...this.data, ...patch }) !== this.savedFormSnapshot;
+    this.setData({ ...patch, hasUnsavedChanges, error: "" }, () => {
+      if (hadError) this.measureActionDock();
+    });
+    this.syncUnloadAlert();
   },
 
   async loadProject(projectId: string) {
@@ -179,7 +258,7 @@ definePage<ProjectEditData>()({
       const response = await listMemoirProjects();
       const project = response.projects.find((item) => item.id === projectId);
       if (!project) {
-        this.setData({ error: "回忆录不存在" });
+        this.setFormError("回忆录不存在");
         return;
       }
       const profile = memoirProjectProfile(project);
@@ -193,9 +272,10 @@ definePage<ProjectEditData>()({
         transcriptPolishLevel: transcriptPolishLevel(project),
         shareVideoStyle: normalizeMemoirShareVideoStyle(project.metadata_json?.share_video_style),
       });
+      this.markFormSaved();
       await this.loadBookShareSetting();
     } catch (error) {
-      this.setData({ error: error instanceof Error ? error.message : "回忆录加载失败" });
+      this.setFormError(error instanceof Error ? error.message : "回忆录加载失败");
     } finally {
       this.setData({ loading: false });
     }
@@ -243,32 +323,32 @@ definePage<ProjectEditData>()({
   },
 
   changeTitle(event: InputEvent) {
-    this.setData({ title: event.detail.value, error: "" });
+    this.updateForm({ title: event.detail.value });
   },
 
   changeNarratorName(event: InputEvent) {
-    this.setData({ narratorName: event.detail.value, error: "" });
+    this.updateForm({ narratorName: event.detail.value });
   },
 
   changeOrigin(event: InputEvent) {
-    this.setData({ narratorOrigin: event.detail.value, error: "" });
+    this.updateForm({ narratorOrigin: event.detail.value });
   },
 
   changeAge(event: InputEvent) {
-    this.setData({ narratorAgeText: event.detail.value.replace(/[^\d]/g, ""), error: "" });
+    this.updateForm({ narratorAgeText: event.detail.value.replace(/[^\d]/g, "") });
   },
 
   selectGender(event: DatasetEvent) {
     const gender = datasetChoice(event, "gender", GENDER_VALUES, this.data.narratorGender);
     if (gender) {
-      this.setData({ narratorGender: gender, error: "" });
+      this.updateForm({ narratorGender: gender });
     }
   },
 
   selectNarrationMode(event: DatasetEvent) {
     const mode = datasetChoice(event, "mode", NARRATION_VALUES, this.data.defaultNarrationMode);
     if (mode) {
-      this.setData({ defaultNarrationMode: mode, error: "" });
+      this.updateForm({ defaultNarrationMode: mode });
     }
   },
 
@@ -280,7 +360,7 @@ definePage<ProjectEditData>()({
       this.data.transcriptPolishLevel,
     );
     if (level) {
-      this.setData({ transcriptPolishLevel: level, error: "" });
+      this.updateForm({ transcriptPolishLevel: level });
     }
   },
 
@@ -292,7 +372,7 @@ definePage<ProjectEditData>()({
       this.data.shareVideoStyle,
     );
     if (style) {
-      this.setData({ shareVideoStyle: style, error: "" });
+      this.updateForm({ shareVideoStyle: style });
     }
   },
 
@@ -302,18 +382,18 @@ definePage<ProjectEditData>()({
     }
     const title = this.data.title.trim();
     if (!title) {
-      this.setData({ error: "回忆录名称不能为空" });
+      this.setFormError("回忆录名称不能为空");
       return;
     }
     let narratorAge: number | null;
     try {
       narratorAge = ageFromText(this.data.narratorAgeText);
     } catch (error) {
-      this.setData({ error: error instanceof Error ? error.message : "年龄格式不正确" });
+      this.setFormError(error instanceof Error ? error.message : "年龄格式不正确");
       return;
     }
     const narrationFields = defaultNarrationSessionFields(this.data.defaultNarrationMode);
-    this.setData({ saving: true, error: "" });
+    this.setData({ saving: true, error: "" }, () => this.measureActionDock());
     const payload: MemoirProjectInput = {
       title,
       elder_name: this.data.narratorName.trim(),
@@ -357,21 +437,39 @@ definePage<ProjectEditData>()({
         });
       }
       this.pendingCreatedProject = null;
+      if (this.unloaded) return;
+      this.markFormSaved();
       wx.showToast({ title: "已保存", icon: "success" });
       if (createdProject) returnToHome();
       else wx.navigateBack({ delta: 1 });
     } catch (error) {
+      if (this.unloaded) return;
       const message = error instanceof Error ? error.message : "保存失败";
-      this.setData({ error: this.pendingCreatedProject && !this.data.projectId
+      this.setFormError(this.pendingCreatedProject && !this.data.projectId
         ? `回忆录已创建，${message}；请重试完成设置`
-        : message });
+        : message);
     } finally {
-      this.setData({ saving: false });
+      if (!this.unloaded) this.setData({ saving: false });
     }
   },
 
   cancel() {
-    wx.navigateBack({ delta: 1 });
+    if (this.data.saving || this.data.loading || this.data.bookShareBusy) return;
+    const leave = () => {
+      this.disableUnloadAlert();
+      wx.navigateBack({ delta: 1, fail: () => this.syncUnloadAlert() });
+    };
+    if (!this.data.hasUnsavedChanges) {
+      leave();
+      return;
+    }
+    wx.showModal({
+      title: "放弃当前修改？",
+      content: "回忆录资料的修改还没有保存，离开后这些修改会丢失。",
+      confirmText: "放弃修改",
+      cancelText: "继续编辑",
+      success: (result) => { if (result.confirm) leave(); },
+    });
   },
 });
 

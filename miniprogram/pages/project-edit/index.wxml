@@ -1,5 +1,4 @@
-<view class="ui-page-shell {{pageClass}}">
-  <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
+<view class="ui-page-shell {{pageClass}}" style="{{actionDockHeight ? 'padding-bottom: ' + actionDockHeight + 'px' : ''}}">
 
   <view class="form-panel ui-card">
     <view class="field">
@@ -8,6 +7,8 @@
         id="project-title-input"
         class="text-input support-form-input"
         value="{{title}}"
+        disabled="{{loading || saving}}"
+        cursor-spacing="{{actionDockHeight || 144}}"
         maxlength="40"
         placeholder="例如：母亲的回忆"
         bindinput="changeTitle"
@@ -20,6 +21,8 @@
         id="project-narrator-name-input"
         class="text-input support-form-input"
         value="{{narratorName}}"
+        disabled="{{loading || saving}}"
+        cursor-spacing="{{actionDockHeight || 144}}"
         maxlength="40"
         placeholder="例如：爷爷"
         bindinput="changeNarratorName"
@@ -35,6 +38,7 @@
           class="segment ui-pressable {{narratorGender === item.value ? 'selected' : ''}}"
           data-gender="{{item.value}}"
           bindtap="selectGender"
+          aria-disabled="{{loading || saving}}"
           aria-role="radio"
           aria-checked="{{narratorGender === item.value}}"
           aria-label="{{item.label}}"
@@ -50,6 +54,8 @@
         id="project-origin-input"
         class="text-input support-form-input"
         value="{{narratorOrigin}}"
+        disabled="{{loading || saving}}"
+        cursor-spacing="{{actionDockHeight || 144}}"
         maxlength="40"
         placeholder="例如：四川成都"
         bindinput="changeOrigin"
@@ -63,6 +69,8 @@
         class="text-input support-form-input"
         value="{{narratorAgeText}}"
         type="number"
+        disabled="{{loading || saving}}"
+        cursor-spacing="{{actionDockHeight || 144}}"
         maxlength="3"
         placeholder="例如：72"
         bindinput="changeAge"
@@ -96,6 +104,7 @@
           class="mode-option ui-pressable {{defaultNarrationMode === item.value ? 'selected' : ''}}"
           data-mode="{{item.value}}"
           bindtap="selectNarrationMode"
+          aria-disabled="{{loading || saving}}"
           aria-role="radio"
           aria-checked="{{defaultNarrationMode === item.value}}"
           aria-label="{{item.label}}，{{item.description}}"
@@ -118,6 +127,7 @@
           class="mode-option ui-pressable {{transcriptPolishLevel === item.value ? 'selected' : ''}}"
           data-polish="{{item.value}}"
           bindtap="selectTranscriptPolishLevel"
+          aria-disabled="{{loading || saving}}"
           aria-role="radio"
           aria-checked="{{transcriptPolishLevel === item.value}}"
           aria-label="{{item.label}}，{{item.description}}"
@@ -138,6 +148,7 @@
           class="mode-option ui-pressable {{shareVideoStyle === item.value ? 'selected' : ''}}"
           data-video-style="{{item.value}}"
           bindtap="selectShareVideoStyle"
+          aria-disabled="{{loading || saving}}"
           aria-role="radio"
           aria-checked="{{shareVideoStyle === item.value}}"
           aria-label="{{item.label}}，{{item.description}}"
@@ -150,10 +161,14 @@
     </view>
   </view>
 
-  <view class="actions">
-    <button id="project-cancel-action" class="ghost-button support-action ui-pressable" disabled="{{saving || loading || bookShareBusy}}" bindtap="cancel">取消</button>
-    <button id="project-save-action" class="primary-button support-action ui-pressable" loading="{{saving}}" disabled="{{saving || loading || bookShareBusy}}" bindtap="saveProject">
-      {{saving ? "保存中" : "保存"}}
-    </button>
+  <view id="project-edit-actions" class="actions ui-fixed-action-dock">
+    <view wx:if="{{error}}" class="save-error ui-error-banner" aria-live="assertive">{{error}}</view>
+    <text class="save-status" aria-live="polite">{{loading ? "正在读取回忆录…" : saving ? "正在保存…" : hasUnsavedChanges ? "有修改未保存" : projectId ? "修改后请保存" : "填写后保存回忆录"}}</text>
+    <view class="action-buttons">
+      <button id="project-cancel-action" class="ghost-button support-action ui-pressable" disabled="{{saving || loading || bookShareBusy}}" bindtap="cancel">取消</button>
+      <button id="project-save-action" class="primary-button support-action ui-pressable" loading="{{saving}}" disabled="{{saving || loading || bookShareBusy}}" bindtap="saveProject">
+        {{saving ? "保存中" : "保存"}}
+      </button>
+    </view>
   </view>
 </view>

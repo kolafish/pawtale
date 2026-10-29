@@ -128,11 +128,14 @@ test("whole-book sharing setting uses existing authorization and refreshes after
   assert.equal(context.data.bookShareEnabled, false);
   await context.toggleBookShare({ detail: { value: true } });
   assert.equal(context.data.bookShareEnabled, true);
+  assert.equal(context.data.hasUnsavedChanges, false, "sharing takes effect immediately");
   assert.deepEqual(changes, [["disable", project.id], ["enable", project.id]]);
 
+  context.changeTitle({ detail: { value: "爸爸的回忆" } });
   active = false; // Revoked from the existing book sharing menu.
   await context.onShow();
   assert.equal(context.data.bookShareEnabled, false);
+  assert.equal(context.data.hasUnsavedChanges, true, "refreshing sharing must preserve pending form edits");
 });
 
 test("failed sharing changes restore the switch and concurrent changes cannot reverse an in-flight request", async () => {
@@ -388,4 +391,159 @@ test("project creation retries activation without creating a duplicate", async (
   assert.deepEqual(updates.map(({ id, input }) => [id, input.title]), [["project-1", "第二版"]]);
   assert.equal(context.pendingCreatedProject, null);
   assert.deepEqual(destinations, ["/pages/home/index"]);
+});
+
+test("every saved field tracks unsaved edits, restoring original values clears the native exit warning", async () => {
+  const project = { id: "project-1", title: "爷爷的回忆" };
+  let warning = false;
+  global.wx = {
+    setNavigationBarTitle() {},
+    enableAlertBeforeUnload() { warning = true; },
+    disableAlertBeforeUnload() { warning = false; },
+  };
+  const { page } = loadProjectEditPage({ project });
+  const context = pageContext(page);
+  await context.onLoad({ projectId: project.id });
+  assert.equal(context.data.hasUnsavedChanges, false);
+  const fields = [
+    ["title", "changeTitle", "爸爸的回忆"],
+    ["narratorName", "changeNarratorName", "爸爸"],
+    ["narratorOrigin", "changeOrigin", "四川"],
+    ["narratorAgeText", "changeAge", "72"],
+    ["narratorGender", "selectGender", "female", "gender"],
+    ["defaultNarrationMode", "selectNarrationMode", "book_completion", "mode"],
+    ["transcriptPolishLevel", "selectTranscriptPolishLevel", "low", "polish"],
+    ["shareVideoStyle", "selectShareVideoStyle", "uploaded", "videoStyle"],
+  ];
+  for (const [field, method, value, key] of fields) {
+    const original = context.data[field];
+    const event = (value) => key ? { currentTarget: { dataset: { [key]: value } } } : { detail: { value } };
+    context[method](event(value));
+    assert.equal(context.data.hasUnsavedChanges, true, field);
+    assert.equal(warning, true, field);
+    context[method](event(original));
+    assert.equal(context.data.hasUnsavedChanges, false, field);
+    assert.equal(warning, false, field);
+  }
+  const fresh = pageContext(page);
+  await fresh.onLoad();
+  assert.equal(fresh.data.hasUnsavedChanges, false);
+  fresh.changeTitle({ detail: { value: "新回忆录" } });
+  assert.equal(fresh.data.hasUnsavedChanges, true);
+  fresh.changeTitle({ detail: { value: "" } });
+  assert.equal(fresh.data.hasUnsavedChanges, false);
+});
+
+test("cancel only confirms unsaved changes, keeps edits on stay, and restores protection if navigation fails", async () => {
+  const project = { id: "project-1", title: "爷爷的回忆" };
+  let warning = false;
+  let modal;
+  let navigations = 0;
+  let navigationFails = false;
+  global.wx = {
+    setNavigationBarTitle() {},
+    enableAlertBeforeUnload() { warning = true; },
+    disableAlertBeforeUnload() { warning = false; },
+    showModal(options) { modal = options; },
+    navigateBack(options) {
+      assert.equal(warning, false, "custom confirmation must not be followed by a second native warning");
+      navigations += 1;
+      if (navigationFails) options.fail();
+    },
+  };
+  const { page } = loadProjectEditPage({ project });
+  const context = pageContext(page);
+  await context.onLoad({ projectId: project.id });
+  context.cancel();
+  assert.equal(navigations, 1);
+  assert.equal(modal, undefined);
+  context.changeTitle({ detail: { value: "爸爸的回忆" } });
+  context.cancel();
+  modal.success({ confirm: false });
+  assert.equal(navigations, 1);
+  assert.equal(context.data.title, "爸爸的回忆");
+  assert.equal(warning, true);
+  navigationFails = true;
+  context.cancel();
+  modal.success({ confirm: true });
+  assert.equal(navigations, 2);
+  assert.equal(warning, true);
+  navigationFails = false;
+  context.cancel();
+  modal.success({ confirm: true });
+  assert.equal(navigations, 3);
+  assert.equal(warning, false);
+});
+
+test("failed saves preserve edits and exit protection; retry saves exactly those edits and clears protection before leaving", async () => {
+  const project = { id: "project-1", title: "爷爷的回忆" };
+  const writes = [];
+  let rejectSave;
+  let warning = false;
+  let navigations = 0;
+  global.wx = {
+    setNavigationBarTitle() {}, showToast() {},
+    enableAlertBeforeUnload() { warning = true; },
+    disableAlertBeforeUnload() { warning = false; },
+    navigateBack() { assert.equal(warning, false); navigations += 1; },
+    showModal() { assert.fail("cancel cannot interrupt a pending save"); },
+  };
+  const { page } = loadProjectEditPage({
+    project,
+    updateMemoirProject: async (id, payload) => {
+      writes.push({ id, payload });
+      if (writes.length === 1) await new Promise((_, reject) => { rejectSave = reject; });
+    },
+  });
+  const context = pageContext(page);
+  await context.onLoad({ projectId: project.id });
+  context.changeTitle({ detail: { value: "爸爸的回忆" } });
+  const saving = context.saveProject();
+  assert.equal(context.data.saving, true);
+  context.changeTitle({ detail: { value: "不应写入" } });
+  context.cancel();
+  await context.saveProject();
+  assert.equal(writes.length, 1);
+  rejectSave(new Error("网络不可用"));
+  await saving;
+  assert.equal(context.data.title, "爸爸的回忆");
+  assert.equal(context.data.hasUnsavedChanges, true);
+  assert.equal(context.data.saving, false);
+  assert.match(context.data.error, /网络不可用/);
+  assert.equal(warning, true);
+  assert.equal(navigations, 0);
+  await context.saveProject();
+  assert.deepEqual(writes.map(({ payload }) => payload.title), ["爸爸的回忆", "爸爸的回忆"]);
+  assert.equal(context.data.hasUnsavedChanges, false);
+  assert.equal(context.data.error, "");
+  assert.equal(navigations, 1);
+});
+
+test("leaving through native navigation during a save cleans up the warning and late responses do not navigate again", async () => {
+  for (const fails of [false, true]) {
+    const project = { id: "project-1", title: "爷爷的回忆" };
+    let complete;
+    let warning = false;
+    global.wx = {
+      setNavigationBarTitle() {},
+      enableAlertBeforeUnload() { warning = true; },
+      disableAlertBeforeUnload() { warning = false; },
+      navigateBack() { assert.fail("the editor has already been left"); },
+      showToast() { assert.fail("do not show a late result on another page"); },
+    };
+    const { page } = loadProjectEditPage({
+      project,
+      updateMemoirProject: () => new Promise((resolve, reject) => {
+        complete = () => fails ? reject(new Error("网络不可用")) : resolve(project);
+      }),
+    });
+    const context = pageContext(page);
+    await context.onLoad({ projectId: project.id });
+    context.changeTitle({ detail: { value: "爸爸的回忆" } });
+    const saving = context.saveProject();
+    context.onUnload();
+    assert.equal(warning, false);
+    complete();
+    await saving;
+  }
 });
