@@ -115,7 +115,7 @@ Component({
     finishFrame() {
       const state = runtime(this), result = this.properties.result as HomeGrowthResult | null;
       if (!result || !state.attached || !state.pageVisible || !state.visible || state.completed) return;
-      if (state.elapsed >= (result.celebrate ? 8000 : 3200)) {
+      if (state.elapsed >= (result.celebrate ? 7200 : 3200)) {
         state.completed = true; state.observer?.disconnect(); state.audio.stop();
         this.triggerEvent("complete", { id: result.id });
       } else state.timer = setTimeout(() => this.tick(), 33);
@@ -124,13 +124,13 @@ Component({
       const state = runtime(this), result = this.properties.result as HomeGrowthResult | null;
       state.timer = null;
       if (!result || !state.attached || !state.pageVisible || !state.visible || state.completed) return;
-      const duration = result.celebrate ? 8000 : 3200, now = Date.now();
+      const duration = result.celebrate ? 7200 : 3200, now = Date.now();
       state.elapsed = Math.min(duration, state.elapsed + Math.min(80, now - state.lastTick)); state.lastTick = now;
       const seconds = state.elapsed / 1000;
-      const fadeIn = result.celebrate ? 1600 : 600, fadeOut = result.celebrate ? 2000 : 900;
+      const fadeIn = result.celebrate ? 1600 : 600, fadeOut = result.celebrate ? 1200 : 900;
       const opacity = ease(state.elapsed / fadeIn) * (1 - ease((state.elapsed - duration + fadeOut) / fadeOut));
       const artSeconds = seconds < 1.6 ? seconds / 2 : seconds < 6
-        ? .8 + (seconds - 1.6) * 1.45 / 4.4 : 2.25 + (seconds - 6) * 1.55 / 2;
+        ? .8 + (seconds - 1.6) * 1.45 / 4.4 : 2.25 + (seconds - 6) * 1.55 / 1.2;
       // Fade the canvas pixels too, so the book and particles share the native text envelope.
       if (state.context) drawStoryBook(state.context, state.width, state.height, state.dpr, artSeconds, opacity);
       if (result.celebrate && !state.soundPlayed && state.elapsed >= 400) {
