@@ -1,7 +1,7 @@
 <view class="result-overlay {{largeText ? 'large-text' : ''}} {{result.celebrate ? '' : 'quiet-result'}}" aria-live="polite" aria-label="{{summary}}">
-  <view class="result-scene" style="opacity: {{opacity}};">
-    <view class="result-aura" aria-hidden="true"></view>
-    <view class="result-copy" aria-hidden="true" style="opacity: {{textOpacity}}; transform: translateY({{textOffset}}px);">
+  <view class="result-scene">
+    <view class="result-aura" style="opacity: {{opacity}};" aria-hidden="true"></view>
+    <view class="result-copy" aria-hidden="true" style="opacity: {{opacity * textOpacity}}; transform: translateY({{textOffset}}px);">
       <text class="result-title">{{title}}</text>
       <text class="result-count ui-tabular">{{result.wordDelta > 0 ? '本次新增 ' + count + ' 字' : structureLabel}}</text>
     </view>
