@@ -26,6 +26,7 @@ from app.schemas.memoir_book_review import (
     MemoirBookRevisionProposalResponse,
 )
 from app.schemas.memoir_section_digests import MemoirBodyDigest
+from app.services.memoir.title_guidance import title_naming_guidance
 from app.services.memoir.material_roles import ANSWER_CONTEXT_GUIDANCE
 from app.services.memoir import (
     book_revision_generation,
@@ -173,7 +174,7 @@ def _source_text(target: _Target) -> str:
     )
 
 
-_PLAN_FORMAT = """请输出严格 JSON：
+_PLAN_FORMAT = title_naming_guidance("section") + """请输出严格 JSON：
 {
   "summary": "这一轮准备怎样修改的简明概括",
   "items": [{

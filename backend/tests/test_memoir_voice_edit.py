@@ -464,6 +464,7 @@ async def test_split_chapter_moves_last_two_sections_without_collapsing_them(
     operation = {
         "action": "split_chapter", "target_ref": source_chapter,
         "section_ids": [section.id for section in moved_sections],
+        "new_title": "辞职以后的日子",
     }
     response, _ = await preview(
         client, monkeypatch, story, [operation],
@@ -477,7 +478,7 @@ async def test_split_chapter_moves_last_two_sections_without_collapsing_them(
     assert data["questions"] == []
     assert len(data["operations"]) == 1
     item = data["operations"][0]
-    assert item["new_title"] == "辞职后的日常与重拾羽毛球"
+    assert item["new_title"] == "辞职以后的日子"
     assert item["section_ids"] == [section.id for section in moved_sections]
     assert item["utterance_ids"] == []
     assert "第3章「早晨日常」" in item["label"]
@@ -695,9 +696,23 @@ async def test_split_section_preview_rejects_changed_section(client, test_db, mo
     assert len((await _story(test_db, story["pid"]))["chapters"]) == 3
 
 
-async def test_split_title_fallback_rejects_unknown_chapter(client, monkeypatch, story):
+@pytest.mark.parametrize("new_title", [None, "", "  "])
+async def test_split_preview_rejects_missing_title_without_fabricating_one(
+    client, test_db, monkeypatch, story, new_title,
+):
+    before = await _story(test_db, story["pid"])
+    response, fake = await preview(client, monkeypatch, story, [{
+        "action": "split_chapter", "target_ref": story["chapters"][1],
+        "section_ids": [story["sections"][3]], "new_title": new_title,
+    }], supports_chapter_split=True)
+    assert response.status_code == 502
+    assert len(fake.inputs) == 1
+    assert await _story(test_db, story["pid"]) == before
+
+
+async def test_split_rejects_unknown_chapter(client, monkeypatch, story):
     response, _ = await preview(client, monkeypatch, story, [{
-        "action": "split_chapter", "target_ref": "not-a-chapter",
+        "action": "split_chapter", "target_ref": "not-a-chapter", "new_title": "新的日子",
         "utterance_ids": [story["materials"][2]],
     }], supports_chapter_split=True)
     assert response.status_code == 422

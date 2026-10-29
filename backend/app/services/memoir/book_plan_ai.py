@@ -15,6 +15,7 @@ from app.services.ai_factory import get_ai_service
 from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
+from app.services.memoir.title_guidance import title_naming_guidance
 from app.services.memoir.book_plan_sources import SourceSegment
 from app.services.memoir.material_roles import STORY_CONTENT_GUIDANCE, STORY_THEME_GUIDANCE
 
@@ -118,7 +119,7 @@ def build_plan_prompt(
 要求：
 - 只根据 source text 已经讲过的事实划分章节，不新增人物、时间、地点、事件或情绪。
 - {STORY_THEME_GUIDANCE}
-- 章节标题要短，像书稿目录，不要像 AI 总结标题。
+{title_naming_guidance("chapter")}
 - 根据素材量和主题密度自主决定章节数量，不要为了凑数拆分，也不要为了减少章节强行合并。
 - source_indices 必须来自给定 source_index，且每章至少包含一个来源。
 - 每条来源是一段完整讲述，只能归入一个章节，不得拆分或跨章重复引用。
@@ -214,7 +215,7 @@ def build_chapter_title_prompt(sources: list[ChapterTitleSourceDigest]) -> str:
         )
         for source in sources
     )
-    return f"""请基于下面这个回忆录章节的全部来源记录摘要，重新拟一个正式章节名。
+    return f"""请基于下面这个回忆录章节的全部来源记录摘要，重新拟一个章节名。
 
 请输出严格 JSON，不要 Markdown，不要解释。格式：
 {{
@@ -226,9 +227,8 @@ def build_chapter_title_prompt(sources: list[ChapterTitleSourceDigest]) -> str:
 
 要求：
 - 只根据 record_summary 和 representative_quote；它们是摘要和摘录，不代表完整转写。created_at 是记录时间，不是事件发生时间。
-- 章名概括本章大主题，小节承载小主题，不把记录日期或某一个细节扩大为整章事实。
-- 必须综合全部来源记录；来源很多时，不要只看前几条，优先概括反复出现或最能代表本章的主题。
-- 标题要像书稿目录，短而正式，建议 6 到 14 个汉字。
+- 必须阅读全部来源记录后拟题；来源很多时，不要只看前几条，不把局部事实扩大为整章事实。
+{title_naming_guidance("chapter")}
 - 不要使用“转写”、“讲述”、“新收录”、“记录”、“素材”、“章节”等占位词。
 - 只输出 JSON 对象，不要解释、引号包裹全文或编号。
 """

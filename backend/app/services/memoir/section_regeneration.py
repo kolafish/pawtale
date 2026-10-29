@@ -34,6 +34,7 @@ from app.services.ai_references import ModelReferenceMap
 from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
+from app.services.memoir.title_guidance import title_naming_guidance
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir import editing_jobs
 from app.services.memoir.editing_jobs import EditingJobResult
@@ -342,7 +343,8 @@ def _build_section_structure_prompt(
         )
     return (
         task + "这里只设计候选小节，不做逐条归类。"
-        + STORY_THEME_GUIDANCE + ANSWER_CONTEXT_GUIDANCE + "摘录可能省略内容，不能把省略理解为不存在。\n\n"
+        + STORY_THEME_GUIDANCE + ANSWER_CONTEXT_GUIDANCE + title_naming_guidance("section")
+        + "摘录可能省略内容，不能把省略理解为不存在。\n\n"
         f"章节：\n{chapter_json}\n\n"
         f"讲述概览：\n{outlines_json}\n\n"
         "只返回 JSON："
@@ -467,7 +469,8 @@ async def _plan_existing_section_merges(
         "每组把顺序最早的小节作为保留的 target_section_id，其他小节放进 source_section_ids。"
         "一个旧小节最多出现在一组中；不在组内的小节保持原样。"
         "尽量保留叙事顺序，不要拆散小节内的讲述，不要新建小节。"
-        "title 可为空以保留目标小节的标题；若改标题，只用现有事实概括合并后的内容。"
+        "title 可为空以保留目标小节的标题；若需改标题，依据合并后的内容拟题。"
+        + title_naming_guidance("section") +
         "至少合并一组；若确实找不到适合合并的旧小节，则返回空 groups。\n"
         '只返回 JSON：{"groups":[{"target_section_id":"S1",'
         '"source_section_ids":["S2"],"title":null}]}'

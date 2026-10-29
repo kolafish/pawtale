@@ -49,6 +49,7 @@ from app.services.ai_references import ModelReferenceMap
 from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir import automation_events, completion_interviews, editing_jobs, narration_people
+from app.services.memoir.title_guidance import title_naming_guidance
 from app.services.memoir.book_plan_ai import NO_STORY_YET
 from app.services.memoir.book_plan_sources import SourceSegment, load_plan_with_chapters, renumber_chapters, set_temporary_chapter_orders
 from app.services.memoir.book_plan_write_workflow import generate_book_plan
@@ -252,7 +253,7 @@ def build_story_growth_prompt(
         '4. 只要有明确的亲历事件或感受，就安排已有位置或建立适当的新位置；篇幅短、没有年份或与现有章节不同，均不是暂不归类的理由。不为迁就现有目录强行添加时间或人生阶段。不编造人物关系、时间或事件。\n'
         '5. 仅当原话连发生了什么都无法确定、安排位置必须猜测事实时才标为 unassigned，说明缺少什么。时间不明但事件明确的故事仍应收录，可以追加在末尾。\n'
         '6. 新章可用 insert_before_chapter_id 指定插在某个现有章节前。只有明确的人生先后且现有目录按人生阶段组织时才指定；主题目录或时间不明填 null。不重排已有章节。不同新章节按拟收录先后顺序列出。time_evidence 必须是本次讲述中能支持插入位置的原文片段；没有明确时间证据时 time_evidence 和 insert_before_chapter_id 都填 null。\n'
-        '标题概括经历，不把单个年龄或细节当成章节主题。原话对年龄、年份有犹疑时，标题用经历主题命名，避免选一个数字写成定论。标题也不得推断原话没有的年龄和人生阶段；“有一次”“那天”不能证明是早年、童年或退休以后。时间未知时用事件主题命名。\n'
+        f'{title_naming_guidance("both")}\n'
         f'7. placements 必须以本次给出的 source_index 字符串为键，每个键对应一个对象且只有一个归属。不能将一个 source_index 解释成多个事件编号，也不能添加本次未给出的键。new_chapters 只声明本次真正要创建的章节。interviewer_line 只供理解回答，不是讲述者的事实。{OFFERED_CHAPTER_GUIDANCE if offered else ""}\n'
         '\n'
         f"本次新讲述：\n{json.dumps(source_payload, ensure_ascii=False)}\n\n"
@@ -260,7 +261,7 @@ def build_story_growth_prompt(
         f"已有小节：\n{json.dumps(section_payload, ensure_ascii=False)}\n\n"
         f"本次 placements 的全部键（不能增减）：{json.dumps([str(i) for i in range(1, len(utterances) + 1)])}。"
         '同一小节的多条讲述填相同的 section_id，或相同的 chapter_ref 和 new_section_title；不同事件能分开时填不同的小节。每个归属都收录该条讲述全文。\n'
-        '只返回 JSON：{"new_chapters":[{"chapter_ref":"N1","title":"新章节标题","insert_before_chapter_id":null,"time_evidence":null}],"placements":{"1":{"kind":"story","section_id":null,"chapter_ref":"N1","new_section_title":"覆盖整条讲述的主题","reason":"归类依据"}}}。'
+        '只返回 JSON：{"new_chapters":[{"chapter_ref":"N1","title":"新章节标题","insert_before_chapter_id":null,"time_evidence":null}],"placements":{"1":{"kind":"story","section_id":null,"chapter_ref":"N1","new_section_title":"小节标题","reason":"归类依据"}}}。'
         '示例仅示意单条讲述；实际 placements 必须包含上面全部键。kind 只能是 story、not_story、unassigned。后两者 section_id、chapter_ref、new_section_title 均填 null。'
         'story 的已有 section_id 和新建小节的 chapter_ref/new_section_title 二者只能选一个。chapter_ref 只能是给出的 C 引用或本次声明的 N 引用；new_chapters 没有新增章时填空数组。'
     )

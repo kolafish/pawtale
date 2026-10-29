@@ -56,16 +56,6 @@ class FakeStoryGrowthAI(AITextServiceBase):
         return json.dumps(self.payload, ensure_ascii=False)
 
 
-def test_section_structure_prompt_does_not_require_specific_titles():
-    prompt = section_regeneration._build_section_structure_prompt(
-        chapter_title="山桃花开的心动",
-        materials=[],
-    )
-
-    assert "标题要具体" not in prompt
-    assert "避免用空泛" not in prompt
-
-
 @pytest.mark.parametrize("same_question", [False, True])
 def test_section_regeneration_budgets_questions_and_answers(same_question):
     from app.services.ai_references import ModelReferenceMap

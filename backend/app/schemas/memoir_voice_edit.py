@@ -73,10 +73,10 @@ class VoiceEditOperation(BaseModel):
     def check_title(self) -> Self:
         if self.new_title is not None:
             self.new_title = self.new_title.strip()
-        if self.action.startswith("rename_") or self.action == "update_book_title":
+        if self.action.startswith("rename_") or self.action in {"update_book_title", "split_chapter"}:
             if not self.new_title:
-                raise ValueError("改名必须提供新标题")
-        elif self.action != "split_chapter" and self.new_title is not None:
+                raise ValueError("改名或拆分章节必须提供新标题")
+        elif self.new_title is not None:
             raise ValueError("只有改名或拆分章节可以提供新标题")
         if self.action == "split_chapter":
             if bool(self.utterance_ids) == bool(self.section_ids):
@@ -200,12 +200,6 @@ class VoiceEditPreviewResponse(BaseModel):
 class VoiceEditApplyRequest(BaseModel):
     signature: str = Field(min_length=2, max_length=8192)
     operations: list[VoiceEditOperation] = Field(min_length=1, max_length=30)
-
-    @model_validator(mode="after")
-    def require_split_title(self) -> Self:
-        if any(op.action == "split_chapter" and not op.new_title for op in self.operations):
-            raise ValueError("拆分章节必须确认新标题")
-        return self
 
 
 class VoiceEditApplyResponse(BaseModel):

@@ -27,6 +27,7 @@ from app.services.ai_references import ModelReferenceMap
 from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir import fact_decisions
+from app.services.memoir.title_guidance import title_naming_guidance
 from app.services.memoir.book_output_versions import automatic_editorial_copy_state
 from app.services.memoir.book_plan_sources import chapter_title_owner, renumber_chapters, set_temporary_chapter_orders
 from app.services.memoir.book_plan_write_workflow import _detach_chapter_operational_references
@@ -297,7 +298,8 @@ def build_grouping_prompt(context: StructureContext, finding: BookStructureFindi
     payload = _structure_payload(context, chapters=chapters, sections=sections)
     return checked_review_prompt(
         "只根据给出的小节正文摘要及要点来源关联完成这一个局部问题，直接输出最终素材分组和标题，不设计拆合操作。" + STORY_THEME_GUIDANCE +
-        "先确定每节包含的完整素材与阅读顺序，再按最终内容命名；标题概括本节实际经历，不用范围过宽的上位主题。"
+        "先确定每节包含的完整素材与阅读顺序，再按最终内容命名。"
+        + title_naming_guidance("both") +
         "素材集合未变的小节沿用原身份和标题；只有本次为 title_scope 时才单独修正原标题。"
         "title_scope 只能改指定层级的标题，素材归属、章节小节数量和顺序全部不变。"
         "section_structure 只能调整本章内给定小节范围，章名和章身份不变；chapter_structure 才允许拆章、合章。"
