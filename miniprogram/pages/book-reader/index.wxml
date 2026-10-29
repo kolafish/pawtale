@@ -234,7 +234,7 @@
             <view class="small-section-paragraph-list">
               <block wx:for="{{section.paragraphs}}" wx:key="*this" wx:for-item="paragraph" wx:for-index="paragraphIndex">
                 <block wx:for="{{shareImages}}" wx:key="id" wx:for-item="illustration">
-                  <view wx:if="{{illustration.chapterId === chapter.chapterId && illustration.sectionId === section.id && illustration.paragraphBefore === paragraphIndex}}" class="share-reading-image {{illustration.portrait ? 'portrait' : ''}}">
+                  <view wx:if="{{illustration.chapterId === chapter.chapterId && illustration.sectionId === section.id && !imageGallerySections[section.id] && illustration.paragraphBefore === paragraphIndex}}" class="share-reading-image {{illustration.portrait ? 'portrait' : ''}}">
                     <image src="{{illustration.url}}" mode="widthFix" data-id="{{illustration.id}}" data-url="{{illustration.url}}" bindload="onReadingImageLoad" />
                     <text wx:if="{{illustration.disclosure}}">AI背景图</text>
                   </view>
@@ -243,12 +243,14 @@
                   <template is="readerHighlightedText" data="{{text: paragraph, active: readerChapterIndex === readerHighlightChapterIndex && section.id === readerHighlightSectionId && paragraphIndex === readerHighlightParagraphIndex, before: readerHighlightBefore, current: readerHighlightCurrent, after: readerHighlightAfter}}" />
                 </view>
               </block>
-              <block wx:for="{{shareImages}}" wx:key="id" wx:for-item="illustration">
-                <view wx:if="{{illustration.chapterId === chapter.chapterId && illustration.sectionId === section.id && illustration.paragraphBefore === section.paragraphs.length}}" class="share-reading-image">
-                  <image src="{{illustration.url}}" mode="widthFix" data-id="{{illustration.id}}" data-url="{{illustration.url}}" bindload="onReadingImageLoad" />
-                  <text wx:if="{{illustration.disclosure}}">AI背景图</text>
-                </view>
-              </block>
+              <view class="{{imageGallerySections[section.id] ? 'reading-image-gallery' : ''}}">
+                <block wx:for="{{shareImages}}" wx:key="id" wx:for-item="illustration">
+                  <view wx:if="{{illustration.chapterId === chapter.chapterId && illustration.sectionId === section.id && (imageGallerySections[section.id] || illustration.paragraphBefore === section.paragraphs.length)}}" class="share-reading-image">
+                    <image src="{{illustration.url}}" mode="{{imageGallerySections[section.id] ? 'aspectFit' : 'widthFix'}}" style="{{imageGallerySections[section.id] ? 'height: ' + illustration.galleryHeight + 'rpx; width: ' + (illustration.galleryHeight / illustration.aspectRatio) + 'rpx;' : ''}}" data-id="{{illustration.id}}" data-url="{{illustration.url}}" bindload="onReadingImageLoad" />
+                    <text wx:if="{{illustration.disclosure}}">AI背景图</text>
+                  </view>
+                </block>
+              </view>
             </view>
           </view>
         </view>

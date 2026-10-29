@@ -586,6 +586,38 @@ class PDFBookBuilder:
         self.y = y - 15
         return True
 
+    def add_image_gallery(self, paths: list[Path]) -> None:
+        """Fit complete images into two columns; paginate by row, not by gallery."""
+        self.finish_image_wrap()
+        content_width = self.layout.page_width - self.layout.margin_x * 2
+        gap = self.layout.font_size
+        column_width = (content_width - gap) / 2
+        max_height = min(content_width * 0.65, self.layout.page_height - self.layout.margin_top - self.layout.margin_bottom - 18)
+        for offset in range(0, len(paths), 2):
+            row = []
+            for path in paths[offset:offset + 2]:
+                with Image.open(path) as source:
+                    width, height = ImageOps.exif_transpose(source).size
+                scale = min(column_width / width, max_height / height)
+                row.append((path, width * scale, height * scale))
+            row_height = max(height for _, _, height in row)
+            available_height = self.y - self.layout.margin_bottom - 18
+            # A small proportional reduction avoids leaving a nearly usable page empty.
+            if row_height * 0.75 <= available_height < row_height:
+                scale = available_height / row_height
+                row = [(path, width * scale, height * scale) for path, width, height in row]
+                row_height = available_height
+            self._ensure_space_height(row_height + 18)
+            for column, (path, width, height) in enumerate(row):
+                slot_left = (content_width - column_width) / 2 if len(row) == 1 else column * (column_width + gap)
+                self._ensure_page().images.append(PDFImageCommand(
+                    path=path, x=self._content_left() + slot_left + (column_width - width) / 2,
+                    y=self.y - height, width=width, height=height,
+                ))
+            self.y -= row_height + 18
+        if paths:
+            self.y -= self.layout.line_height / 2
+
     def finish_image_wrap(self) -> None:
         while self.wrapped_image:
             self.y = min(self.y, self.wrapped_image.y - self.layout.line_height)

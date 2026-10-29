@@ -616,3 +616,25 @@ button.excerpt-reader-button {
 .excerpt-reading-link { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 52px; border-top: 1rpx solid #e3d8c7; color: #714c38; font-size: 17px; line-height: 1.5; }
 .excerpt-reading-label { min-width: 0; }
 .excerpt-reading-arrow { flex: none; }
+
+/* A short section keeps its text full width and its illustrations together. */
+.reading-image-gallery {
+  clear: both;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 24rpx 20rpx;
+  margin-top: 24rpx;
+}
+.reading-image-gallery .share-reading-image {
+  width: calc((100% - 20rpx) / 2);
+}
+
+.reading-image-gallery image {
+  max-width: 100%;
+  margin: 0 auto;
+}
+.reading-image-gallery text {
+  text-align: center;
+}

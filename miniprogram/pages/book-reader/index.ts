@@ -79,7 +79,8 @@ type BookReaderData = ReaderData & BookTTSState & ShareLikeData & typeof INITIAL
   readerDemo: boolean;
   sharePreview: boolean;
   shareScope: "book" | "chapter" | "story";
-  shareImages: { id: string; chapterId: string; sectionId: string; paragraphBefore: number; paragraphCount: number; position: string; portrait: boolean; url: string; disclosure: string }[];
+  shareImages: { id: string; chapterId: string; sectionId: string; paragraphBefore: number; paragraphCount: number; position: string; portrait: boolean; aspectRatio: number; galleryHeight: number; url: string; disclosure: string }[];
+  imageGallerySections: Record<string, boolean>;
   shareCoverUrl: string;
   shareByline: string;
   sharePreface: string;
@@ -283,7 +284,7 @@ definePage<BookReaderData>()({
     readerMode: "book",
     readerShared: false,
     readerDemo: false,
-    sharePreview: false, shareScope: "book", shareImages: [], shareCoverUrl: "", shareByline: "",
+    sharePreview: false, shareScope: "book", shareImages: [], imageGallerySections: {}, shareCoverUrl: "", shareByline: "",
     sharePreface: "", shareAfterword: "", shareRetryable: false,
     readerChapterIndex: 0,
     readerChapterTotal: 0,
@@ -374,6 +375,7 @@ definePage<BookReaderData>()({
     const returningToShare = Boolean(this.readingToken && this.sharedReadingShown);
     if (this.readingToken) this.sharedReadingShown = true;
     this.setData(accessibilityPagePatch(PAGE_CLASS));
+    this.layoutReadingImages(this.data.shareImages);
     if (this.readingToken && !this.data.error) enableMiniProgramShareMenu(); else hideMiniProgramShareMenu();
     if (this.sharedReadingObjectId && this.readingProgressKey !== sharedReadingKey(this.sharedReadingObjectId, this.data.shareScope)) {
       this.stopPlayback();
@@ -414,7 +416,7 @@ definePage<BookReaderData>()({
     this.flatPages = [];
     hideMiniProgramShareMenu();
     this.setData({ ...readerData(null), readerChapterIndex: 0, readerChapterTotal: 0,
-      shareImages: [], shareCoverUrl: "", shareByline: "", sharePreface: "", shareAfterword: "",
+      shareImages: [], imageGallerySections: {}, shareCoverUrl: "", shareByline: "", sharePreface: "", shareAfterword: "",
       loading: false, shareRetryable: !(error instanceof ApiError && [404, 410].includes(error.statusCode)), error: error.message });
   },
 
@@ -781,7 +783,7 @@ definePage<BookReaderData>()({
     const manuscript = output.latest_version?.manuscript;
     const scope = output.share_scope || "book";
     this.setData({
-      shareScope: scope, readerMode: scope === "book" ? "book" : "chapter", shareImages: [], shareCoverUrl: "",
+      shareScope: scope, readerMode: scope === "book" ? "book" : "chapter", shareImages: [], imageGallerySections: {}, shareCoverUrl: "",
       shareByline: [manuscript?.profile.narrator_name ? `${manuscript.profile.narrator_name} 口述` : "", manuscript?.profile.prepared_by || ""].filter(Boolean).join(" · "),
       sharePreface: (manuscript?.front_matter || []).filter(item => item.kind === "preface" && item.enabled).map(item => item.content).join("\n\n"),
       shareAfterword: manuscript?.back_matter.afterword.enabled ? manuscript.back_matter.afterword.content : "",
@@ -804,23 +806,53 @@ definePage<BookReaderData>()({
       const url = await readingImageUrl(item.image_url, privateImages);
       return { id: item.image_asset_id, chapterId: chapter.chapter_id, sectionId,
         paragraphBefore: position === "before" ? 0 : position === "middle" ? Math.ceil(count / 2) : count,
-        paragraphCount: count, position, portrait: false,
+        paragraphCount: count, position, portrait: true, aspectRatio: 16 / 9, galleryHeight: 0,
         url, disclosure: item.disclosure };
     })));
-    if (generation === this.sharedReadGeneration) this.setData({ shareImages: images.filter(item => Boolean(item.url)) });
+    if (generation === this.sharedReadGeneration) this.layoutReadingImages(images.filter(item => Boolean(item.url)));
   },
 
   onReadingImageLoad(event: PageDatasetEvent<{ id: string; url: string }> & { detail: { width: number; height: number } }) {
     const id = datasetString(event, "id");
     const url = datasetString(event, "url");
-    const portrait = event.detail.height > event.detail.width && event.detail.width > 0;
-    if (!this.data.shareImages.some(image => image.id === id && image.url === url && image.sectionId && image.portrait !== portrait)) return;
-    this.setData({ shareImages: this.data.shareImages.map(image => {
-      if (image.id !== id || image.url !== url || !image.sectionId) return image;
+    if (event.detail.width <= 0 || event.detail.height <= 0) return;
+    const aspectRatio = event.detail.height / event.detail.width;
+    if (!this.data.shareImages.some(image => image.id === id && image.url === url && image.aspectRatio !== aspectRatio)) return;
+    this.layoutReadingImages(this.data.shareImages.map(image => image.id === id && image.url === url
+      ? { ...image, portrait: aspectRatio > 1, aspectRatio } : image));
+  },
+
+  layoutReadingImages(images: BookReaderData["shareImages"]) {
+    // Work in rpx: page/card padding leaves 626 of 750 units for the text.
+    const contentWidth = 626;
+    const imageGap = 20;
+    const positioned = images.map(image => {
       const count = image.paragraphCount;
-      const index = image.position === "before" ? 0 : image.position === "middle" ? (portrait ? Math.floor(count / 2) : Math.ceil(count / 2)) : count;
-      return { ...image, portrait, paragraphBefore: portrait ? Math.min(index, Math.max(0, count - 1)) : index };
-    }) });
+      const index = image.position === "before" ? 0 : image.position === "middle"
+        ? (image.portrait ? Math.floor(count / 2) : Math.ceil(count / 2)) : count;
+      return { ...image, galleryHeight: Math.min((contentWidth - imageGap) / 2 * image.aspectRatio, contentWidth * 0.65), paragraphBefore: image.portrait ? Math.min(index, Math.max(0, count - 1)) : index };
+    });
+    const imageGallerySections: Record<string, boolean> = {};
+    const large = this.data.pageClass.includes("large-text");
+    const fontSize = large ? 38 : 32;
+    const lineHeight = fontSize * (large ? 2 : 1.8);
+    const lineUnits = (contentWidth * 0.65 - imageGap) / fontSize;
+    for (const chapter of this.bookChapters) for (const section of chapter.sections) {
+      const portraits = positioned.filter(image => image.chapterId === chapter.chapterId && image.sectionId === section.id && image.portrait)
+        .sort((a, b) => b.paragraphBefore - a.paragraphBefore);
+      let requiredUnits = 0;
+      for (const image of portraits) {
+        const imageHeight = contentWidth * 0.35 * image.aspectRatio + 28 + (image.disclosure ? (large ? 32 : 29) * 1.4 + 8 : 0);
+        requiredUnits += Math.ceil(imageHeight / lineHeight) * lineUnits;
+        const remainingUnits = Array.from(section.paragraphs.slice(image.paragraphBefore).join("").replace(/\s/g, ""))
+          .reduce((sum, char) => sum + (char.charCodeAt(0) < 128 ? 0.55 : 1), 0);
+        if (remainingUnits < requiredUnits) {
+          imageGallerySections[section.id] = true;
+          break;
+        }
+      }
+    }
+    this.setData({ shareImages: positioned.sort((a, b) => a.paragraphBefore - b.paragraphBefore), imageGallerySections });
   },
 
   async loadChapterReader(projectId: string, chapterId: string) {
