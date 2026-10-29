@@ -57,10 +57,10 @@ test("overlay waits until fully visible, holds one clear title and fades in and 
   assert.deepEqual(h.context.events, []);
   h.context.properties.result = { ...h.result };
   h.component.observers.result.call(h.context); // Polling the same result cannot restart it.
-  h.advance(1700);
+  h.advance(1300);
   assert.ok(h.context.data.opacity > .3 && h.context.data.opacity < .7);
   assert.deepEqual(h.context.events, []);
-  h.advance(1200);
+  h.advance(800);
   assert.equal(h.context.data.opacity, 0);
   assert.deepEqual(h.context.events, [{ name: "complete", detail: { id: "result-1" } }]);
   h.visible(); h.advance(7000);
@@ -79,7 +79,7 @@ test("background pauses reading and sound; returning never replays the chime", t
   assert.equal(h.context.data.count, count);
   assert.deepEqual(h.context.events, []);
   h.component.pageLifetimes.show.call(h.context);
-  h.advance(6700);
+  h.advance(5900);
   assert.equal(h.audioCalls.played, 1);
   assert.equal(h.context.events.length, 1);
   h.detach();
@@ -133,7 +133,7 @@ test("resizing the same result redraws it without replaying its sound", t => {
   const h = setup(t);
   h.visible(); h.advance(1500);
   h.component.pageLifetimes.resize.call(h.context);
-  h.visible(); h.advance(8200);
+  h.visible(); h.advance(7400);
   assert.equal(h.audioCalls.played, 1);
   assert.deepEqual(h.context.events, [{ name: "complete", detail: { id: "result-1" } }]);
   h.detach();
