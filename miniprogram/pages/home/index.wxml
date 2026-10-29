@@ -1,6 +1,6 @@
 <template name="memoirHomeCard">
     <view class="home-memoir-card ui-pressable {{isDemoSlide ? 'home-memoir-slide' : ''}}"
-      data-demo-id="{{demoId}}"
+      data-share-token="{{shareToken}}"
       bindtap="openBook" hover-class="home-memoir-card-hover" aria-role="button" aria-label="{{memoirCard.action}}">
       <image class="home-card-background" src="/assets/home/memoir-background.jpg" mode="aspectFill" aria-hidden="true" />
       <view wx:if="{{hasProject && !needsLogin}}" class="memoir-switch-action ui-pressable" catchtap="openProjects"
@@ -76,11 +76,11 @@
     </view>
 
     <view wx:if="{{storyLoaded}}" id="home-memoir">
-      <swiper wx:if="{{needsLogin && demoBooks.length}}" class="memoir-demo-swiper"
-        current="{{selectedDemoIndex}}" bindchange="changeDemoBook" autoplay="{{false}}"
-        indicator-dots="{{demoBooks.length > 1}}" indicator-color="#d8d3cc" indicator-active-color="#944535">
-        <swiper-item wx:for="{{demoBooks}}" wx:key="id">
-          <template is="memoirHomeCard" data="{{memoirCard: item, progressText: item.progressText, demoId: item.id, isDemoSlide: true}}" />
+      <swiper wx:if="{{needsLogin && featuredBooks.length}}" class="memoir-demo-swiper"
+        current="{{selectedBookIndex}}" bindchange="changeFeaturedBook" autoplay="{{false}}"
+        indicator-dots="{{featuredBooks.length > 1}}" indicator-color="#d8d3cc" indicator-active-color="#944535">
+        <swiper-item wx:for="{{featuredBooks}}" wx:key="id">
+          <template is="memoirHomeCard" data="{{memoirCard: item, progressText: item.progressText, shareToken: item.token, isDemoSlide: true}}" />
         </swiper-item>
       </swiper>
       <template wx:else is="memoirHomeCard" data="{{memoirCard, progressText: story.memoir.bookProgressText, hasProject, needsLogin}}" />

@@ -19,23 +19,7 @@ const {
   returnToStory,
   consumeHomeStoryTarget,
   navigateToMe,
-  returnToHomeThenNarrate,
-  consumeNarrationRequest,
 } = require("../services/navigation.ts");
-
-test("narration returns a session holder to home even when home is absent from the page stack", () => {
-  const destinations = [];
-  global.getCurrentPages = () => [{ route: "pages/book-reader/index" }];
-  global.wx = {
-    reLaunch: ({ url }) => destinations.push(url),
-  };
-  returnToHomeThenNarrate();
-  assert.deepEqual(destinations, ["/pages/home/index"]);
-  assert.equal(consumeNarrationRequest(), "start");
-  assert.equal(consumeNarrationRequest(), null);
-  delete global.getCurrentPages;
-  delete global.wx;
-});
 
 test("navigation helper identifies backend auth errors", () => {
   assert.equal(isAuthError(new ApiError(401, "login required", null)), true);

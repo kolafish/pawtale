@@ -604,3 +604,11 @@ export interface MemoirBookShareCreated {
   token: string;
   expires_at: string | null;
 }
+
+export interface MemoirFeaturedBook {
+  id: string;
+  token: string;
+  title: string;
+  book_chapter_count: number;
+  book_char_count: number;
+}

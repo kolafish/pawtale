@@ -1,12 +1,10 @@
 import type {
   MemoirBookSnapshot,
-  MemoirDemoStory,
   MemoirDraftProgress,
   MemoirStorySnapshot,
 } from "../domain/memoir-snapshots";
 import { writeMemoirIdentitySnapshot } from "../stores/memoir-cache";
 import { memoirRequest } from "./memoir-api-client";
-import { request } from "./request";
 
 export async function getMemoirStorySnapshot(): Promise<MemoirStorySnapshot> {
   return memoirRequest<MemoirStorySnapshot>("/api/mobile/memoir/story-snapshot");
@@ -25,8 +23,4 @@ export async function getMemoirBookSnapshot(): Promise<MemoirBookSnapshot> {
   const snapshot = await memoirRequest<MemoirBookSnapshot>("/api/mobile/memoir/book-snapshot");
   writeMemoirIdentitySnapshot(snapshot.identity);
   return snapshot;
-}
-
-export function getMemoirDemoStory(): Promise<MemoirDemoStory> {
-  return request<MemoirDemoStory>("/api/mobile/memoir/demo-story");
 }

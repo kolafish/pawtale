@@ -785,6 +785,14 @@ class MemoirBookShareCreateResponse(BaseModel):
     expires_at: datetime | None = None
 
 
+class MemoirFeaturedBookResponse(BaseModel):
+    id: str
+    token: str
+    title: str
+    book_chapter_count: int
+    book_char_count: int
+
+
 class MemoirBookShareReadRequest(BaseModel):
     token: str
 

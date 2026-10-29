@@ -914,6 +914,7 @@ test("an account without a memoir can open the public sample from its empty card
   const opened = [];
   global.wx = { navigateTo: ({ url }) => opened.push(url) };
   const { page } = loadHomePage({
+    voiceApiExports: { listFeaturedMemoirBooks: async () => [{ token: "sample-share" }] },
     authExports: {
       getMemoirIdentity: async () => ({
         id: "user-1",
@@ -945,8 +946,8 @@ test("an account without a memoir can open the public sample from its empty card
   assert.deepEqual(context.data.memoirCard, {
     label: "我的回忆录", title: "还没有回忆录", action: "看看示例", showProgress: false,
   });
-  context.openBook();
-  assert.deepEqual(opened, ["/pages/book-reader/index?demo=1"]);
+  await context.openBook();
+  assert.deepEqual(opened, ["/pages/book-reader/index?shareToken=sample-share"]);
 });
 
 test("home keeps first-visit context while presenting the seed state", async () => {
@@ -1276,16 +1277,16 @@ test("an expired session returns an existing memoir to home after login", async 
       },
     },
     voiceApiExports: {
-      getMemoirDemoStory: async () => ({ title: "示例", chapters: [], books: [] }),
+      listFeaturedMemoirBooks: async () => [],
       createMemoirVoiceSession: async () => { creates += 1; return { session: { id: "resumed" } }; },
     },
   });
-  require("../services/navigation.ts").returnToHomeThenNarrate();
   const expired = pageContext(page, { needsLogin: false, voiceAuthorizationAgreed: true });
   expired.measureNarration = () => {};
   await expired.onShow();
+  await expired.startPrimaryVoiceChat();
 
-  assert.deepEqual(navigations, ["/pages/home/index", "/pages/login/index"]);
+  assert.deepEqual(navigations, ["/pages/login/index"]);
   assert.equal(expired.data.needsLogin, true);
   assert.equal(creates, 0);
   expired.onUnload();
@@ -1312,7 +1313,7 @@ test("cancelling narration login allows the visitor to return home without a log
   global.wx = { navigateTo: ({ url }) => navigations.push(url) };
   const { page } = loadHomePage({ voiceApiExports: {
     getMemoirStorySnapshot: async () => { throw new ApiError(401, "请先登录", {}); },
-    getMemoirDemoStory: async () => ({ title: "示例", chapters: [], books: [] }),
+    listFeaturedMemoirBooks: async () => [],
   } });
   require("../services/navigation.ts").navigateToLoginThenNarrate();
   const context = pageContext(page);
@@ -1589,67 +1590,21 @@ test("home refreshes the saved project default for the current account and proje
   context.onUnload();
 });
 
-test("visitors browse the sample memoir and open only its readable chapters", async () => {
-  const { ApiError } = require("../services/request.ts");
-  const chapter = (id, title, readable) => ({
-    id, title, readable, include_in_book: true, material_count: 1, image_count: 0, video_count: 0,
-    char_count: readable ? 120 : 80, candidate_job_id: null, state: readable ? "settled" : "draft",
-    state_text: "", issues: { review_count: 0, supplement_count: 0 }, sections: [],
-  });
-  const { page } = loadHomePage({ voiceApiExports: {
-    getMemoirStorySnapshot: async () => { throw new ApiError(401, "请先登录", {}); },
-    getMemoirDemoStory: async () => ({
-      title: "余仲尤往事",
-      books: [{ id: "yu", title: "余仲尤往事", book_chapter_count: 1, book_char_count: 120 }],
-      chapters: [chapter("family", "家里的人", true), chapter("closed", "下乡那几年", false)],
-      book_chapter_count: 2,
-      book_char_count: 200,
-      videos: [{ share_code: "code-1", title: "他端来半碗胡豆", poster_url: "/poster" }],
-    }),
-  } });
-  const opened = [];
-  const toasts = [];
-  global.wx = {
-    navigateTo: ({ url }) => opened.push(url),
-    showToast: ({ title }) => toasts.push(title),
-  };
-  const context = pageContext(page, {});
-
-  await page.loadHome.call(context);
-  await flushAsyncWork();
-
-  assert.equal(context.data.needsLogin, true);
-  assert.equal(context.data.storyLoaded, true);
-  assert.deepEqual(context.data.memoirCard, {
-    label: "示例回忆录", title: "余仲尤往事", action: "翻开看看", showProgress: true,
-  });
-  assert.deepEqual(context.data.story.chapters.map((item) => item.title), ["家里的人", "下乡那几年"]);
-
-  context.openChapter({ detail: { chapterId: "family" } });
-  context.openChapter({ detail: { chapterId: "closed" } });
-  context.openBook();
-  assert.deepEqual(opened, [
-    "/pages/book-reader/index?demo=1&projectId=yu",
-    "/pages/book-reader/index?demo=1&projectId=yu",
-  ]);
-  assert.equal(toasts.length, 1);
-});
-
 test("a failed demo refresh clears old public links and remains retryable without login", async () => {
   const { ApiError } = require("../services/request.ts");
   const { page } = loadHomePage({ voiceApiExports: {
     getMemoirStorySnapshot: async () => { throw new ApiError(401, "请先登录", {}); },
-    getMemoirDemoStory: async () => { throw new Error("offline"); },
+    listFeaturedMemoirBooks: async () => { throw new Error("offline"); },
   } });
   const context = pageContext(page, {
     needsLogin: true,
-    demoReadableChapterIds: ["old-chapter"],
+    featuredBooks: [{ id: "old-book", token: "old-token" }],
   });
   await context.loadHome();
   assert.equal(context.data.needsLogin, true);
   assert.equal(context.data.loading, false);
   assert.ok(context.data.storyError);
-  assert.deepEqual(context.data.demoReadableChapterIds, []);
+  assert.deepEqual(context.data.featuredBooks, []);
 });
 
 
@@ -1657,28 +1612,25 @@ test("visitors swipe the default grandmother book to Yu and open the selected bo
   const { ApiError } = require("../services/request.ts");
   const { page } = loadHomePage({ voiceApiExports: {
     getMemoirStorySnapshot: async () => { throw new ApiError(401, "请先登录", {}); },
-    getMemoirDemoStory: async () => ({
-      title: "我的奶奶—李桂芳", chapters: [], videos: [], book_chapter_count: 5, book_char_count: 10000,
-      books: [
-        { id: "grandma", title: "我的奶奶—李桂芳", book_chapter_count: 5, book_char_count: 10000 },
-        { id: "yu", title: "余仲尤的往事", book_chapter_count: 5, book_char_count: 20000 },
-      ],
-    }),
+    listFeaturedMemoirBooks: async () => [
+        { id: "grandma", token: "grandma-token", title: "我的奶奶—李桂芳", book_chapter_count: 5, book_char_count: 10000 },
+        { id: "yu", token: "yu-token", title: "余仲尤的往事", book_chapter_count: 5, book_char_count: 20000 },
+    ],
   } });
   const opened = [];
   global.wx = { navigateTo: ({ url }) => opened.push(url) };
   const context = pageContext(page);
   await context.loadHome();
-  assert.equal(context.data.selectedDemoIndex, 0);
-  assert.deepEqual(context.data.demoBooks.map(book => book.title), ["我的奶奶—李桂芳", "余仲尤的往事"]);
+  assert.equal(context.data.selectedBookIndex, 0);
+  assert.deepEqual(context.data.featuredBooks.map(book => book.title), ["我的奶奶—李桂芳", "余仲尤的往事"]);
   context.openBook();
-  context.changeDemoBook({ detail: { current: 1 } });
+  context.changeFeaturedBook({ detail: { current: 1 } });
   context.openBook();
   // A tap carries its card identity even while the swipe change is being delivered.
-  context.openBook({ currentTarget: { dataset: { demoId: "grandma" } } });
+  context.openBook({ currentTarget: { dataset: { shareToken: "grandma-token" } } });
   assert.deepEqual(opened, [
-    "/pages/book-reader/index?demo=1&projectId=grandma",
-    "/pages/book-reader/index?demo=1&projectId=yu",
-    "/pages/book-reader/index?demo=1&projectId=grandma",
+    "/pages/book-reader/index?shareToken=grandma-token",
+    "/pages/book-reader/index?shareToken=yu-token",
+    "/pages/book-reader/index?shareToken=grandma-token",
   ]);
 });

@@ -50,10 +50,9 @@ class Settings(BaseSettings):
     wechat_message_token: str = ""
     wechat_message_aes_key: str = ""
 
-    # Public full memoirs, in display order (first is the default). Only these
-    # projects are readable without login; future compiled chapters follow the book.
+    # Homepage selection of existing public book shares, in display order.
+    # The first is the default; normal share authorization controls all reading.
     memoir_demo_project_ids: str = ""
-    memoir_demo_video_codes: str = ""
 
     # AI API Keys
     deepseek_api_key: str = ""

@@ -203,51 +203,6 @@ test("returning to a shared reader replaces removed content with the current sha
   assert.match(context.data.error, /正在更新/);
 });
 
-test("demo reader uses the public book and disables account-only audio", async () => {
-  const requested = [];
-  const destinations = [];
-  global.wx = { getStorageSync: () => "", navigateTo({url}) { destinations.push(url); } };
-  const { page } = loadBookReaderPage({
-    getMemoirBookOutput: unmockedAsync("owner book API"),
-    readMemoirDemoBook: async (projectId) => { requested.push(projectId); return sampleFinishedBook("家里的人完整章节"); },
-  });
-  const context = pageContext(page);
-  await context.onLoad({ demo: "1", projectId: "yu" });
-  assert.deepEqual(requested, ["yu"]);
-  await context.retrySharedReading();
-  assert.deepEqual(requested, ["yu", "yu"]);
-  assert.equal(context.data.readerShared, true);
-  assert.equal(context.data.shareLikeVisible, false);
-  assert.equal(context.readerText, "家里的人完整章节");
-  assert.equal(context.data.error, "");
-  await context.playReaderAudio();
-  assert.equal(context.data.ttsBusyTarget, "");
-  assert.equal(context.data.readerDemo, true);
-  context.startMyStory();
-  assert.deepEqual(destinations, ["/pages/login/index"]);
-  assert.equal(require("../services/navigation.ts").consumeNarrationRequest(), "after_login");
-  delete global.wx;
-});
-
-test("a signed-in sample reader returns to the existing home to start narration", () => {
-  const destinations = [];
-  global.wx = {
-    getStorageSync: () => "test-session",
-    navigateTo: ({ url }) => destinations.push(url),
-    navigateBack: ({ delta }) => destinations.push({ delta }),
-  };
-  global.getCurrentPages = () => [{ route: "pages/home/index" }, { route: "pages/book-reader/index" }];
-  const { page } = loadBookReaderPage();
-  const context = pageContext(page, { readerDemo: true });
-
-  context.startMyStory();
-
-  assert.deepEqual(destinations, [{ delta: 1 }]);
-  const { consumeNarrationRequest } = require("../services/navigation.ts");
-  assert.equal(consumeNarrationRequest(), "start");
-  assert.equal(consumeNarrationRequest(), null);
-});
-
 test("reader paragraphs only honor line breaks saved by the language model", () => {
   const unbrokenContent = [
     "十九年前，我们因为一次偶然的点赞认识。",
@@ -708,17 +663,6 @@ test("retrying a failed share restores both text and the like target", async () 
   assert.equal(context.data.error, "");
   assert.deepEqual(targets, [{ reading_token: "retry-token" }]);
   assert.equal(context.data.shareLikeVisible, true);
-});
-
-test("the sample book retry reloads its public source", async () => {
-  let fail = true;
-  const { page } = loadBookReaderPage({ readMemoirDemoBook: async () => { if (fail) throw new Error("network"); return sampleFinishedBook(); } });
-  const context = pageContext(page);
-  await context.onLoad({ demo: "1" });
-  fail = false;
-  await context.retrySharedReading();
-  assert.equal(context.data.error, "");
-  assert.equal(context.readerText, "全书正文");
 });
 
 test("shared reading restores its chapter and scroll position, then resets obsolete audio after a new version", async () => {

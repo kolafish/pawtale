@@ -154,17 +154,12 @@ export function navigateToLogin(): void {
 }
 
 // Explicit narration actions reuse the home flow, with login only when no session exists.
-type NarrationRequest = "start" | "after_login";
+type NarrationRequest = "after_login";
 let pendingNarration: NarrationRequest | null = null;
 
 export function navigateToLoginThenNarrate(): void {
   pendingNarration = "after_login";
   navigateToLogin();
-}
-
-export function returnToHomeThenNarrate(): void {
-  pendingNarration = "start";
-  returnToHome();
 }
 
 export function consumeNarrationRequest(): NarrationRequest | null {

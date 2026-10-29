@@ -37,7 +37,7 @@ from app.schemas.memoir_book import (
     MemoirReadingShareCardRequest, MemoirReadingShareCardSelection,
     MemoirExcerptSelection, MemoirExcerptTitle, MemoirExcerptImageRequest,
     MemoirExcerptShareRequest, MemoirExcerptShareResponse, MemoirExcerptShareCreated,
-    MemoirBookShareReadRequest, MemoirSharedAudioPlanRequest, MemoirSharedAudioPlanResponse,
+    MemoirBookShareReadRequest, MemoirSharedAudioPlanRequest, MemoirSharedAudioPlanResponse, MemoirFeaturedBookResponse,
     MemoirBookShareStatusResponse,
     MemoirBookPlanConfirmRequest,
     MemoirBookPlanGenerateRequest,
@@ -191,6 +191,12 @@ async def get_mobile_memoir_excerpt_poster(
 ):
     image = await memoir_book_shares.excerpt_share_poster(db, token, user_id=current_user.id, quote=quote)
     return Response(image, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+
+
+@router.get("/book-shares/featured", response_model=list[MemoirFeaturedBookResponse])
+async def list_mobile_featured_memoirs(response: Response, db: AsyncSession = Depends(get_db)):
+    response.headers["Cache-Control"] = "no-store"
+    return await memoir_book_shares.featured_books(db)
 
 
 @router.post("/book-shares/read", response_model=MemoirBookOutputResponse)
