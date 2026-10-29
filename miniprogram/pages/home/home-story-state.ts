@@ -45,7 +45,6 @@ export interface HomeStoryData {
   readableNoticeText: string;
   reviewNoticeScope: string;
   growthResult: HomeGrowthResult | null;
-  growthResultReadingId: string;
   retryingDraft: boolean;
 }
 
@@ -133,7 +132,7 @@ export class HomeGrowthTracker {
 export function emptyHomeStoryData(): HomeStoryData {
   return {
     story: emptyStoryViewData(), storyLoaded: false, hasStories: false, storyError: "", progress: null, readableNoticeText: "", reviewNoticeScope: "",
-    growthResult: null, growthResultReadingId: "", retryingDraft: false,
+    growthResult: null, retryingDraft: false,
   };
 }
 

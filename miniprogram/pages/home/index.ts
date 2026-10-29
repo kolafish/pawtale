@@ -482,7 +482,8 @@ definePage<HomeData>()({
       const freshEvents = this.growthTracker.observe(snapshot.identity.id, this.data.projectId, snapshot.growth_events);
       const pendingGrowth = this.growthTracker.pending(snapshot.growth_events);
       const storyData = homeStorySnapshotData(snapshot, freshEvents);
-      const settled = snapshot.progress?.status !== "processing" && snapshot.progress?.stage !== "queued";
+      const settled = snapshot.progress?.stage !== "queued" && (snapshot.progress?.status !== "processing"
+        || ["writing_copy", "reviewing_book"].includes(snapshot.progress.stage));
       const nextResult = settled
         ? homeGrowthResult(pendingGrowth, storyData.story) : null;
       const growthResult = this.data.growthResult || (nextResult
@@ -787,11 +788,6 @@ definePage<HomeData>()({
     }
   },
 
-  growthResultReadingMode(event: { detail: { id: string; static: boolean } }) {
-    if (this.data.growthResult?.id !== event.detail.id) return;
-    this.setData({ growthResultReadingId: event.detail.static ? event.detail.id : "" });
-  },
-
   async completeGrowthResult(event: { detail: { id: string } }) {
     const result = this.data.growthResult;
     if (!this.homeVisible || this.data.voiceEntry || !result || result.id !== event.detail.id) return;
@@ -801,7 +797,7 @@ definePage<HomeData>()({
     const noticeReadState = { ...this.data.noticeReadState,
       readableSeen: this.data.noticeReadState.readableSeen || Boolean(this.data.readableNoticeText) };
     rememberHomeNoticeReadState(userId, projectId, noticeReadState);
-    setHomeData(this, { growthResult: null, growthResultReadingId: "", noticeReadState });
+    setHomeData(this, { growthResult: null, noticeReadState });
     await this.growthTracker.syncAcknowledgements(events, id => acknowledgeMemoirAutomationEvent(projectId, id));
   },
 

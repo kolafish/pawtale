@@ -79,9 +79,9 @@
       loading="{{loading}}" disabled="{{loading}}">重新读取</button>
 
     <story-result wx:if="{{growthResult && !voiceEntry}}" result="{{growthResult}}" large-text="{{largeTextEnabled}}"
-      bindcomplete="completeGrowthResult" bindreadingmode="growthResultReadingMode" />
+      bindcomplete="completeGrowthResult" />
 
-    <view wx:if="{{notice && (!growthResult || growthResultReadingId === growthResult.id)}}" class="home-growth-notice" aria-live="polite">
+    <view wx:if="{{notice && !growthResult}}" class="home-growth-notice" aria-live="polite">
       <template wx:if="{{notice.kind === 'like'}}" is="shareLikePeople" data="{{avatars: notice.people.avatars, text: notice.text}}" />
       <text wx:else class="home-growth-value ui-tabular">{{notice.text}}</text>
       <view class="home-growth-actions">

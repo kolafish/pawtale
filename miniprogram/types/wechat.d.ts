@@ -40,7 +40,7 @@ type ComponentInstance<
   setData(data: Partial<TData>, callback?: () => void): void;
   triggerEvent(name: string, detail?: unknown): void;
   createSelectorQuery(): WechatMiniprogram.SelectorQuery;
-  createIntersectionObserver(options?: { thresholds?: number[]; observeAll?: boolean }): WechatMiniprogram.IntersectionObserver;
+  createIntersectionObserver(options?: { thresholds?: number[] }): WechatMiniprogram.IntersectionObserver;
 };
 
 declare function Component<
@@ -79,7 +79,7 @@ declare namespace WechatMiniprogram {
   }
   interface IntersectionObserver {
     relativeToViewport(): IntersectionObserver;
-    observe(selector: string, callback: (result: { intersectionRatio: number; dataset: Record<string, unknown> }) => void): void;
+    observe(selector: string, callback: (result: { intersectionRatio: number }) => void): void;
     disconnect(): void;
   }
   interface BoundingClientRectResult { top: number; bottom: number; left: number; right: number; width: number; height: number }
@@ -593,7 +593,7 @@ declare namespace WechatMiniprogram {
     switchTab(option: NavigateOption): void;
     navigateBack(option?: NavigateBackOption): void;
     createSelectorQuery(): SelectorQuery;
-    getWindowInfo(): { pixelRatio: number; windowHeight: number };
+    getWindowInfo(): { pixelRatio: number };
     pageScrollTo(option: { scrollTop?: number; selector?: string; offsetTop?: number; duration?: number }): void;
     showActionSheet(option: ActionSheetOption): void;
     showModal(option: ModalOption): void;

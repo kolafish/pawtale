@@ -1,14 +1,10 @@
-<view class="result-shell {{largeText ? 'large-text' : ''}} {{result.celebrate ? '' : 'quiet-result'}}" style="opacity: {{opacity}};" aria-live="polite" aria-label="{{summary}}">
-  <view class="result-copy" aria-hidden="true">
-    <view wx:for="{{rows}}" wx:key="id" class="result-row" style="opacity: {{item.opacity}}; transform: translateY({{item.offset}}px);">
-      <text class="result-label">{{item.label}}</text>
-      <text class="result-title">{{item.title}}</text>
+<view class="result-overlay {{largeText ? 'large-text' : ''}} {{result.celebrate ? '' : 'quiet-result'}}" aria-live="polite" aria-label="{{summary}}">
+  <view class="result-scene" style="opacity: {{opacity}};">
+    <view class="result-aura" aria-hidden="true"></view>
+    <view class="result-copy" aria-hidden="true" style="opacity: {{textOpacity}}; transform: translateY({{textOffset}}px);">
+      <text class="result-title">{{title}}</text>
+      <text class="result-count ui-tabular">{{result.wordDelta > 0 ? '本次新增 ' + count + ' 字' : structureLabel}}</text>
     </view>
-    <view class="result-meta" style="opacity: {{metaOpacity}};">
-      <text wx:if="{{result.wordDelta > 0}}" class="result-count ui-tabular">新增 {{count}} 字</text>
-      <text wx:if="{{result.moreCount > 0}}" class="result-more">另有 {{result.moreCount}} 处更新</text>
-    </view>
-    <view wx:for="{{bands}}" wx:key="index" class="reading-band" data-index="{{item.index}}" style="top: {{item.top}}px; height: {{item.height}}px;" />
+    <canvas wx:if="{{result.celebrate}}" id="result-book" type="2d" class="book-art" aria-hidden="true"></canvas>
   </view>
-  <canvas wx:if="{{result.celebrate}}" id="result-book" type="2d" class="book-art" aria-hidden="true"></canvas>
 </view>
