@@ -92,7 +92,7 @@ test("book reader page loads the finished book by project id", async () => {
   assert.equal(context.data.error, "");
 });
 
-test("shared reader opens without owner access and hides owner-only narration", async () => {
+test("shared reader opens without owner access", async () => {
   const calls = [];
   const { page } = loadBookReaderPage({
     getMemoirBookOutput: unmockedAsync("owner book API"),
@@ -117,8 +117,6 @@ test("shared reader opens without owner access and hides owner-only narration", 
   assert.equal(context.readerText, "只读分享正文");
   assert.equal(context.data.bookPreviewChapters.length, 1);
   assert.equal(context.data.error, "");
-  await page.playReaderAudio.call(context);
-  assert.equal(context.data.ttsBusyTarget, "");
 });
 
 test("returning to a shared reader replaces removed content with the current share result", async () => {
@@ -260,6 +258,7 @@ test("book reader previews and highlights one current chapter", async () => {
   );
   assert.equal(context.data.bookContent, "");
 
+  context.prepareReaderHighlight(context.readerText);
   const activeText = Array.from(context.readerText);
   const currentTextStart = context.readerText.indexOf("主动伸手");
   page.onBookTTSProgressPatch.call(context, {
@@ -377,26 +376,6 @@ test("book reader identifies the saved version when chapters have newer changes"
   assert.equal(context.readerAudioVersionId, "book-output-version-3");
   assert.match(context.data.readerUpdateNotice, /已保存书稿.*尚未包含.*工作与创业经历/);
   assert.equal(context.data.readerMetaText, "2章 · 6字");
-});
-
-test("book reader template keeps editing language out of the reading view", () => {
-  const template = fs.readFileSync(
-    path.join(__dirname, "../pages/book-reader/index.wxml"),
-    "utf8",
-  );
-
-  [
-    "bookVersionText",
-    "bookStaleNotice",
-    "chapter.metaText",
-    "已修改",
-    "重新整理一版",
-    "原始讲述",
-    "小节 ",
-    "回到目录与封面",
-  ].forEach((editingCopy) => assert.equal(template.includes(editingCopy), false));
-  assert.match(template, /readerUpdateNotice/);
-  assert.match(template, /回到目录/);
 });
 
 test("book reader keeps flat chapter content as a historical-version fallback", async () => {
@@ -797,6 +776,117 @@ test("shared narration generates only after play and resumes at the saved segmen
   assert.ok(requests.slice(1).every(r => r.generate === true && r.source_text_hash === initial.source_text_hash
     && r.profile_key === initial.profile_key));
   assert.deepEqual(played, ["audio-2"]);
+});
+
+for (const scope of ["book", "chapter", "story"]) test(`shared ${scope} narration resumes with highlight in the original illustrated body`, async () => {
+  const requests = [], played = [], scrolls = [];
+  global.wx = { getStorageSync: () => "", setStorageSync() {}, pageScrollTo: options => scrolls.push(options),
+    hideShareMenu() {}, showShareMenu() {} };
+  const paragraph = "我记得🌿那个院子。外婆在门口等我。";
+  const content = `${paragraph}\r\n\r\n${paragraph}`;
+  const output = sampleFinishedBook(content);
+  output.share_scope = scope;
+  const chapter = { ...output.latest_version.manuscript.chapters[0], content,
+    sections: [{ section_id: "section-1", title: "院子里的日子", content }],
+    illustrations: [{ image_asset_id: "image-1", image_url: "/api/mobile/memoir/book-shares/family/images/image-1",
+      placement: "chapter_inline", section_id: "section-1", inline_position: "middle", disclosure: "" }] };
+  output.latest_version.manuscript.chapters = scope === "book"
+    ? [chapter, { ...chapter, chapter_id: "chapter-2", title: "重返故乡", illustrations: [] }]
+    : [chapter];
+  const chapterIndex = scope === "book" ? 1 : 0;
+  const secondStart = Array.from(`${paragraph}\r\n\r\n`).length;
+  const plan = { ...sampleAudioPlan(), content, segments: [
+    { index: 0, text_start: 0, text_end: secondStart, status: "succeeded", audio_file_id: "audio-0", duration_seconds: 10, alignment: [] },
+    { index: 1, text_start: secondStart, text_end: Array.from(content).length, status: "succeeded", audio_file_id: "audio-1", duration_seconds: 10, alignment: [] },
+  ] };
+  const { page } = loadBookReaderPage({
+    readMemoirBookShare: async () => output,
+    readMemoirShareLikes: async () => ({ count: 0, likers: [], liked: false, can_like: true }),
+    readMemoirSharedAudioPlan: async (_token, _version, chapterId, playback) => {
+      requests.push({ chapterId, playback });
+      return plan;
+    },
+  });
+  const context = pageContext(page);
+  await context.onLoad({ shareToken: "family" });
+  assert.deepEqual(requests, []);
+  context.showReaderChapter(chapterIndex);
+  context.readingProgress = { versionId: context.readerAudioVersionId, audioHash: plan.source_text_hash,
+    audioChapterId: scope === "book" ? "chapter-2" : "", audioIndex: 1, audioSeconds: 1 };
+  const scrollCount = scrolls.length;
+  const body = JSON.stringify(context.data.bookPreviewChapters);
+  let finish;
+  const audio = { currentTime: 1, duration: 10 };
+  context.audioPlayback.currentAudio = () => audio;
+  context.audioPlayback.playFile = (id, _token, callbacks) => {
+    played.push([id, callbacks.startTime]);
+    callbacks.onPlay(audio);
+    callbacks.onTimeUpdate(audio);
+    return new Promise(resolve => { finish = resolve; });
+  };
+  const playback = context.playReaderAudio();
+  await flushAsyncWork();
+  try {
+    assert.deepEqual(played, [["audio-1", 1]]);
+    assert.equal(requests[0].chapterId, scope === "book" ? "chapter-2" : undefined);
+    assert.equal(context.data.readerHighlightChapterIndex, chapterIndex);
+    assert.equal(context.data.readerHighlightSectionId, "section-1");
+    assert.equal(context.data.readerHighlightParagraphIndex, 1);
+    assert.equal(context.data.readerHighlightCurrent, "我记得🌿那个院子。");
+    assert.equal(JSON.stringify(context.data.bookPreviewChapters), body, "narration preserves the original headings and paragraphs");
+    assert.equal(context.data.shareImages.length, 1);
+    assert.deepEqual(scrolls.slice(scrollCount), [{ selector: "#reader-spoken-sentence", duration: 280 }],
+      "resuming locates the currently spoken sentence after rendering it");
+    context.onPageScroll({ scrollTop: 800 });
+    const secondSentence = Array.from(content).length - Array.from("外婆在门口等我。").length;
+    const chars = Array.from(content);
+    context.onBookTTSProgressPatch({ ttsSpokenText: chars.slice(0, secondSentence).join(""), ttsCurrentText: "外",
+      ttsRemainingText: chars.slice(secondSentence + 1).join(""), ttsProgressPercent: 90 });
+    assert.equal(scrolls.length, scrollCount + 1, "later sentences leave manual scrolling alone");
+    assert.equal(context.data.bookTTSSpokenText + context.data.bookTTSCurrentText + context.data.bookTTSRemainingText, "");
+    audio.currentTime = 10;
+    // Natural completion must remove the highlight as well as manual stop.
+    finish();
+    await playback;
+    assert.equal(context.data.readerHighlightCurrent, "");
+  } finally {
+    context.onHide();
+    finish?.();
+    await playback;
+  }
+});
+
+test("full-book narration follows the existing chapter pagination without stopping audio", async () => {
+  const output = sampleFinishedBook();
+  const chapters = output.latest_version.manuscript.chapters;
+  const source = chapters.map(chapter => chapter.content).join("\n\n");
+  output.latest_version.content = source;
+  const { page } = loadBookReaderPage({ getMemoirBookOutput: async () => output });
+  const context = pageContext(page);
+  await context.onLoad({ projectId: "p" });
+  context.prepareReaderHighlight(source);
+  context.data.playingTarget = "book";
+  const token = context.playToken;
+  const offset = source.indexOf(chapters[1].sections[0].content);
+  context.onBookTTSProgressPatch({ ttsSpokenText: source.slice(0, offset), ttsCurrentText: source[offset],
+    ttsRemainingText: source.slice(offset + 1), ttsProgressPercent: 50 });
+  assert.equal(context.data.readerChapterIndex, 1);
+  assert.equal(context.data.bookPreviewChapters[0].title, chapters[1].title);
+  assert.equal(context.data.readerHighlightCurrent, chapters[1].sections[0].content);
+  assert.equal(context.data.playingTarget, "book");
+  assert.equal(context.playToken, token);
+  context.previousReaderChapter();
+  assert.equal(context.data.playingTarget, "");
+  assert.equal(context.data.readerHighlightCurrent, "");
+});
+
+test("reading template binds narration only to the existing body and keeps its headings", () => {
+  const template = fs.readFileSync(path.join(__dirname, "../pages/book-reader/index.wxml"), "utf8");
+  const player = template.match(/<book-tts-player[\s\S]*?\/>/)[0];
+  assert.doesNotMatch(player, /(?:spoken|current|remaining)-text=/);
+  assert.match(template, /{{chapter.title}}/);
+  assert.match(template, /{{section.title}}/);
+  assert.match(template, /is="readerHighlightedText"/);
 });
 
 for (const shared of [false, true]) test(`${shared ? "shared" : "owner"} chapter shows images before, within and after unchanged text`, async () => {

@@ -35,6 +35,8 @@ export interface BookTTSHost {
   bookTTSPollTimer?: PollingTimer;
   bookTTSWake?: () => void;
   onBookAudioPosition?(index: number, seconds: number): void;
+  // A host with its own text projection receives progress and reset/completion
+  // events instead of duplicating the text in the standalone player view.
   onBookTTSProgressPatch?(patch: VoiceAssistantTTSProgressPatch): void;
 }
 
@@ -55,9 +57,13 @@ export function applyBookTTSProgressPatch(
     };
   }
   host.setData({
-    bookTTSSpokenText: patch.ttsSpokenText,
-    bookTTSCurrentText: patch.ttsCurrentText,
-    bookTTSRemainingText: patch.ttsRemainingText,
+    // Readers project the position into their existing body. Only standalone
+    // players need another copy of the spoken/current/remaining text in setData.
+    ...(!host.onBookTTSProgressPatch ? {
+      bookTTSSpokenText: patch.ttsSpokenText,
+      bookTTSCurrentText: patch.ttsCurrentText,
+      bookTTSRemainingText: patch.ttsRemainingText,
+    } : {}),
     bookTTSProgressPercent: patch.ttsProgressPercent,
   });
   host.onBookTTSProgressPatch?.(patch);
@@ -156,9 +162,12 @@ export async function playBookAudioPlan(
       host.setData({ ttsBusyTarget: "", playingTarget: target, bookTTSPreparingText: "" });
       await playBookAudioFile(host, segment.audio_file_id!, token, 0, positiveFiniteSeconds(segment.duration_seconds), segment.index === resume.index ? resume.seconds : 0);
     }, resume.index);
-    if (token === host.playToken) host.setData({
-      bookTTSSpokenText: activeText, bookTTSCurrentText: "", bookTTSRemainingText: "", bookTTSProgressPercent: 100,
-    });
+    if (token === host.playToken) {
+      host.bookTTSChunk = null;
+      applyBookTTSProgressPatch(host, {
+        ttsSpokenText: activeText, ttsCurrentText: "", ttsRemainingText: "", ttsProgressPercent: 100,
+      });
+    }
   } catch (error) {
     if (token === host.playToken) resetBookTTSProgress(host);
     throw error;
@@ -290,6 +299,9 @@ export function resetBookTTSProgress(host: BookTTSHost): void {
     bookTTSDurationSeconds: 0,
     bookTTSAlignment: [],
     bookTTSPreparingText: "",
+  });
+  host.onBookTTSProgressPatch?.({
+    ttsSpokenText: "", ttsCurrentText: "", ttsRemainingText: "", ttsProgressPercent: 0,
   });
 }
 
