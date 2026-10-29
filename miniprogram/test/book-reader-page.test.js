@@ -29,6 +29,7 @@ function sampleFinishedBook(content = "全书正文") {
 
 function loadBookReaderPage(voiceApiExports = {}, ttsExports = {}) {
   global.wx ||= { getStorageSync: () => "", setStorageSync() {} };
+  global.wx.createSelectorQuery ||= playerMeasurement();
   mockMemoirApiModules({
     memoirAudioPlanLoader: (...args) => memoirAudioPlanLoader(...args, voiceApiExports.prepareMemoirAudio || unmockedAsync("prepareMemoirAudio")),
     getMemoirChapterWorkspace: unmockedAsync("getMemoirChapterWorkspace"),
@@ -44,6 +45,18 @@ function loadBookReaderPage(voiceApiExports = {}, ttsExports = {}) {
   clearModule("../services/share-likes.ts");
   clearModule("../services/reading-excerpt-share.ts");
   return loadPageModule("../pages/book-reader/index.ts");
+}
+
+function playerMeasurement(player = { height: 120, top: "8px" }, pending) {
+  return () => {
+    let callback;
+    const query = {
+      select() { return query; },
+      fields(_options, resultCallback) { callback = resultCallback; return query; },
+      exec() { if (pending) pending.push(() => callback(player)); else callback(player); },
+    };
+    return query;
+  };
 }
 
 test("book reader page is registered as the finished-book route", () => {
@@ -780,7 +793,9 @@ test("shared narration generates only after play and resumes at the saved segmen
 
 for (const scope of ["book", "chapter", "story"]) test(`shared ${scope} narration resumes with highlight in the original illustrated body`, async () => {
   const requests = [], played = [], scrolls = [];
+  const playerHeight = { book: 96, chapter: 148, story: 192 }[scope];
   global.wx = { getStorageSync: () => "", setStorageSync() {}, pageScrollTo: options => scrolls.push(options),
+    createSelectorQuery: playerMeasurement({ height: playerHeight, top: "8px" }),
     hideShareMenu() {}, showShareMenu() {} };
   const paragraph = "我记得🌿那个院子。外婆在门口等我。";
   const content = `${paragraph}\r\n\r\n${paragraph}`;
@@ -835,8 +850,8 @@ for (const scope of ["book", "chapter", "story"]) test(`shared ${scope} narratio
     assert.equal(context.data.readerHighlightCurrent, "我记得🌿那个院子。");
     assert.equal(JSON.stringify(context.data.bookPreviewChapters), body, "narration preserves the original headings and paragraphs");
     assert.equal(context.data.shareImages.length, 1);
-    assert.deepEqual(scrolls.slice(scrollCount), [{ selector: "#reader-spoken-sentence", duration: 280 }],
-      "resuming locates the currently spoken sentence after rendering it");
+    assert.deepEqual(scrolls.slice(scrollCount), [{ selector: "#reader-spoken-sentence", offsetTop: -(playerHeight + 8 + 12), duration: 280 }],
+      "resuming places the sentence below the measured sticky player, including larger text layouts");
     context.onPageScroll({ scrollTop: 800 });
     const secondSentence = Array.from(content).length - Array.from("外婆在门口等我。").length;
     const chars = Array.from(content);
@@ -854,6 +869,25 @@ for (const scope of ["book", "chapter", "story"]) test(`shared ${scope} narratio
     finish?.();
     await playback;
   }
+});
+
+for (const interrupted of ["stopped", "new sentence", "player removed"]) test(`pending resume measurement does not scroll after ${interrupted}`, async () => {
+  const pending = [], scrolls = [];
+  global.wx = { getStorageSync: () => "", setStorageSync() {}, pageScrollTo: options => scrolls.push(options),
+    createSelectorQuery: playerMeasurement(interrupted === "player removed" ? null : { height: 160, top: "10px" }, pending) };
+  const { page } = loadBookReaderPage();
+  const context = pageContext(page);
+  const content = "第一句。第二句。";
+  context.flatPages = [content];
+  context.prepareReaderHighlight(content);
+  context.onBookTTSProgressPatch({ ttsSpokenText: "", ttsCurrentText: "第", ttsRemainingText: content.slice(1), ttsProgressPercent: 0 });
+  assert.equal(pending.length, 1);
+  if (interrupted === "stopped") context.stopPlayback();
+  if (interrupted === "new sentence") {
+    context.onBookTTSProgressPatch({ ttsSpokenText: "第一句。", ttsCurrentText: "第", ttsRemainingText: "二句。", ttsProgressPercent: 50 });
+  }
+  pending[0]();
+  assert.deepEqual(scrolls, [], "an obsolete layout result must not move the page");
 });
 
 test("full-book narration follows the existing chapter pagination without stopping audio", async () => {

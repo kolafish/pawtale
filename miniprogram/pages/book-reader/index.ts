@@ -109,10 +109,10 @@ const PAGE_CLASS = "book-reader-page ui-page-shell ui-accessible-page";
 const FLAT_READER_PAGE_CHARS = 6000;
 
 type WxWithPageScrollTo = typeof wx & {
-  pageScrollTo?: (options: { selector?: string; scrollTop?: number; duration?: number }) => void;
+  pageScrollTo?: (options: { selector?: string; scrollTop?: number; offsetTop?: number; duration?: number }) => void;
 };
 
-function scrollReader(options: { selector?: string; scrollTop?: number }) {
+function scrollReader(options: { selector?: string; scrollTop?: number; offsetTop?: number }) {
   const pageScrollTo = (wx as WxWithPageScrollTo).pageScrollTo;
   if (typeof pageScrollTo === "function") {
     pageScrollTo({ ...options, duration: 280 });
@@ -684,7 +684,17 @@ definePage<BookReaderData>()({
       readerHighlightAfter: highlight.after,
     }, () => {
       if (locatePlayback && this.playToken === playbackToken && this.readerHighlightKey === key) {
-        scrollReader({ selector: "#reader-spoken-sentence" });
+        wx.createSelectorQuery().select(".reader-tts-shell").fields({
+          size: true,
+          computedStyle: ["top"],
+        }, (player) => {
+          if (!player?.height || this.playToken !== playbackToken || this.readerHighlightKey !== key) return;
+          // Leave the sentence below the sticky player, including its inset and a reading gap.
+          scrollReader({
+            selector: "#reader-spoken-sentence",
+            offsetTop: -(player.height + (parseFloat(player.top || "0") || 0) + 12),
+          });
+        }).exec();
       }
     });
   },
