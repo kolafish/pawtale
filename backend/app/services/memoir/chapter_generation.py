@@ -41,6 +41,7 @@ from app.services.ai_timeouts import (
 )
 from app.services.ai_types import AITextClient
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
+from app.services.memoir.title_guidance import title_naming_guidance
 from app.services.memoir.book_output_state import invalidate_book_output
 from app.services.memoir import automation_events
 from app.services.memoir import narration_people
@@ -1099,6 +1100,7 @@ def build_chapter_generation_prompt(
 用户修改要求：
 {revision_instruction}
 
+{title_naming_guidance("section")}
 修改规则：
 - 以当前小节正文为编辑基线，只修改已确认思路明确涉及的对象和范围，再输出修改后的标题和完整正文。
 - 如果修改要求涉及标题中的错字或表达，必须同步修改标题；否则标题保持不变。
