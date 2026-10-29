@@ -152,6 +152,54 @@ async def test_raw_speech_context_and_both_renames(client, test_db, monkeypatch,
     assert (await apply(client, story, response.json())).status_code == 409
 
 
+@pytest.mark.parametrize("action,kind", [("rename_chapter", "chapters"), ("rename_section", "sections")])
+@pytest.mark.parametrize("mixed", [False, True])
+async def test_rename_preview_rejects_unchanged_titles_and_false_success(
+    client, test_db, monkeypatch, story, action, kind, mixed,
+):
+    before = await _story(test_db, story["pid"])
+    operations = [{"action": action, "target_ref": story[kind][1], "new_title": " 童年回忆 "}]
+    if mixed:
+        operations.insert(0, {"action": "rename_section", "target_ref": story["sections"][3], "new_title": "外婆家里"})
+    response, fake = await preview(client, monkeypatch, story, operations,
+        instruction="把这一章的名字重命名一下" if kind == "chapters" else "把这一章的几个小节的名字重命名一下",
+        reply="我按内容拟了新标题，请确认。")
+    assert response.status_code == 422
+    assert "原标题相同" in response.json()["detail"]
+    assert len(fake.inputs) == 1
+    assert await _story(test_db, story["pid"]) == before
+
+
+@pytest.mark.parametrize("action,kind", [("rename_chapter", "chapters"), ("rename_section", "sections")])
+async def test_apply_rejects_pre_fix_unchanged_rename_without_writes(
+    client, test_db, monkeypatch, story, action, kind,
+):
+    from app.services.memoir.voice_edit import _operation_key, _operation_signature, LAST_BATCH_METADATA_KEY
+
+    before = await _story(test_db, story["pid"])
+    # Reproduce a signed preview issued before unchanged renames were rejected.
+    operations = [
+        VoiceEditOperation(action="rename_section", target_ref=story["sections"][3], new_title="外婆家里"),
+        VoiceEditOperation(action=action, target_ref=story[kind][1], new_title="童年回忆"),
+    ]
+    signatures = {_operation_key(op): _operation_signature(before, op) for op in operations}
+    scheduled = []
+
+    async def schedule(*args, **kwargs):
+        scheduled.append(kwargs)
+
+    monkeypatch.setattr("app.services.memoir.voice_edit.schedule_book_draft", schedule)
+    response = await client.post(f"/api/memoir/projects/{story['pid']}/voice-edit/apply", json={
+        "signature": json.dumps(signatures), "operations": [op.model_dump() for op in operations],
+    })
+    assert response.status_code == 422
+    assert "原标题相同" in response.json()["detail"]
+    assert await _story(test_db, story["pid"]) == before
+    assert scheduled == []
+    project = await test_db.get(Project, story["pid"], populate_existing=True)
+    assert LAST_BATCH_METADATA_KEY not in (project.metadata_json or {})
+
+
 async def test_regenerate_chapter_sections_preview_queues_existing_workflow(
     client,
     test_db,
