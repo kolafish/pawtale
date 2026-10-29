@@ -8,6 +8,7 @@
       <text wx:if="{{result.wordDelta > 0}}" class="result-count ui-tabular">新增 {{count}} 字</text>
       <text wx:if="{{result.moreCount > 0}}" class="result-more">另有 {{result.moreCount}} 处更新</text>
     </view>
+    <view wx:for="{{bands}}" wx:key="index" class="reading-band" data-index="{{item.index}}" style="top: {{item.top}}px; height: {{item.height}}px;" />
   </view>
   <canvas wx:if="{{result.celebrate}}" id="result-book" type="2d" class="book-art" aria-hidden="true"></canvas>
 </view>

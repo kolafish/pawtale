@@ -751,3 +751,37 @@ test("replacing a required issue with another in the same scope and count notifi
     assert.equal(second.data.notice?.action, "review", "a different issue must not inherit the old issue's read state");
   } finally { second.onHide(); }
 });
+
+
+test("static result reading keeps actionable notices reachable and rejects stale mode events", async () => {
+  const template = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
+  const modeHandler = template.match(/<story-result[^>]+bindreadingmode="([^"]+)"/)[1];
+  const noticeCondition = template.match(/<view wx:if="{{([^}]+)}}" class="home-growth-notice"/)[1];
+  const noticeVisible = data => Function("notice", "growthResult", "growthResultReadingId", `return Boolean(${noticeCondition});`)(data.notice, data.growthResult, data.growthResultReadingId);
+  for (const status of ["failed", "needs_input"]) {
+    const { page, calls } = loadStoryPage({ current: snapshot({ progress: progress({ status, can_retry: status === "failed" }),
+      book_issues: { review_count: status === "needs_input" ? 1 : 0, supplement_count: 0 },
+      growth_events: [growth("long-result")] }) });
+    const context = pageContext(page);
+    try {
+      await context.onShow();
+      const id = context.data.growthResult.id;
+      assert.equal(context.data.notice.action, status === "failed" ? "retry" : "review");
+      assert.equal(noticeVisible(context.data), false);
+      context[modeHandler]({ detail: { id: "old-account/result", static: true } });
+      assert.equal(noticeVisible(context.data), false);
+      context[modeHandler]({ detail: { id, static: true } });
+      assert.equal(noticeVisible(context.data), true);
+      assert.deepEqual(calls.acknowledgedEventIds, []);
+      context[modeHandler]({ detail: { id: "old-account/result", static: false } });
+      assert.equal(noticeVisible(context.data), true);
+      context[modeHandler]({ detail: { id, static: false } });
+      assert.equal(noticeVisible(context.data), false);
+      context[modeHandler]({ detail: { id, static: true } });
+      await context.completeGrowthResult({ detail: { id } });
+      assert.equal(context.data.growthResultReadingId, "");
+      assert.equal(noticeVisible(context.data), true);
+      assert.deepEqual(calls.acknowledgedEventIds, ["long-result"]);
+    } finally { context.onHide(); }
+  }
+});

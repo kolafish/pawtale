@@ -787,6 +787,11 @@ definePage<HomeData>()({
     }
   },
 
+  growthResultReadingMode(event: { detail: { id: string; static: boolean } }) {
+    if (this.data.growthResult?.id !== event.detail.id) return;
+    this.setData({ growthResultReadingId: event.detail.static ? event.detail.id : "" });
+  },
+
   async completeGrowthResult(event: { detail: { id: string } }) {
     const result = this.data.growthResult;
     if (!this.homeVisible || this.data.voiceEntry || !result || result.id !== event.detail.id) return;
@@ -796,7 +801,7 @@ definePage<HomeData>()({
     const noticeReadState = { ...this.data.noticeReadState,
       readableSeen: this.data.noticeReadState.readableSeen || Boolean(this.data.readableNoticeText) };
     rememberHomeNoticeReadState(userId, projectId, noticeReadState);
-    setHomeData(this, { growthResult: null, noticeReadState });
+    setHomeData(this, { growthResult: null, growthResultReadingId: "", noticeReadState });
     await this.growthTracker.syncAcknowledgements(events, id => acknowledgeMemoirAutomationEvent(projectId, id));
   },
 
