@@ -121,8 +121,8 @@ export function drawStoryBook(ctx: CanvasRenderingContext2D, width: number, heig
         if (p <= 0 || p >= 1)
             continue;
         const alpha = Math.sin(p * Math.PI) * .48;
-        const x = 146 + i * 102 / 14 + Math.sin(p * 2.4 + i) * 4;
-        const y = 184 - 43 * p + (i % 3) * 5;
+        const x = 120 + i * 160 / 14 + Math.sin(p * 2.4 + i) * 6;
+        const y = 184 - 65 * p + (i % 3) * 5;
         const radius = i % 3 === 0 ? 1.65 : 1.1;
         ctx.save();
         ctx.globalAlpha = opacity * alpha;
