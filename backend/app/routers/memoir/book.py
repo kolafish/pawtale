@@ -186,7 +186,7 @@ async def get_mobile_memoir_excerpt_card(token: str, db: AsyncSession = Depends(
 
 @router.get("/excerpt-shares/{token}/poster.jpg")
 async def get_mobile_memoir_excerpt_poster(
-    token: str, quote: str = Query(min_length=1, max_length=120),
+    token: str, quote: str = Query(min_length=1, max_length=512),
     db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
 ):
     image = await memoir_book_shares.excerpt_share_poster(db, token, user_id=current_user.id, quote=quote)

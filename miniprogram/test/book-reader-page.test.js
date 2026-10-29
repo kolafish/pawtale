@@ -1240,6 +1240,8 @@ test("selected-text entry reuses the chapter preview loader and presentation", a
 });
 
 test("512 Unicode characters reach title recommendation and remain complete behind an independent sharing title", async () => {
+  const downloads = [];
+  mockModule("../services/authenticated-media.ts", { downloadAuthenticatedFile: async url => { downloads.push(url); return "/tmp/poster.jpg"; } });
   const content = "回忆🌿。".repeat(128);
   let posted;
   const snapshot = { token: "x1.long", title: "小时候的回忆", summary: "那些难忘的童年回忆。", content, book_title: "回忆录", chapter_title: "童年" };
@@ -1256,6 +1258,15 @@ test("512 Unicode characters reach title recommendation and remain complete behi
   assert.equal(context.data.excerptSelectionCount, 512);
   assert.equal(posted, content);
   assert.equal(context.data.excerptContent, content);
+  assert.equal(context.data.excerptPosterQuote, content);
+  context.chooseExcerptOutput({ currentTarget: { dataset: { output: "poster" } } });
+  await context.generateExcerptPoster();
+  assert.equal(downloads.length, 1);
+  assert.equal(new URL(downloads[0]).searchParams.get("quote"), content);
+  context.changeExcerptPosterQuote({ detail: { value: content + "字" } });
+  await context.generateExcerptPoster();
+  assert.equal(downloads.length, 1);
+  assert.ok(context.data.excerptPosterError);
   context.onExcerptImageLoad({ currentTarget: { dataset: { url: context.data.excerptImageUrl } } });
   assert.equal(context.onShareAppMessage().title, snapshot.title);
   await context.onLoad({ excerptToken: snapshot.token });

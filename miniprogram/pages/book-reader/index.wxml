@@ -60,8 +60,8 @@
     </block>
     <block wx:else>
       <text class="excerpt-summary-label">图片上的原文摘录</text>
-      <textarea class="excerpt-poster-quote" value="{{excerptPosterQuote}}" maxlength="120" auto-height disabled="{{excerptPosterBusy || excerptPosterSaving}}" bindinput="changeExcerptPosterQuote" />
-      <text class="excerpt-help">保留最想分享的两三句话，最多 120 字。扫码可读全部选文；图片沿用刚才选好的插图或照片。</text>
+      <textarea class="excerpt-poster-quote" value="{{excerptPosterQuote}}" maxlength="-1" auto-height disabled="{{excerptPosterBusy || excerptPosterSaving}}" bindinput="changeExcerptPosterQuote" />
+      <text class="excerpt-help">默认保留全部选文，也可以选取其中一段连续原文，最多 512 字。文字较多时图片会加长；沿用刚才选好的插图或照片。</text>
       <image wx:if="{{excerptPosterPath}}" class="excerpt-card-image" src="{{excerptPosterPath}}" mode="widthFix" bindtap="previewExcerptPoster" aria-label="查看分享图片大图" />
       <text wx:if="{{excerptPosterBusy}}" class="excerpt-help">正在排版并生成小程序码…</text>
       <text wx:if="{{excerptPosterError}}" class="excerpt-selection-error">{{excerptPosterError}}</text>

@@ -3,10 +3,48 @@ from io import BytesIO
 from functools import lru_cache
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont, ImageOps
+from PIL import Image, ImageChops, ImageDraw, ImageFont, ImageOps
 
 _ASSETS = Path(__file__).resolve().parents[2] / "assets"
 _INK = "#614b39"
+_PAPER = (252, 248, 241)
+
+
+def _excerpt_picture(content: bytes | None) -> tuple[Image.Image | None, tuple[int, int, int]]:
+    """Use the dominant edge color, rather than people's skin or clothes, as paper tint."""
+    if not content:
+        return None, _PAPER
+    with Image.open(BytesIO(content)) as source:
+        picture = ImageOps.exif_transpose(source).convert("RGBA")
+    sample = picture.resize((64, 64))
+    opaque = Image.new("RGBA", sample.size, (*_PAPER, 255))
+    opaque.alpha_composite(sample)
+    border = Image.new("RGB", (64, 24))
+    # Sample all four edges, excluding the subject in the middle.
+    for index, box in enumerate(((0, 0, 64, 6), (0, 58, 64, 64), (0, 6, 6, 58), (58, 6, 64, 58))):
+        border.paste(opaque.crop(box).convert("RGB").resize((64, 6)), (0, index * 6))
+    palette = border.quantize(colors=8).convert("RGB")
+    _, tint = max(palette.getcolors(64 * 24), key=lambda item: item[0])
+    # Keep even dark/saturated photos light enough for the existing brown text.
+    paper = tuple(round(255 * .88 + color * .12) for color in tint)
+    return picture, paper
+
+
+def _paste_excerpt_picture(image: Image.Image, picture: Image.Image, position: tuple[int, int]) -> None:
+    """Blend a narrow edge for both photos and illustrations; leave the center intact."""
+    fade = max(1, min(32, picture.width // 25, picture.height // 25))
+    horizontal = Image.new("L", picture.size, 255)
+    vertical = Image.new("L", picture.size, 255)
+    x_edge, y_edge = ImageDraw.Draw(horizontal), ImageDraw.Draw(vertical)
+    for inset in range(fade):
+        progress = inset / fade
+        alpha = round(255 * progress * progress * (3 - 2 * progress))
+        x_edge.line((inset, 0, inset, picture.height), fill=alpha)
+        x_edge.line((picture.width - 1 - inset, 0, picture.width - 1 - inset, picture.height), fill=alpha)
+        y_edge.line((0, inset, picture.width, inset), fill=alpha)
+        y_edge.line((0, picture.height - 1 - inset, picture.width, picture.height - 1 - inset), fill=alpha)
+    mask = ImageChops.multiply(horizontal, vertical)
+    image.paste(picture, position, ImageChops.multiply(picture.getchannel("A"), mask))
 
 
 def _wrapped_lines(text: str, font: ImageFont.FreeTypeFont, width: int, *, book_typography: bool = False) -> list[str]:
@@ -82,18 +120,18 @@ def render_reading_share_card(*, title: str, book_title: str, is_book: bool,
 
 def render_excerpt_share_card(*, book_title: str, chapter_title: str, content: str,
                               summary: str = "", image_content: bytes | None = None, ai_image: bool = False, caption: str = "") -> bytes:
-    image = Image.new("RGB", (1000, 800), "#fcf8f1")
+    picture, paper = _excerpt_picture(image_content)
+    image = Image.new("RGB", (1000, 800), paper)
     _text(image, "老余口述 · 一个家庭的回忆录", (56, 24, 944, 80), size=32, align="left")
     # Older snapshots have no confirmed summary; retain a bounded original-text teaser.
     compact = " ".join(content.split())
     limit = min(64, max(1, len(compact) - 12)) if len(compact) > 24 else len(compact)
     preview = summary or compact[:limit].rstrip("，。！？；：、,.;!?: ") + ("…" if limit < len(compact) else "")
-    if image_content:
+    if picture is not None:
         label = "AI 意象插图" if ai_image else " ".join(caption.split())
         caption_height = min(300, _caption_height(label, width=888))
-        with Image.open(BytesIO(image_content)) as source:
-            picture = ImageOps.fit(ImageOps.exif_transpose(source).convert("RGB"), (1000, max(96, 396 - caption_height)))
-        image.paste(picture, (0, 96))
+        picture = ImageOps.fit(picture, (1000, max(96, 396 - caption_height)))
+        _paste_excerpt_picture(image, picture, (0, 96))
         if label:
             _text(image, label, (56, 492 - caption_height, 944, 492), size=22)
         _text(image, preview, (56, 506, 944, 634), size=40, minimum=40, align="left")
@@ -110,10 +148,12 @@ def render_excerpt_share_card(*, book_title: str, chapter_title: str, content: s
 def render_excerpt_share_poster(*, title: str, book_title: str, quote: str, code_content: bytes,
                                 image_content: bytes | None = None, ai_image: bool = False, caption: str = "") -> bytes:
     """A story print that grows for long quotes, keeping the type and code readable."""
-    from PIL import ImageChops
-
-    paper = "#fcf8f1"
-    quote_top = 930 if image_content else 490
+    picture, paper = _excerpt_picture(image_content)
+    label = "AI 意象插图" if ai_image else " ".join(caption.split())
+    caption_height = _caption_height(label, width=1040) if picture is not None else 0
+    if picture is not None:
+        picture = ImageOps.contain(picture, (1040, 780))
+    quote_top = 410 + picture.height + caption_height + 24 if picture is not None else 490
     quote_size = 48 if image_content else 66
     quote_spacing = 1.65
     quote_font = ImageFont.truetype(str(_ASSETS / "fonts" / "NotoSerifSC-Regular.ttf"), quote_size)
@@ -132,31 +172,17 @@ def render_excerpt_share_poster(*, title: str, book_title: str, quote: str, code
     _text(image, title, (80, 187, 1120, 368), size=76, minimum=44, align="left", bold=True)
     draw.line((82, 388, 172, 388), fill="#b9785c", width=4)
 
-    if image_content:
-        label = "AI 意象插图" if ai_image else " ".join(caption.split())
-        caption_height = _caption_height(label, width=1040)
-        picture_height = 520 - caption_height
-        with Image.open(BytesIO(image_content)) as source:
-            picture = ImageOps.contain(ImageOps.exif_transpose(source).convert("RGBA"), (1120, picture_height))
-        # Fade only the outer edge of illustrations into the same paper used throughout.
-        # Keep photos intact, including their original colors and full framing.
-        if ai_image:
-            fade = min(48, picture.width // 5, picture.height // 5)
-            mask = Image.new("L", picture.size, 255)
-            edge = ImageDraw.Draw(mask)
-            for inset in range(fade):
-                edge.rectangle((inset, inset, picture.width - 1 - inset, picture.height - 1 - inset),
-                               outline=round(255 * inset / fade))
-            picture.putalpha(ImageChops.multiply(picture.getchannel("A"), mask))
-        image.paste(picture, ((1200 - picture.width) // 2, 410 + (picture_height - picture.height) // 2), picture)
+    if picture is not None:
+        _paste_excerpt_picture(image, picture, ((1200 - picture.width) // 2, 410))
         if label:
-            _text(image, label, (80, 930 - caption_height, 1120, 930), size=22)
+            _text(image, label, (80, 410 + picture.height, 1120, quote_top - 24), size=22)
     _text(image, quote, (108, quote_top, 1092, quote_bottom), size=quote_size,
           minimum=quote_size, align="left", line_spacing=quote_spacing, book_typography=True)
     draw.line((80, footer_top, 1120, footer_top), fill="#decfbd", width=1)
     _text(image, f"选自《{book_title}》", (80, footer_top + 10, 1120, footer_top + 72), size=28, minimum=22)
     # A quiet centered paper panel; never cover or redraw the official code/avatar.
-    draw.rounded_rectangle((480, footer_top + 80, 720, footer_top + 320), radius=26, fill="#f3ebdf")
+    draw.rounded_rectangle((480, footer_top + 80, 720, footer_top + 320), radius=26,
+                           fill=tuple(channel - 8 for channel in paper))
     with Image.open(BytesIO(code_content)) as source:
         code = ImageOps.contain(source.convert("RGBA"), (220, 220))
     image.paste(code, ((1200 - code.width) // 2, footer_top + 90 + (220 - code.height) // 2), code)
