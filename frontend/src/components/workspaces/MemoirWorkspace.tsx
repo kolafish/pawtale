@@ -96,12 +96,14 @@ export function MemoirWorkspace({ project }: MemoirWorkspaceProps) {
             <MemoirChapterDraftWorkspace
               project={project}
               onOpenChapters={() => changeView('chapters')}
+              onUnsavedChange={setHasUnsavedChanges}
             />
           ) : view === 'book' ? (
             <MemoirBookWorkspace
               project={project}
               onOpenChapters={() => changeView('chapters')}
               onOpenDrafts={openDrafts}
+              onUnsavedChange={setHasUnsavedChanges}
             />
           ) : (
             <MemoirMaterialWorkspace

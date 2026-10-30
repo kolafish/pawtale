@@ -669,7 +669,7 @@ async def test_mobile_memoir_book_output_routes_require_login(anonymous_client):
 
 
 @pytest.mark.ci_smoke
-async def test_admin_reads_other_users_memoir_book_without_write_access(client, test_db):
+async def test_admin_reads_and_edits_other_users_book_without_changing_plan_permissions(client, test_db):
     narration = "我小时候常在外婆家的院子里晒太阳。"
     material = await create_test_voice_transcript(client, test_db, narration)
     project_id = material["session"]["project_id"]
@@ -718,6 +718,13 @@ async def test_admin_reads_other_users_memoir_book_without_write_access(client, 
     for path in paths.values():
         response = await client.get(path)
         assert response.status_code == 404, response.text
+    response = await client.patch(paths["output"], json={"title": "不应修改"})
+    assert response.status_code == 404
+    response = await client.post(f"{paths['draft']}/revise", json={
+        "expected_version_id": owner_responses["draft"].json()["latest_version"]["id"],
+        "sections": [{"section_id": section["id"], "content": "不应修改"}],
+    })
+    assert response.status_code == 404
 
     reader.role = "admin"
     await test_db.commit()
@@ -726,18 +733,25 @@ async def test_admin_reads_other_users_memoir_book_without_write_access(client, 
         assert response.status_code == 200, response.text
         assert response.content == owner_responses[key].content
 
-    for path, payload in (
-        (
-            f"{base}/book-plan",
-            {
-                "title": "管理员尝试修改",
-                "chapters": [{"id": chapters[0].id, "title": chapters[0].title}],
-            },
-        ),
-        (f"{base}/book-output", {"title": "管理员尝试修改"}),
-    ):
-        response = await client.patch(path, json=payload)
-        assert response.status_code == 404, response.text
+    response = await client.patch(f"{base}/book-plan", json={
+        "title": "管理员尝试修改目录",
+        "chapters": [{"id": chapters[0].id, "title": chapters[0].title}],
+    })
+    assert response.status_code == 404, response.text
+    update = {"expected_version_id": version.id, "title": "管理员校订的书名", "preface": "写给家人的话。"}
+    response = await client.patch(paths["output"], json=update)
+    assert response.status_code == 200, response.text
+    latest = response.json()["latest_version"]
+    assert latest["id"] != version.id
+    assert latest["manuscript"]["profile"]["title"] == update["title"]
+    assert latest["manuscript"]["chapters"][0]["content"] == narration
+    original = await client.get(paths["version"])
+    assert original.content == owner_responses["version"].content
+    stale = await client.patch(paths["output"], json={**update, "title": "旧页面覆盖"})
+    assert stale.status_code == 409
+    current = await client.get(paths["output"])
+    assert current.json()["latest_version"]["id"] == latest["id"]
+    assert current.json()["title"] == update["title"]
 
 
 async def test_book_output_requires_structured_small_sections(test_db, client):

@@ -516,6 +516,11 @@ export interface MemoirBookChapterDraft {
   updated_at: string;
 }
 
+export interface MemoirBookChapterDraftRevision {
+  expected_version_id: string;
+  sections: Array<{ section_id: string; content: string }>;
+}
+
 export type MemoirBookCoverStyle =
   | 'classic_plain'
   | 'warm_gray'
@@ -616,6 +621,8 @@ export interface MemoirBookOutputForm {
   back_cover_quote: string;
   cover_style: MemoirBookCoverStyle;
 }
+
+export type MemoirBookOutputUpdate = Partial<MemoirBookOutputForm> & { expected_version_id: string };
 
 export interface MemoirBookExportDownload {
   blob: Blob;

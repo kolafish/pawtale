@@ -30,8 +30,10 @@ import type {
   AICreditKind,
   MemoirBookPlan,
   MemoirBookChapterDraft,
+  MemoirBookChapterDraftRevision,
   MemoirBookExportDownload,
   MemoirBookOutput,
+  MemoirBookOutputUpdate,
   MemoirBatchTranscriptCleanupConfirmResponse,
   MemoirBatchTranscriptCleanupPreviewResponse,
   MemoirDialectGlossaryEntry,
@@ -345,10 +347,19 @@ export const memoirBookApi = {
     api.get<MemoirBookChapterDraft>(
       `/mobile/memoir/projects/${projectId}/book-plan/chapters/${encodeURIComponent(chapterId)}/draft`,
     ).then(response => response.data).catch(error => absentMemoirResource(error, '章节稿不存在')),
+  reviseChapterDraft: (projectId: string, chapterId: string, revision: MemoirBookChapterDraftRevision) =>
+    api.post<MemoirBookChapterDraft>(
+      `/mobile/memoir/projects/${projectId}/book-plan/chapters/${encodeURIComponent(chapterId)}/draft/revise`,
+      revision,
+    ).then(response => response.data),
   getOutput: (projectId: string) =>
     api.get<MemoirBookOutput>(
       `/mobile/memoir/projects/${projectId}/book-output`,
     ).then(response => response.data).catch(error => absentMemoirResource(error, '全书稿不存在')),
+  updateOutput: (projectId: string, update: MemoirBookOutputUpdate) =>
+    api.patch<MemoirBookOutput>(
+      `/mobile/memoir/projects/${projectId}/book-output`, update,
+    ).then(response => response.data),
   downloadOutput: async (
     projectId: string,
     format: 'pdf' | 'txt',

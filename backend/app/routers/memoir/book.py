@@ -562,6 +562,7 @@ async def revise_mobile_memoir_book_chapter_draft(
         project_id=project_id,
         chapter_id=chapter_id,
         req=req,
+        allow_admin=is_admin_user(current_user),
     )
 
 
@@ -670,6 +671,7 @@ async def update_mobile_memoir_book_output(
         user_id=current_user.id,
         project_id=project_id,
         req=req,
+        allow_admin=is_admin_user(current_user),
     )
 
 

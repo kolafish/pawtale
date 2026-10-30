@@ -37,7 +37,7 @@ export function MemoirBookPreview({
   const tableOfContents = manuscript?.table_of_contents ?? [];
 
   return (
-    <section className="relative h-full min-h-0 overflow-y-auto bg-[#e9ebe9] px-3 py-4 sm:px-6 sm:py-6">
+    <section aria-label="全书预览" className="relative h-full min-h-0 overflow-y-auto bg-[#e9ebe9] px-3 py-4 sm:px-6 sm:py-6">
       <div className="mx-auto max-w-[820px] overflow-hidden rounded-md bg-white shadow-[0_8px_30px_rgba(23,43,35,0.12),0_0_0_1px_rgba(0,0,0,0.06)]">
         <section
           className="flex min-h-[420px] flex-col items-center justify-center px-8 py-16 text-center"

@@ -21,7 +21,9 @@ from app.models.memoir import (
     MemoirCompletionIssue,
     MemoirSection,
     MemoirSectionMaterial,
+    MemoirVoiceUtterance,
 )
+from app.models.users import User
 from app.schemas.memoir_section_digests import MemoirBodyDigest
 from app.services.ai_references import ModelReferenceMap
 from app.services.memoir import (
@@ -1028,6 +1030,48 @@ async def test_chapter_generation_saves_material_allowlist_snapshot(client, test
     )
     assert persisted is not None
     assert persisted.input_signature == version.input_signature
+
+
+async def test_admin_revises_other_users_chapter_with_version_and_project_guards(client, test_db):
+    project_id, chapter, section, materials = await _chapter(client, test_db)
+    original_transcripts = {
+        material["utterance_id"]: (await test_db.get(MemoirVoiceUtterance, material["utterance_id"])).transcript_raw
+        for material in materials
+    }
+    fake = FakeChapterAI(section_material_id=materials[0]["utterance_id"],
+        chapter_section_id=section["id"], chapter_material_id=materials[0]["utterance_id"],
+        draft_material_ids=[materials[0]["utterance_id"]])
+    _, version = await chapter_generation.generate_and_save_chapter_draft(
+        test_db, project_id=project_id, chapter_id=chapter.id, ai_client=fake)
+    await test_db.commit()
+    original_content = version.content
+    original_evidence = list(version.material_snapshot_json)
+    registration = await client.post("/api/auth/register", json={
+        "email": "chapter-editor@example.com", "password": "password123"})
+    assert registration.status_code == 201
+    editor = await test_db.get(User, registration.json()["user"]["id"])
+    path = f"/api/mobile/memoir/projects/{project_id}/book-plan/chapters/{chapter.id}/draft"
+    payload = {"expected_version_id": version.id,
+        "sections": [{"section_id": section["id"], "content": "人工校订后的小节正文。"}]}
+    assert (await client.post(f"{path}/revise", json=payload)).status_code == 404
+    editor.role = "admin"
+    await test_db.commit()
+    own_project = await ensure_mobile_memoir_project(client)
+    mismatched = await client.post(
+        f"/api/mobile/memoir/projects/{own_project}/book-plan/chapters/{chapter.id}/draft/revise", json=payload)
+    assert mismatched.status_code == 404
+    response = await client.post(f"{path}/revise", json=payload)
+    assert response.status_code == 200, response.text
+    latest = response.json()["latest_version"]
+    assert latest["content"] == payload["sections"][0]["content"]
+    assert latest["created_by"] == "user"
+    assert response.json()["versions"][0]["content"] == original_content
+    assert (await client.post(f"{path}/revise", json=payload)).status_code == 409
+    stored = await test_db.get(MemoirBookChapterDraftVersion, latest["id"])
+    assert stored.material_snapshot_json == original_evidence
+    for material in materials:
+        utterance = await test_db.get(MemoirVoiceUtterance, material["utterance_id"])
+        assert utterance.transcript_raw == original_transcripts[material["utterance_id"]]
 
 
 async def test_chapter_draft_update_generates_only_section_with_new_material(
