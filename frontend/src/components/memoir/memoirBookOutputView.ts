@@ -26,7 +26,7 @@ export function bookOutputForm(output: MemoirBookOutput | null | undefined): Mem
     title: output.title,
     subtitle: manuscript.profile.subtitle,
     narrator_name: manuscript.profile.narrator_name,
-    prepared_by: manuscript.profile.prepared_by || DEFAULT_FORM.prepared_by,
+    prepared_by: manuscript.profile.prepared_by,
     preface,
     afterword: manuscript.back_matter.afterword.content,
     back_cover_quote: manuscript.render_settings.back_cover_quote,

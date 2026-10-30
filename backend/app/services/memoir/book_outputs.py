@@ -511,6 +511,8 @@ async def update_book_output(
     if not output or not output.versions:
         raise HTTPException(status_code=404, detail="全书稿不存在")
     latest = output.versions[-1]
+    if req.expected_version_id is not None and req.expected_version_id != latest.id:
+        raise HTTPException(status_code=409, detail="全书已更新，请刷新核对后再保存")
     snapshot = [item for item in (latest.chapter_snapshot_json or []) if isinstance(item, dict)]
     fields_set = getattr(req, "model_fields_set", set())
     title = (

@@ -1,9 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
 import { BookOpen, Loader2, RefreshCw } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { memoirBookApi, memoirMaterialEditorApi } from '../../api';
-import type { Project } from '../../types';
+import type { MemoirBookPlanChapter, Project } from '../../types';
 import { getErrorMessage } from '../../utils/apiError';
 import { MemoirChapterDraftEditor } from './MemoirChapterDraftEditor';
 import { MemoirDraftChapterList } from './MemoirDraftChapterList';
@@ -11,15 +11,18 @@ import { MemoirDraftChapterList } from './MemoirDraftChapterList';
 interface MemoirChapterDraftWorkspaceProps {
   project: Project;
   onOpenChapters: () => void;
+  onUnsavedChange?: (dirty: boolean) => void;
 }
 
 function initialChapterId() {
   return new URL(window.location.href).searchParams.get('chapter');
 }
 
-export function MemoirChapterDraftWorkspace({ project, onOpenChapters }: MemoirChapterDraftWorkspaceProps) {
+export function MemoirChapterDraftWorkspace({ project, onOpenChapters, onUnsavedChange }: MemoirChapterDraftWorkspaceProps) {
   const [selectedChapterId, setSelectedChapterId] = useState<string | null>(initialChapterId);
   const [mobileEditorOpen, setMobileEditorOpen] = useState(Boolean(initialChapterId()));
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [editingChapter, setEditingChapter] = useState<MemoirBookPlanChapter | null>(null);
   const planQuery = useQuery({
     queryKey: ['memoirBookPlan', project.id],
     queryFn: () => memoirBookApi.getPlan(project.id),
@@ -29,7 +32,12 @@ export function MemoirChapterDraftWorkspace({ project, onOpenChapters }: MemoirC
     queryFn: () => memoirMaterialEditorApi.listAll(project.id),
   });
   const chapters = planQuery.data?.chapters ?? [];
-  const selectedChapter = chapters.find(chapter => chapter.id === selectedChapterId) ?? chapters[0];
+  const selectedChapter = editingChapter ?? chapters.find(chapter => chapter.id === selectedChapterId) ?? chapters[0];
+  const handleUnsavedChange = useCallback((dirty: boolean) => {
+    setHasUnsavedChanges(dirty);
+    setEditingChapter(dirty ? selectedChapter ?? null : null);
+    onUnsavedChange?.(dirty);
+  }, [onUnsavedChange, selectedChapter]);
   const draftQuery = useQuery({
     queryKey: ['memoirChapterDraft', project.id, selectedChapter?.id],
     queryFn: () => memoirBookApi.getChapterDraft(project.id, selectedChapter!.id),
@@ -39,14 +47,24 @@ export function MemoirChapterDraftWorkspace({ project, onOpenChapters }: MemoirC
   useEffect(() => {
     const handlePopState = () => {
       if (new URL(window.location.href).searchParams.get('view') !== 'drafts') return;
+      if (initialChapterId() === selectedChapter?.id) return;
+      if (hasUnsavedChanges && !window.confirm('当前正文尚未保存，确定离开吗？')) {
+        const url = new URL(window.location.href);
+        if (selectedChapter) url.searchParams.set('chapter', selectedChapter.id);
+        window.history.replaceState(window.history.state, '', url);
+        return;
+      }
+      setEditingChapter(null);
       setSelectedChapterId(initialChapterId());
       setMobileEditorOpen(Boolean(initialChapterId()));
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
-  }, []);
+  }, [hasUnsavedChanges, selectedChapter]);
 
   const selectChapter = (chapterId: string) => {
+    if (chapterId !== selectedChapter?.id && hasUnsavedChanges && !window.confirm('当前正文尚未保存，确定离开吗？')) return;
+    setEditingChapter(null);
     setSelectedChapterId(chapterId);
     setMobileEditorOpen(true);
     const url = new URL(window.location.href);
@@ -56,7 +74,7 @@ export function MemoirChapterDraftWorkspace({ project, onOpenChapters }: MemoirC
   if (planQuery.isLoading || materialsQuery.isLoading) {
     return <div className="flex h-full items-center justify-center gap-2 text-sm text-[#69736e]"><Loader2 size={20} className="animate-spin" />正在读取章节稿</div>;
   }
-  if (planQuery.isError || materialsQuery.isError) {
+  if ((planQuery.isError && !planQuery.data) || (materialsQuery.isError && !materialsQuery.data)) {
     return (
       <div className="flex h-full flex-col items-center justify-center text-sm text-[#69736e]">
         <BookOpen size={24} />
@@ -82,13 +100,13 @@ export function MemoirChapterDraftWorkspace({ project, onOpenChapters }: MemoirC
       <div className={`${mobileEditorOpen ? 'min-h-0' : 'hidden'} min-w-0 lg:block lg:min-h-0`}>
         {draftQuery.isLoading ? (
           <div className="flex h-full items-center justify-center gap-2 text-sm text-[#69736e]"><Loader2 size={18} className="animate-spin" />正在读取正文</div>
-        ) : draftQuery.isError ? (
+        ) : draftQuery.isError && !draftQuery.data ? (
           <div className="flex h-full flex-col items-center justify-center text-sm text-[#69736e]">
             <p>{getErrorMessage(draftQuery.error, '章节稿读取失败')}</p>
             <button type="button" onClick={() => draftQuery.refetch()} className="mt-4 h-10 rounded-md bg-white px-3">重新加载</button>
           </div>
         ) : (
-          <MemoirChapterDraftEditor key={selectedChapter.id} chapter={selectedChapter} draft={draftQuery.data ?? null} sources={sources} onBack={() => setMobileEditorOpen(false)} />
+          <MemoirChapterDraftEditor key={selectedChapter.id} chapter={selectedChapter} draft={draftQuery.data ?? null} sources={sources} onBack={() => setMobileEditorOpen(false)} canEdit={project.can_edit_memoir_materials !== false && planQuery.data?.status === 'confirmed'} onUnsavedChange={handleUnsavedChange} />
         )}
       </div>
     </div>
