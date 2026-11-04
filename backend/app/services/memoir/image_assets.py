@@ -1062,24 +1062,22 @@ async def manuscript_image_snapshots(
     db: AsyncSession,
     *,
     project_id: str,
+    asset_id: str | None = None,
 ) -> tuple[dict[str, list[dict[str, object]]], list[dict[str, object]], dict[str, object] | None]:
-    placements = (
-        await db.execute(
-            select(MemoirBookImagePlacement)
-            .join(MemoirImageAsset, MemoirBookImagePlacement.image_asset_id == MemoirImageAsset.id)
-            .where(
-                MemoirBookImagePlacement.project_id == project_id,
-                MemoirBookImagePlacement.enabled == True,  # noqa: E712
-                MemoirImageAsset.status == MemoirImageAssetStatus.READY.value,
-            )
-            .options(selectinload(MemoirBookImagePlacement.image_asset))
-            .order_by(
-                MemoirBookImagePlacement.sort_order,
-                MemoirBookImagePlacement.created_at,
-                MemoirBookImagePlacement.id,
-            )
+    query = (select(MemoirBookImagePlacement)
+        .join(MemoirImageAsset, MemoirBookImagePlacement.image_asset_id == MemoirImageAsset.id)
+        .where(
+            MemoirBookImagePlacement.project_id == project_id,
+            MemoirBookImagePlacement.enabled.is_(True),
+            MemoirImageAsset.status == MemoirImageAssetStatus.READY.value,
         )
-    ).scalars().all()
+        .options(selectinload(MemoirBookImagePlacement.image_asset))
+        .order_by(MemoirBookImagePlacement.sort_order, MemoirBookImagePlacement.created_at, MemoirBookImagePlacement.id))
+    if asset_id is not None:
+        # Keep the same winning cover if several enabled placements exist.
+        query = query.where((MemoirBookImagePlacement.image_asset_id == asset_id)
+                            | (MemoirBookImagePlacement.placement_type == "cover"))
+    placements = (await db.scalars(query)).all()
     source_locations = await _source_material_locations(
         db,
         project_id=project_id,

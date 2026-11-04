@@ -488,6 +488,21 @@ async def test_friend_preview_and_public_media_have_identical_scope_without_publ
             assert displayed.format == "JPEG"
             assert max(displayed.size) <= 960
         assert (await guest.get(media_url.replace(token, chapter_token))).status_code == 404
+        # The saved reading manuscript may have fewer sections than its assembly snapshot.
+        old_sections = manuscript.chapters[0].sections
+        manuscript.chapters[0].sections = []
+        version.manuscript_json = manuscript.model_dump(mode="json")
+        await test_db.commit()
+        assert (await guest.get(illustration["image_url"])).status_code == 404
+        assert (await guest.get(media_url)).status_code == 200
+        manuscript.chapters[0].sections = old_sections
+        version.manuscript_json = manuscript.model_dump(mode="json")
+        await test_db.commit()
+        replacement = MemoirBookImagePlacement(project_id=project_id, image_asset_id=inline.id, placement_type="cover", sort_order=99)
+        test_db.add(replacement)
+        await test_db.commit()
+        assert (await guest.get(media_url)).status_code == 404
+        replacement.enabled = False
         placement.enabled = False
         await test_db.commit()
         assert (await guest.get(media_url)).status_code == 404
