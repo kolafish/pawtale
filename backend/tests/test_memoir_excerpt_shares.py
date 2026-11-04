@@ -249,7 +249,7 @@ async def test_excerpt_photo_uses_managed_asset_and_honors_deletion(client, test
 async def test_excerpt_image_reuses_jobs_styles_and_asset_management_with_single_flash_image(client, test_db, tmp_path, monkeypatch, background_note):
     from app.config import get_settings
     from app.services.memoir import material_image_generation, image_assets
-    from app.services.memoir.share_video_backgrounds import VolcArkGeneratedImage, share_video_background_style_options
+    from app.services.memoir.share_video_backgrounds import VolcArkGeneratedImage
     from tests.test_memoir_image_assets import _png_bytes, register_memoir_editing_job_handlers, run_test_editing_job
     project_id, chapter, _, version, _, _, sources = await saved_stories(client, test_db, with_sources=True)
     monkeypatch.setattr(material_image_generation, "DATA_DIR", tmp_path)
@@ -284,7 +284,8 @@ async def test_excerpt_image_reuses_jobs_styles_and_asset_management_with_single
     assert asset["metadata_json"]["generation_estimated_cost"]["amount_rmb"] == 0.12
     assert asset["suggested_source_utterance_ids"] == [sources[0]["utterance_id"]]
     assert not asset["include_in_book"]
-    assert (await client.get("/api/mobile/memoir/image-generation/styles")).json() == share_video_background_style_options()
+    styles = (await client.get("/api/mobile/memoir/image-generation/styles")).json()
+    assert {style["image_unit_price_rmb"] for style in styles} == {"0.18"}
     shared = (await client.post(path, json={"version_id": version.id, "content": payload["content"], "image_asset_id": asset["id"], "title": "院子的往事"})).json()
     assert shared["image_disclosure"] == image_assets.AI_GENERATED_IMAGE_DISCLOSURE
     assert (await client.post(path + "/image-jobs", json=payload)).json()["job_id"] == job["job_id"]

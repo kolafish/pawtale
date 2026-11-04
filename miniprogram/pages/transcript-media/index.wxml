@@ -273,7 +273,7 @@
             loading="{{materialImageCreating || materialImagePolling}}"
             disabled="{{!shareVideoSelectedText || materialImageCreating || materialImagePolling || shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing || shareVideoPhotoBusy}}"
           >
-            {{materialImageCreating || materialImagePolling ? "生成中" : "生成图片"}}
+            {{materialImageCreating || materialImagePolling ? "生成中" : "生成图片"}}<text wx:if="{{!materialImageCreating && !materialImagePolling && shareVideoContext.image_unit_price_rmb}}"> · {{shareVideoContext.image_unit_price_rmb}} 元/张</text>
           </button>
           <view wx:if="{{shareVideoSelectedText && !shareVideoSelectedCanGenerate}}" class="share-video-error" aria-live="polite">
             <text>{{shareVideoStatusText}}，请调整所选句子后再生成视频。</text>

@@ -17,7 +17,7 @@ export interface MemoirShareVideoStyleOption {
 }
 
 export const MEMOIR_SHARE_VIDEO_STYLES: MemoirShareVideoStyleOption[] = [
-  { value: "uploaded", label: "自己配图", description: "使用自己上传的照片或插图，配上讲述原声和字幕。" },
+  { value: "uploaded", label: "自己配图", description: "用已有照片或插图，免费做视频。" },
   { value: "illustrated", label: "AI配图", description: "AI 根据讲述内容生成插图，配上讲述原声和字幕。" },
 ];
 
@@ -137,6 +137,7 @@ export interface MemoirTranscriptShareVideoContext {
   photo_min_ms?: number;
   photo_max_count?: number;
   default_video_style: MemoirShareVideoStyle;
+  image_unit_price_rmb?: string | null;
   video_styles: MemoirShareVideoStyleOption[];
   ai_background_enabled: boolean;
   default_background_source: string;

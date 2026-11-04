@@ -13,7 +13,7 @@ export const INITIAL_EXCERPT_DATA = {
   ...initialTranscriptMaterialImageTaskState(),
   excerptTitle: "", excerptSummary: "", excerptTitleBusy: false, excerptTitleError: "",
   excerptStyle: "text" as "text" | "image", excerptImageSource: "ai" as "ai" | "photo",
-  excerptBackgroundNote: "", excerptIllustrationStyle: "watercolor", excerptStyleOptions: [] as ReturnType<typeof illustrationStyleViews>,
+  excerptImageUnitPrice: "", excerptBackgroundNote: "", excerptIllustrationStyle: "watercolor", excerptStyleOptions: [] as ReturnType<typeof illustrationStyleViews>,
   excerptPhotoIds: [] as string[], excerptAiAssetIds: [] as string[], excerptPhotoBusy: false,
   excerptAllowBookLink: false,
   excerptReadingLink: null as MemoirExcerptShare["reading_link"],
@@ -120,10 +120,11 @@ export const readingExcerptMethods = methods({
     if (this.data.excerptStyle === "image" && !this.data.excerptStyleOptions.length) {
       const generation = this.excerptGeneration;
       try {
-        const options = illustrationStyleViews(await getMemoirIllustrationStyles());
+        const styles = await getMemoirIllustrationStyles();
+        const options = illustrationStyleViews(styles);
         if (generation !== this.excerptGeneration) return;
         const preferred = readShareVideoBackgroundSettings().backgroundStyle;
-        this.setData({ excerptStyleOptions: options,
+        this.setData({ excerptStyleOptions: options, excerptImageUnitPrice: styles[0]?.image_unit_price_rmb || "",
           excerptIllustrationStyle: options.some((item) => item.value === preferred) ? preferred : "watercolor" });
       } catch (error) {
         if (generation === this.excerptGeneration) this.setData({ error: "插图风格加载失败，请重新选择带图片。" });
