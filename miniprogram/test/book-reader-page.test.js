@@ -276,14 +276,8 @@ test("book reader previews and highlights one current chapter", async () => {
   assert.equal(context.data.bookContent, "");
 
   context.prepareReaderHighlight(context.readerText);
-  const activeText = Array.from(context.readerText);
   const currentTextStart = context.readerText.indexOf("主动伸手");
-  page.onBookTTSProgressPatch.call(context, {
-    ttsSpokenText: activeText.slice(0, currentTextStart).join(""),
-    ttsCurrentText: activeText[currentTextStart],
-    ttsRemainingText: activeText.slice(currentTextStart + 1).join(""),
-    ttsProgressPercent: 20,
-  });
+  page.onBookTTSOffset.call(context, currentTextStart);
 
   assert.equal(context.data.readerHighlightSectionId, "section-2");
   assert.equal(context.data.readerHighlightParagraphIndex, 0);
@@ -847,9 +841,7 @@ for (const scope of ["book", "chapter", "story"]) test(`shared ${scope} narratio
       "resuming places the sentence below the measured sticky player, including larger text layouts");
     context.onPageScroll({ scrollTop: 800 });
     const secondSentence = Array.from(content).length - Array.from("外婆在门口等我。").length;
-    const chars = Array.from(content);
-    context.onBookTTSProgressPatch({ ttsSpokenText: chars.slice(0, secondSentence).join(""), ttsCurrentText: "外",
-      ttsRemainingText: chars.slice(secondSentence + 1).join(""), ttsProgressPercent: 90 });
+    context.onBookTTSOffset(secondSentence);
     assert.equal(scrolls.length, scrollCount + 1, "later sentences leave manual scrolling alone");
     assert.equal(context.data.bookTTSSpokenText + context.data.bookTTSCurrentText + context.data.bookTTSRemainingText, "");
     audio.currentTime = 10;
@@ -873,11 +865,11 @@ for (const interrupted of ["stopped", "new sentence", "player removed"]) test(`p
   const content = "第一句。第二句。";
   context.flatPages = [content];
   context.prepareReaderHighlight(content);
-  context.onBookTTSProgressPatch({ ttsSpokenText: "", ttsCurrentText: "第", ttsRemainingText: content.slice(1), ttsProgressPercent: 0 });
+  context.onBookTTSOffset(0);
   assert.equal(pending.length, 1);
   if (interrupted === "stopped") context.stopPlayback();
   if (interrupted === "new sentence") {
-    context.onBookTTSProgressPatch({ ttsSpokenText: "第一句。", ttsCurrentText: "第", ttsRemainingText: "二句。", ttsProgressPercent: 50 });
+    context.onBookTTSOffset(4);
   }
   pending[0]();
   assert.deepEqual(scrolls, [], "an obsolete layout result must not move the page");
@@ -895,8 +887,7 @@ test("full-book narration follows the existing chapter pagination without stoppi
   context.data.playingTarget = "book";
   const token = context.playToken;
   const offset = source.indexOf(chapters[1].sections[0].content);
-  context.onBookTTSProgressPatch({ ttsSpokenText: source.slice(0, offset), ttsCurrentText: source[offset],
-    ttsRemainingText: source.slice(offset + 1), ttsProgressPercent: 50 });
+  context.onBookTTSOffset(offset);
   assert.equal(context.data.readerChapterIndex, 1);
   assert.equal(context.data.bookPreviewChapters[0].title, chapters[1].title);
   assert.equal(context.data.readerHighlightCurrent, chapters[1].sections[0].content);
