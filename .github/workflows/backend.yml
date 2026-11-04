@@ -26,13 +26,13 @@ jobs:
       postgres:
         image: paradedb/paradedb:0.26.2
         env:
-          POSTGRES_DB: pawtale_test
+          POSTGRES_DB: postgres
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U postgres -d pawtale_test"
+          --health-cmd "pg_isready -U postgres -d postgres"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
@@ -45,6 +45,10 @@ jobs:
         working-directory: backend
     steps:
       - uses: actions/checkout@v4
+      # The image preloads PostGIS demo schemas into template1 and POSTGRES_DB.
+      # Exercise Alembic against an empty database, including extension installation.
+      - name: Create dedicated Pawtale test database
+        run: docker exec "${{ job.services.postgres.id }}" createdb -U postgres -T template0 pawtale_test
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
