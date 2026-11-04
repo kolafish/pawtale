@@ -139,13 +139,11 @@ def render_excerpt_share_card(*, book_title: str, chapter_title: str, content: s
     return output.getvalue()
 
 
-def render_book_share_card(*, chapter_count: int, char_count: int,
+def render_book_share_card(*, title: str, chapter_count: int, char_count: int,
                            image_content: bytes | None = None, picture_label: str = "") -> bytes:
-    # WeChat already puts the app name and book title immediately above this image.
     detail = f"{char_count:,} 字"
     if chapter_count:
         detail = f"{chapter_count} 章 · {detail}"
-    action = "翻开这本书"
     picture, paper = _excerpt_picture(image_content)
     if picture is None:
         with Image.open(_ASSETS / "book_covers" / "moonlit_courtyard_cover.jpg") as art:
@@ -165,11 +163,11 @@ def render_book_share_card(*, chapter_count: int, char_count: int,
                   size=30, minimum=26)
     if picture is None or picture.height > picture.width:
         ImageDraw.Draw(image).line((506, 247, 582, 247), fill="#986544", width=5)
-        _text(image, action, (502, 267, 966, 421), size=86, align="left", bold=True, color="#412e21")
+        _text(image, title, (502, 259, 966, 428), size=76, minimum=40, align="left", bold=True, color="#412e21")
         _text(image, detail, (506, 423, 966, 512), size=48, align="left", color="#57422f")
     else:
         ImageDraw.Draw(image).line((48, 646, 952, 646), fill="#cdbda9", width=2)
-        _text(image, action, (48, 666, 476, 780), size=66, align="left", bold=True)
+        _text(image, title, (48, 656, 494, 790), size=66, minimum=40, align="left", bold=True)
         _text(image, detail, (500, 666, 958, 780), size=44)
     output = BytesIO()
     image.save(output, "JPEG", quality=88, optimize=True)

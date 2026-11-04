@@ -1916,7 +1916,7 @@ test("chapter sharing creates a chapter-only reader link and revokes the same ch
   assert.equal(context.onShareAppMessage().path, "/pages/home/index?from=share_home");
   await context.prepareReadingShare();
   assert.equal(context.data.bookShareFeedbackVisible, true);
-  assert.deepEqual(context.onShareAppMessage(), { title: "第一次离家", path: "/pages/book-reader/index?shareToken=c1.chapter-token", imageUrl: "https://pawtale-api.spaceflows.cn/api/mobile/memoir/book-shares/c1.chapter-token/card.jpg?design=3" });
+  assert.deepEqual(context.onShareAppMessage(), { title: "第一次离家", path: "/pages/book-reader/index?shareToken=c1.chapter-token", imageUrl: "https://pawtale-api.spaceflows.cn/api/mobile/memoir/book-shares/c1.chapter-token/card.jpg?design=4" });
   await context.revokeBookShare();
   assert.equal(context.onShareAppMessage().path, "/pages/home/index?from=share_home");
   assert.deepEqual(calls, [["status", "project-1", "chapter-1", undefined], ["ensure", "project-1", "chapter-1", undefined], ["revoke", "project-1", "chapter-1", undefined]]);
