@@ -473,6 +473,9 @@ async def test_friend_preview_and_public_media_have_identical_scope_without_publ
         assert illustration["image_asset_id"] == inline.id
         assert illustration["storage_path"] == illustration["source_quote"] == ""
         assert (await guest.get(illustration["image_url"])).status_code == 200
+        card_url = f"/api/mobile/memoir/book-shares/{token}/card.jpg"
+        cover_card = await guest.get(card_url)
+        assert cover_card.status_code == 200
         assert public_book["profile"] == book["profile"]
         manuscript.back_matter.afterword.enabled = False
         version.manuscript_json = manuscript.model_dump(mode="json")
@@ -506,6 +509,8 @@ async def test_friend_preview_and_public_media_have_identical_scope_without_publ
         placement.enabled = False
         await test_db.commit()
         assert (await guest.get(media_url)).status_code == 404
+        text_card = await guest.get(card_url)
+        assert text_card.status_code == 200 and text_card.content != cover_card.content
         placement.enabled = True
         await test_db.commit()
         await client.delete(path)

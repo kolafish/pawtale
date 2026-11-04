@@ -147,7 +147,7 @@ export function readingShareImageUrl(token: string, excerpt?: Pick<ReadingShareE
   const version = excerpt?.versionId || versionId;
   const revision = version ? `&version_id=${encodeURIComponent(version)}` : "";
   const selection = excerpt ? `&excerpt_start=${excerpt.start}&excerpt_length=${excerpt.length}` : "";
-  return `${base}/api/mobile/memoir/book-shares/${encodeURIComponent(token)}/card.jpg?design=1${revision}${selection}`;
+  return `${base}/api/mobile/memoir/book-shares/${encodeURIComponent(token)}/card.jpg?design=2${revision}${selection}`;
 }
 
 export function excerptShareMessage(token: string, title: string): WechatMiniprogram.ShareAppMessagePayload {
