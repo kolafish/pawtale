@@ -676,6 +676,10 @@ test("shared reading restores its chapter and scroll position, then resets obsol
   first.onHide();
   const reopened = pageContext(page);
   await reopened.onLoad({ shareToken: "family" });
+  assert.equal(reopened.data.readerChapterIndex, 0);
+  assert.equal(reopened.data.resumeAvailable, true);
+  reopened.onHide();
+  reopened.continueSharedReading();
   assert.equal(reopened.data.readerChapterIndex, 1);
   assert.equal(reopened.readingScrollTop, 456);
   assert.equal(reopened.readingProgress.audioIndex, 3);
@@ -683,6 +687,7 @@ test("shared reading restores its chapter and scroll position, then resets obsol
   output.latest_version.id = "updated-version";
   const updated = pageContext(page);
   await updated.onLoad({ shareToken: "family" });
+  updated.continueSharedReading();
   assert.equal(updated.data.readerChapterIndex, 1);
   assert.equal(updated.readingScrollTop, 0);
   assert.equal(updated.readingProgress.audioHash, "");
