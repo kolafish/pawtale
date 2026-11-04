@@ -41,7 +41,6 @@ export function createVoiceSessionRuntime() {
     progressNoticeWatcher: new StoryProgressWatcher(),
     disposed: false,
     pendingExit: null as VoiceSessionExit | null,
-    requestedExit: null as VoiceSessionExit | null,
   };
 }
 

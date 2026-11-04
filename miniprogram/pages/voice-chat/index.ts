@@ -1,5 +1,5 @@
 import { definePage } from "../../services/page-definition";
-import { queryParam, queryChoice, type PageQuery } from "../../services/page-input";
+import { pageUrl, queryParam, queryChoice, type PageQuery } from "../../services/page-input";
 import { redirectToTranscripts, returnToStory } from "../../services/navigation";
 import type { VoiceSessionEntry, VoiceSessionExitEvent } from "../../components/voice-session/events";
 
@@ -19,6 +19,8 @@ definePage<{ entry: VoiceSessionEntry | null }>()({
   async exitSession({ detail }: VoiceSessionExitEvent) {
     if (detail.destination === "story") {
       returnToStory(detail.projectId, detail.narrationSaved);
+    } else if (detail.destination === "material") {
+      wx.redirectTo({ url: pageUrl("/pages/transcript-detail/index", { id: detail.utteranceId }) });
     } else if (detail.destination === "transcripts") {
       redirectToTranscripts();
     } else {

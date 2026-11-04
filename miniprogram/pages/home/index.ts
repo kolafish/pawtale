@@ -1138,6 +1138,10 @@ definePage<HomeData>()({
       return;
     }
     setHomeData(this, { voiceEntry: null }, () => this.measureNarration());
+    if (detail.destination === "material") {
+      wx.navigateTo({ url: pageUrl("/pages/transcript-detail/index", { id: detail.utteranceId }) });
+      return;
+    }
     if (detail.destination === "transcripts") {
       navigateToTranscripts();
       return;

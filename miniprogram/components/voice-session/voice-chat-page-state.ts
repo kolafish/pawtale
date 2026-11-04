@@ -235,7 +235,7 @@ export function initialVoiceChatData(): VoiceChatData {
     canReconnect: false,
     canFinishAfterDisconnect: false,
     recorderSettingsRequired: false,
-    finishButtonText: "结束访谈",
+    finishButtonText: "结束",
     storyGrowthNoticeState: "hidden",
     storyGrowthNoticeTitle: "",
     storyGrowthNoticeDetail: "",
@@ -686,7 +686,7 @@ export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatDat
   return {
     narrationMode,
     voiceChatPageClass: pageClass.filter(Boolean).join(" "),
-    finishButtonText: state.finishingSession ? "保存中" : (isBookCompletion ? "保存离开" : "结束访谈"),
+    finishButtonText: state.finishingSession ? "保存中" : (isBookCompletion ? "保存离开" : "结束"),
     topModeLabel: NARRATION_MODES[narrationMode].label,
     topSubtitle: isBookCompletion
       ? "一次只补一个重点"
