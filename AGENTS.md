@@ -33,6 +33,7 @@ GitHub Actions 不作为合并门槛。用户已明确选择不为 Actions 充�
 
 ## Testing Strategy
 
+- 后端 PR 使用本机全量验证，GitHub Actions 只在后端相关改动推送到 `main` 后运行。优化 CI 时以所有 GitHub runner 累计占用的分钟数为准，保留完整测试覆盖。
 - 本机检查范围以 `.github/workflows/backend.yml` 和 `frontend.yml` 的触发路径与实际任务为准。只运行本次改动会触发的任务：后端运行 `scripts/test-backend.sh`（Ruff + 全部后端测试）；`frontend/` 运行 `npm --prefix frontend ci` 和 `bash scripts/test-frontend.sh`；`miniprogram/` 或 `xiaoyu-miniprogram/` 分别执行 `npm ci`、`npm run typecheck`、`npm test`。仅文档且不触发 CI 时做 diff/内容核对。workflow、测试脚本变化按其影响范围扩大验证。
 - 后端 CI 在本机隔离的 Linux Python / ParadeDB 环境运行，可复用 `pawtale-local-backend-tests` skill。不得在共享 ECS 或生产库运行会迁移、清库的 CI；ECS 只做部署、只读诊断和部署后 smoke。
 - 实现过程中从能证明本次改动的最小测试开始：单个回归用例、受影响测试文件或相关模块检查。提交前的完整后端或小程序验证按上述 CI 范围执行；CI 以外的更广验证仅在共享基础设施、schema/迁移、依赖或配置、跨模块契约、发布边界风险需要，或用户明确要求时运行。

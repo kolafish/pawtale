@@ -220,7 +220,7 @@ async def test_video_thumbnail_uses_real_frames_and_keeps_cached_images_private(
     path.parent.mkdir(parents=True)
     subprocess.run([
         share_video_jobs.rendering._ffmpeg_executable(), "-y", "-f", "lavfi",
-        "-i", "color=c=green:s=640x360:d=3", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(path),
+        "-i", "color=c=green:s=640x360:r=5:d=3", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", str(path),
     ], check=True, capture_output=True, timeout=10)
     original = path.read_bytes()
     url = f"/api/mobile/memoir/share-video/jobs/{job.id}/download?variant=thumbnail"
@@ -260,9 +260,9 @@ async def test_forwarded_card_cover_is_a_sharp_crop_without_captions(client, tes
     # Green story image with a blue caption band where the subtitles sit, then a red closing card.
     subprocess.run([
         share_video_jobs.rendering._ffmpeg_executable(), "-y", "-f", "lavfi",
-        "-i", "color=c=green:s=720x1280:d=5,drawbox=y=880:w=720:h=400:color=blue:t=fill,"
+        "-i", "color=c=green:s=720x1280:r=5:d=5,drawbox=y=880:w=720:h=400:color=blue:t=fill,"
         "drawbox=w=720:h=1280:color=red:t=fill:enable='gte(t,4.4)'",
-        "-c:v", "libx264", "-pix_fmt", "yuv420p", str(path),
+        "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", str(path),
     ], check=True, capture_output=True, timeout=10)
 
     # Already-shared clips may have a cached image without any cover text.

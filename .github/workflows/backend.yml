@@ -1,11 +1,6 @@
 name: Backend
 
 on:
-  pull_request:
-    paths:
-      - "backend/**"
-      - "scripts/test-backend.sh"
-      - ".github/workflows/backend.yml"
   push:
     branches:
       - main
@@ -13,10 +8,6 @@ on:
       - "backend/**"
       - "scripts/test-backend.sh"
       - ".github/workflows/backend.yml"
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: true
 
 jobs:
   test:
@@ -47,8 +38,11 @@ jobs:
       - uses: actions/checkout@v4
       # The image preloads PostGIS demo schemas into template1 and POSTGRES_DB.
       # Exercise Alembic against an empty database, including extension installation.
-      - name: Create dedicated Pawtale test database
-        run: docker exec "${{ job.services.postgres.id }}" createdb -U postgres -T template0 pawtale_test
+      - name: Create dedicated databases for both pytest workers
+        run: |
+          for worker in gw0 gw1; do
+            docker exec "${{ job.services.postgres.id }}" createdb -U postgres -T template0 "test_${worker}_pawtale_test"
+          done
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -60,4 +54,4 @@ jobs:
       - run: python -m pip install -r requirements-dev.txt
       - run: ruff check app embedding_service tests scripts
       - name: Full backend test suite
-        run: python -m pytest -q tests
+        run: python -m pytest -q -n 2 --dist worksteal --max-worker-restart=0 tests

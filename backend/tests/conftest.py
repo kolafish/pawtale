@@ -14,6 +14,26 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 POSTGRES_DATABASE_URL = os.getenv("TEST_POSTGRES_DATABASE_URL", "").strip()
+
+
+def _assert_dedicated_postgres_test_database() -> None:
+    if not POSTGRES_DATABASE_URL:
+        raise RuntimeError("TEST_POSTGRES_DATABASE_URL is required for database/API tests")
+    database_name = (make_url(POSTGRES_DATABASE_URL).database or "").lower()
+    if not (database_name.startswith("test_") or database_name.endswith("_test")):
+        raise RuntimeError(
+            "TEST_POSTGRES_DATABASE_URL must name a dedicated test database "
+            "starting with test_ or ending with _test"
+        )
+
+
+# Workers must never migrate or clear each other's rows. Select the database
+# before importing app.main, which creates the application engine on import.
+if POSTGRES_DATABASE_URL and (worker := os.getenv("PYTEST_XDIST_WORKER")):
+    _assert_dedicated_postgres_test_database()
+    url = make_url(POSTGRES_DATABASE_URL)
+    POSTGRES_DATABASE_URL = url.set(database=f"test_{worker}_{url.database}").render_as_string(hide_password=False)
+    os.environ["TEST_POSTGRES_DATABASE_URL"] = POSTGRES_DATABASE_URL
 if POSTGRES_DATABASE_URL:
     os.environ["DATABASE_URL"] = POSTGRES_DATABASE_URL
 os.environ["APP_ENV"] = "test"
@@ -53,17 +73,6 @@ def pytest_collection_modifyitems(config, items):
             selected.append(item)
     config.hook.pytest_deselected(items=deselected)
     items[:] = selected
-
-
-def _assert_dedicated_postgres_test_database() -> None:
-    if not POSTGRES_DATABASE_URL:
-        raise RuntimeError("TEST_POSTGRES_DATABASE_URL is required for database/API tests")
-    database_name = (make_url(POSTGRES_DATABASE_URL).database or "").lower()
-    if not (database_name.startswith("test_") or database_name.endswith("_test")):
-        raise RuntimeError(
-            "TEST_POSTGRES_DATABASE_URL must name a dedicated test database "
-            "starting with test_ or ending with _test"
-        )
 
 
 def _postgres_alembic_config() -> Config:
