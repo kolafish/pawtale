@@ -612,8 +612,8 @@ definePage<BookReaderData>()({
 
   saveReadingProgress() {
     if (!this.readingProgressKey || this.data.error || this.data.loading) return;
-    // Opening the cover and leaving it should preserve the previous bookmark.
-    if (this.data.resumeAvailable && !this.readingScrollTop && !this.data.readerChapterIndex) return;
+    // Scrolling the cover does not replace a bookmark waiting to be resumed.
+    if (this.data.resumeAvailable) return;
     const prior = this.readingProgress;
     const value: SharedReadingProgress = {
       versionId: this.readerAudioVersionId, chapterId: this.bookChapters[this.data.readerChapterIndex]?.chapterId || "",
