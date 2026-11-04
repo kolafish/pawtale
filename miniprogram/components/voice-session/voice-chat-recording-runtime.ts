@@ -74,7 +74,7 @@ export interface VoiceChatRecordingRuntimeMethods {
   tryStartAutoListenAfterTTS(): Promise<boolean>;
   cancelPendingNoAnswerPrompt(clearLoading?: boolean): void;
   handleNoAnswerAutoStop(): Promise<void>;
-  finishSession(): Promise<void>;
+  finishSession(destination?: "material"): Promise<void>;
   handleStatus(status: VoiceChatConnectionStatus): void;
   handleCaptureStats(stats: MemoirCaptureStats): void;
   handleGatewayEvent(event: VoiceGatewayServerEvent): void;
@@ -394,7 +394,7 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
     }
   },
 
-  async finishSession() {
+  async finishSession(destination?: "material") {
     if (this.data.finishingSession) {
       return;
     }
@@ -425,7 +425,16 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
       trackAuditAction("voice_chat.finish", {}, { voiceSessionId: this.data.voiceSessionId });
       applyVoiceChatDataPatch(this, finishSessionSavedPatch());
       applyVoiceChatDataPatch(this, { persistenceStateText: "已保存" });
-      this.exitSession(this.runtime().requestedExit || (this.data.sessionGoal === "book_completion"
+      if (destination === "material" && this.data.sessionGoal !== "book_completion") {
+        const material = [...saved.utterances].reverse().find(item =>
+          item.audio_file_id || item.transcript_edited.trim() || item.transcript_raw.trim());
+        if (material) {
+          this.exitSession({ destination: "material", utteranceId: material.id });
+          return;
+        }
+        wx.showToast({ title: "本次没有讲述记录", icon: "none" });
+      }
+      this.exitSession(this.data.sessionGoal === "book_completion"
         ? { destination: "completion" }
         : {
           destination: "story",
@@ -434,7 +443,7 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
             utterance.transcript_edited.trim() || utterance.transcript_raw.trim(),
           )),
           finished: true,
-        }));
+        });
     } catch (error) {
       const saved = await this.refreshVoiceSessionSnapshot();
       if (saved?.session.status === "failed") {
