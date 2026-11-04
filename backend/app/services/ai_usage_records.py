@@ -13,6 +13,7 @@ from app.database import async_session_maker
 from app.models.ai_credits import AICreditAccount, AICreditTransaction
 from app.models.ai_usage import AIUsageRecord
 from app.services.ai_costs import AICostEstimate, NormalizedAIUsage
+from app.services.ai_credits import USAGE_DEBIT, ai_usage_charge, ensure_ai_credit_account
 
 
 logger = logging.getLogger(__name__)
@@ -66,7 +67,7 @@ async def record_ai_usage(
     context: AIUsageContext | None = None,
     billable: bool | None = None,
 ) -> None:
-    """Record one upstream call and debit its cost.
+    """Record the upstream estimate and debit the user at the current rate.
 
     Only successful calls are debited by default. Callers pass ``billable=True``
     for a failed or interrupted call whose usage is still exactly known (for
@@ -93,6 +94,10 @@ async def record_ai_usage(
         )
     try:
         usage = usage or NormalizedAIUsage()
+        charge = (
+            ai_usage_charge(cost.amount_rmb)
+            if resolved_context.user_id and billable and cost.amount_rmb is not None else Decimal("0")
+        )
         record = AIUsageRecord(
             operation_id=resolved_context.operation_id,
             operation=resolved_context.operation,
@@ -113,20 +118,14 @@ async def record_ai_usage(
             estimated_cost_rmb=(
                 Decimal(str(cost.amount_rmb)) if cost.amount_rmb is not None else None
             ),
+            charged_rmb=charge,
             cost_status=cost.status,
             error_type=error_type,
         )
         async with async_session_maker() as db:
             db.add(record)
             await db.flush()
-            if (
-                resolved_context.user_id
-                and billable
-                and cost.amount_rmb is not None
-                and Decimal(str(cost.amount_rmb)) > 0
-            ):
-                from app.services.ai_credits import ensure_ai_credit_account, USAGE_DEBIT
-
+            if resolved_context.user_id and charge > 0:
                 await ensure_ai_credit_account(db, resolved_context.user_id, commit=False)
                 account = await db.scalar(
                     select(AICreditAccount)
@@ -140,7 +139,7 @@ async def record_ai_usage(
                         account_id=account.id,
                         user_id=resolved_context.user_id,
                         transaction_type=USAGE_DEBIT,
-                        amount_rmb=-Decimal(str(cost.amount_rmb)),
+                        amount_rmb=-charge,
                         usage_record_id=record.id,
                         operation_id=resolved_context.operation_id,
                     )

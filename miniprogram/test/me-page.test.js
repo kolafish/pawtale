@@ -147,6 +147,7 @@ test("me shows AI credit usage percentage to one decimal place", async () => {
     billingExports: {
       getAICreditSummary: async () => ({
         total_credit_rmb: 10,
+        billing_multiplier: "1.5",
         used_rmb: 0.03,
         remaining_rmb: 9.97,
       }),
@@ -156,6 +157,7 @@ test("me shows AI credit usage percentage to one decimal place", async () => {
 
   await page.loadAICreditSummary.call(context);
 
+  assert.equal(context.data.creditMultiplier, "1.5");
   assert.equal(context.data.creditProgressPercent, "0.3");
   assert.equal(context.data.creditUsedText, "0.03");
   assert.equal(context.data.creditRemainingText, "9.97");

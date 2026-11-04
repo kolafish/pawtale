@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class AICreditSummaryResponse(BaseModel):
     currency: str = "CNY"
+    billing_multiplier: Decimal
     free_credit_rmb: Decimal
     manual_grant_rmb: Decimal
     recharged_credit_rmb: Decimal
@@ -18,6 +19,7 @@ class AICreditSummaryResponse(BaseModel):
     model_config = ConfigDict(json_schema_extra={
         "example": {
             "currency": "CNY",
+            "billing_multiplier": "1.5",
             "free_credit_rmb": 5,
             "manual_grant_rmb": 0,
             "recharged_credit_rmb": 0,

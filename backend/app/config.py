@@ -1,3 +1,6 @@
+from decimal import Decimal
+
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
 from pathlib import Path
@@ -75,6 +78,8 @@ class Settings(BaseSettings):
     memoir_share_video_ai_background_enabled: bool = False
     memoir_share_video_scene_planner_enabled: bool = True
     memoir_share_video_scene_planner_model: str = "doubao-seed-2-0-pro-260215"
+
+    ai_billing_multiplier: Decimal = Field(default=Decimal("1.5"), ge=1, allow_inf_nan=False)
 
     # Default AI Model
     default_ai_model: str = DEFAULT_AI_TEXT_MODEL

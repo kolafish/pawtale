@@ -175,10 +175,10 @@ async def test_material_image_generation_creates_unplaced_toolbox_asset(
     assert ready_asset["metadata_json"]["generation_estimated_cost"]["amount_rmb"] == 0.22
 
     summary = (await client.get("/api/billing/ai-credit-summary")).json()
-    assert Decimal(summary["used_rmb"]) == Decimal("0.22")
+    assert Decimal(summary["used_rmb"]) == Decimal("0.33")
     [day] = (await client.get("/api/billing/ai-usage")).json()["days"]
     assert [(item["purpose"], Decimal(item["cost_rmb"])) for item in day["purposes"]] == [
-        ("图片生成", Decimal("0.22")),
+        ("图片生成", Decimal("0.33")),
     ]
 
     file_response = await client.get(ready_asset["file_url"])
