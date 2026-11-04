@@ -165,6 +165,7 @@ beforeEach(() => {
         if ('back_cover_quote' in update) manuscript.render_settings.back_cover_quote = update.back_cover_quote;
         if ('cover_style' in update) manuscript.render_settings.cover_style = update.cover_style;
         currentOutput = { ...currentOutput!, title: update.title ?? currentOutput!.title, latest_version: latest };
+        return response(config, { ...structuredClone(currentOutput), is_stale: false, stale_chapter_titles: [] });
       }
       return response(config, structuredClone(currentOutput));
     }
@@ -319,6 +320,8 @@ test('keeps unsaved prose and its original version after a background refresh an
 });
 
 test('saves only changed book fields, including deliberately cleared text', async () => {
+  currentOutput!.is_stale = true;
+  currentOutput!.stale_chapter_titles = ['童年'];
   const page = workspace(<MemoirBookWorkspace project={project} onOpenChapters={vi.fn()} onOpenDrafts={vi.fn()} />);
   fireEvent.change(await page.findByRole('textbox', { name: /^书名$/ }), { target: { value: '校订后的书名' } });
   fireEvent.change(page.getByRole('textbox', { name: '副标题' }), { target: { value: '' } });
@@ -326,6 +329,7 @@ test('saves only changed book fields, including deliberately cleared text', asyn
   fireEvent.change(page.getByRole('textbox', { name: '前言' }), { target: { value: '写给家人的前言。' } });
   fireEvent.click(page.getByRole('button', { name: '保存信息' }));
   await page.findByText('已保存');
+  expect(page.getByText('章节稿已更新：童年')).toBeTruthy();
   const write = transport.mock.calls.map(([config]) => config).find(config => config.method === 'patch');
   expect(JSON.parse(write.data)).toEqual({ expected_version_id: 'output-version', title: '校订后的书名', subtitle: '', prepared_by: '', preface: '写给家人的前言。' });
   expect((page.getByRole('textbox', { name: '整理者' }) as HTMLInputElement).value).toBe('');
