@@ -40,10 +40,7 @@ export function MemoirBookWorkspace({ project, onOpenChapters, onOpenDrafts, onU
     mutationFn: () => memoirBookApi.updateOutput(project.id, { ...patch, expected_version_id: edit!.versionId }),
     onError: () => setMobilePanel('settings'),
     onSuccess: updated => {
-      // A successful write confirms the metadata. Only GET checks chapter freshness.
-      const queryKey = ['memoirBookOutput', project.id];
-      queryClient.setQueryData(queryKey, { ...updated, is_stale: output!.is_stale, stale_chapter_titles: output!.stale_chapter_titles });
-      void queryClient.invalidateQueries({ queryKey });
+      queryClient.setQueryData(['memoirBookOutput', project.id], updated);
       void queryClient.invalidateQueries({ queryKey: ['memoirBookPlan', project.id] });
       void queryClient.invalidateQueries({ queryKey: ['projects'] });
       const store = useAppStore.getState();
