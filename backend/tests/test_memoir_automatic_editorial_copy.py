@@ -1191,3 +1191,19 @@ def test_body_excerpt_typo_keeps_its_section_and_does_not_rewrite_authored_copy(
     assert [quote.text for quote in retained_chapter_quotes(stored, snapshot)] == [revised, "家人的题词"]
     snapshot["sections"][0]["section_id"] = "different"
     assert [quote.text for quote in retained_chapter_quotes(stored, snapshot)] == ["家人的题词"]
+
+@pytest.mark.parametrize("automatic", [False, True])
+async def test_generate_subtitle_for_saved_book(client, test_db, monkeypatch, automatic):
+    project, _, _ = await _output(client, test_db)
+
+    async def generate(**kwargs):
+        assert "cover_subtitle" in kwargs["targets"]
+        return replace(_copy(kwargs["snapshot"]), cover_subtitle="老街的桂花香")
+
+    monkeypatch.setattr(book_outputs, "generate_manuscript_editorial_copy", generate)
+    result = await book_outputs.regenerate_book_output_editorial_copy(test_db, user_id=project.user_id,
+        project_id=project.id, req=MemoirBookOutputEditorialCopyRegenerateRequest(targets=[] if automatic else ["subtitle"]),
+        automatic=automatic)
+    manuscript = result.latest_version.manuscript
+    assert manuscript.profile.subtitle == "老街的桂花香"
+    assert all("老街的桂花香" in item.content for item in manuscript.front_matter if item.kind in ("cover", "title_page"))

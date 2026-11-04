@@ -219,7 +219,7 @@ def fallback_title_suggestions(base_title: str, count: int) -> list[str]:
     return result
 
 
-def _fallback_cover_subtitle(chapter_titles: list[str]) -> str:
+def fallback_cover_subtitle(chapter_titles: list[str]) -> str:
     topics = [_short_topic(title) for title in chapter_titles if _short_topic(title)]
     if len(topics) >= 2:
         return f"关于{'、'.join(topics[:3])}的记忆"
@@ -436,7 +436,7 @@ def manuscript_from_snapshot(
     chapter_titles = [item.title for item in toc]
     subtitle = metadata.get("subtitle")
     if subtitle is None:
-        subtitle = editorial_copy.cover_subtitle if editorial_copy and editorial_copy.cover_subtitle else _fallback_cover_subtitle(chapter_titles)
+        subtitle = editorial_copy.cover_subtitle if editorial_copy and editorial_copy.cover_subtitle else fallback_cover_subtitle(chapter_titles)
     narrator_name = metadata.get("narrator_name", "")
     book_title = title.strip() or "家庭回忆录"
     subtitle = safe_str(subtitle)
@@ -587,24 +587,29 @@ def updated_manuscript_payload(
     if cover_style_value:
         manuscript.render_settings.cover_style = cover_style(cover_style_value)
     manuscript.render_settings.back_cover_quote = metadata["back_cover_quote"]
+    _sync_cover_text(manuscript)
     for section in manuscript.front_matter:
-        if section.kind == "cover":
-            section.title = title
-            section.content = f"{title}\n{metadata['subtitle']}"
-        elif section.kind == "title_page":
-            section.content = _title_page_content(
-                subtitle=metadata["subtitle"],
-                narrator_name=metadata["narrator_name"],
-                prepared_by=metadata["prepared_by"],
-            )
-        elif section.kind == "preface":
+        if section.kind == "preface":
             section.content = metadata["preface"]
     manuscript.back_matter.afterword.content = metadata["afterword"]
     return manuscript.model_dump(mode="json")
 
 
+def _sync_cover_text(manuscript: MemoirBookManuscript) -> None:
+    for section in manuscript.front_matter:
+        if section.kind == "cover":
+            section.title = manuscript.profile.title
+            section.content = f"{manuscript.profile.title}\n{manuscript.profile.subtitle}"
+        elif section.kind == "title_page":
+            section.content = _title_page_content(
+                subtitle=manuscript.profile.subtitle,
+                narrator_name=manuscript.profile.narrator_name,
+                prepared_by=manuscript.profile.prepared_by,
+            )
+
+
 def target_set(targets: list[str]) -> set[str]:
-    requested = {target for target in targets if target in BOOK_EDITORIAL_COPY_TARGETS}
+    requested = {target for target in targets if target in BOOK_EDITORIAL_COPY_TARGETS or target == "subtitle"}
     return requested or set(BOOK_EDITORIAL_COPY_TARGETS)
 
 
@@ -627,6 +632,9 @@ def apply_editorial_copy(
     targets: set[str],
     chapter_ids: set[str],
 ) -> None:
+    if "subtitle" in targets and editorial_copy.cover_subtitle:
+        manuscript.profile.subtitle = editorial_copy.cover_subtitle
+        _sync_cover_text(manuscript)
     if "preface" in targets and editorial_copy.preface:
         _set_preface(manuscript, editorial_copy.preface)
     if "afterword" in targets and editorial_copy.afterword:

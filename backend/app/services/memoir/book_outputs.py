@@ -56,6 +56,7 @@ from app.services.memoir.book_output_manuscript import (
     apply_editorial_copy as _apply_editorial_copy,
     chapter_id_set as _chapter_id_set,
     cover_style as _cover_style,
+    fallback_cover_subtitle,
     fallback_title_suggestions as _fallback_title_suggestions,
     formal_book_title as _formal_book_title,
     editable_manuscript as _editable_manuscript,
@@ -535,7 +536,7 @@ async def update_book_output(
         cover_style = _template_cover_style(req.manuscript_template) or _stored_cover_style(latest)
     metadata_patch = _request_book_metadata_patch(req)
     stored_metadata = stored_manuscript_metadata(latest.manuscript_json)
-    claim_editorial_copy_fields(output, targets=[key for key in ("preface", "afterword", "back_cover_quote")
+    claim_editorial_copy_fields(output, targets=[key for key in ("subtitle", "preface", "afterword", "back_cover_quote")
         if key in metadata_patch and metadata_patch[key] != stored_metadata[key]], chapter_fields={})
     content = _compose_book_content_from_snapshot(title=title, snapshot=snapshot)
     manuscript_json = _updated_manuscript_payload(
@@ -625,6 +626,10 @@ async def regenerate_book_output_editorial_copy(
                 and not refresh_book_level_copy(baseline.chapter_snapshot_json, snapshot, preserved=current_copy)):
             targets -= {"preface", "afterword", "back_cover_quote"}
         state.input_signature = signature
+        if not req.targets and (not state.processed_version or state.status == "failed") and manuscript.profile.subtitle == fallback_cover_subtitle(
+            [chapter.title for chapter in manuscript.chapters]
+        ):
+            targets.add("subtitle")
         targets -= set(state.manual_targets)
         chapter_ids = {
             chapter_id for chapter_id, signature in signatures.items()
@@ -648,7 +653,7 @@ async def regenerate_book_output_editorial_copy(
         title=output_title,
         snapshot=snapshot,
         ai_model=ai_model,
-        targets=sorted(targets),
+        targets=sorted("cover_subtitle" if target == "subtitle" else target for target in targets),
         chapter_ids=sorted(chapter_ids),
         feedback=req.feedback,
         polish_level=project_transcript_polish_level(project),
@@ -657,6 +662,7 @@ async def regenerate_book_output_editorial_copy(
         generated = {item.chapter_id: item for item in editorial_copy.chapter_intros}
         eligible_chapters = {chapter.chapter_id for chapter in manuscript.chapters
             if not chapter_ids or chapter.chapter_id in chapter_ids}
+        has_subtitle = "subtitle" in targets and bool(editorial_copy.cover_subtitle)
         has_book_copy = any(target in targets and (getattr(editorial_copy, target)
                 or (target == "back_cover_quote" and editorial_copy.valid_empty_back_cover_quote))
             for target in ("preface", "afterword", "back_cover_quote"))
@@ -667,7 +673,9 @@ async def regenerate_book_output_editorial_copy(
                 for target, attribute, field in (("chapter_intros", "intro", "intro"), ("pull_quotes", "pull_quote", "pull_quotes"))
             ) for item in generated.values()
         )
-        if not has_book_copy and not has_chapter_copy:
+        # A subtitle alone cannot complete a request for the preface and afterword as well.
+        missing_prose = any(key in targets and not getattr(editorial_copy, key) for key in ("preface", "afterword"))
+        if not (has_book_copy or has_chapter_copy or (has_subtitle and not missing_prose)):
             editorial_copy = None
     if not editorial_copy and not automatic:
         raise HTTPException(status_code=503, detail="成书文案生成服务暂时不可用")
@@ -682,6 +690,11 @@ async def regenerate_book_output_editorial_copy(
                     chapter.model_dump(), chapter_snapshot, polish_level=project_transcript_polish_level(project),
                 )
         _apply_editorial_copy(manuscript, editorial_copy, targets=targets, chapter_ids=chapter_ids)
+        if not automatic:
+            if "preface" in targets and editorial_copy.preface:
+                next(s for s in manuscript.front_matter if s.kind == "preface").enabled = True
+            if "afterword" in targets and editorial_copy.afterword:
+                manuscript.back_matter.afterword.enabled = True
     # Legacy cleanup may supply defaults for blank fields. Preserve authored
     # choices unless this request explicitly regenerates that same field.
     protected_targets = set(ownership.manual_targets) - targets
@@ -738,8 +751,8 @@ async def regenerate_book_output_editorial_copy(
         raise HTTPException(status_code=409, detail="生成期间文案选择已更新，请重试")
     if not automatic and editorial_copy:
         claim_editorial_copy_fields(output,
-            targets=[key for key in ("preface", "afterword", "back_cover_quote") if key in targets
-                and (getattr(editorial_copy, key) or (key == "back_cover_quote" and editorial_copy.valid_empty_back_cover_quote))],
+            targets=[key for key in ("subtitle", "preface", "afterword", "back_cover_quote") if key in targets
+                and (getattr(editorial_copy, "cover_subtitle" if key == "subtitle" else key) or (key == "back_cover_quote" and editorial_copy.valid_empty_back_cover_quote))],
             chapter_fields={chapter.chapter_id: [field for target, field in (("chapter_intros", "intro"), ("pull_quotes", "pull_quotes"))
                 if target in targets and (field == "pull_quotes" or generated[chapter.chapter_id].intro)]
                 for chapter in manuscript.chapters if chapter.chapter_id in generated

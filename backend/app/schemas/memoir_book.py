@@ -453,6 +453,7 @@ class MemoirBookOutputUpdateRequest(BaseModel):
 
 
 MemoirBookEditorialCopyTarget = Literal[
+    "subtitle",
     "preface",
     "afterword",
     "back_cover_quote",
@@ -460,7 +461,7 @@ MemoirBookEditorialCopyTarget = Literal[
     "pull_quotes",
 ]
 
-MemoirBookLevelEditorialCopyTarget = Literal["preface", "afterword", "back_cover_quote"]
+MemoirBookLevelEditorialCopyTarget = Literal["subtitle", "preface", "afterword", "back_cover_quote"]
 
 
 class MemoirBookOutputEditorialCopyGenerationJobResponse(BaseModel):

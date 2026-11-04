@@ -436,7 +436,7 @@ export function getMemoirBookEditorialCopyJobs(
   projectId: string,
 ): Promise<MemoirBookEditorialCopyJobsResponse> {
   return memoirRequest<MemoirBookEditorialCopyJobsResponse>(
-    memoirProjectPath(projectId, "/book-output/editorial-copy/regenerate/jobs"),
+    memoirProjectPath(projectId, "/book-output/editorial-copy/regenerate/jobs?include_subtitle=true"),
   );
 }
 

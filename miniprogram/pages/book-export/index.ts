@@ -101,8 +101,9 @@ interface BookEditorialCopyJobView {
 
 type BookEditorialCopyJobs = Record<MemoirBookEditorialCopyJobTarget, BookEditorialCopyJobView>;
 
-const EDITORIAL_TARGETS: readonly MemoirBookEditorialCopyJobTarget[] = ["preface", "afterword", "back_cover_quote"];
+const EDITORIAL_TARGETS: readonly MemoirBookEditorialCopyJobTarget[] = ["subtitle", "preface", "afterword", "back_cover_quote"];
 const EDITORIAL_TARGET_LABELS: Record<MemoirBookEditorialCopyJobTarget, string> = {
+  subtitle: "副标题",
   preface: "前言",
   afterword: "后记",
   back_cover_quote: "封底摘要",
@@ -112,7 +113,7 @@ function emptyEditorialCopyJobs(): BookEditorialCopyJobs {
   const empty = (): BookEditorialCopyJobView => ({
     jobId: "", status: "idle", statusText: "", errorText: "", active: false, visible: false, updatedAt: "",
   });
-  return { preface: empty(), afterword: empty(), back_cover_quote: empty() };
+  return { subtitle: empty(), preface: empty(), afterword: empty(), back_cover_quote: empty() };
 }
 
 function editorialCopyJobView(job: MemoirBookEditorialCopyJob): BookEditorialCopyJobView {
@@ -420,7 +421,7 @@ definePage<BookExportData>()({
     this.bookEditorialCopyPageVisible = true;
     this.setData(accessibilityPagePatch(PAGE_CLASS));
     setPageNavigationTitle(this.data.activeSection ? SECTION_TITLES[this.data.activeSection] : (this.data.pagePurpose === "settings" ? "书的设置" : "导出文件"));
-    if (this.data.activeSection === "editorial" && this.bookOutput) {
+    if (["title", "editorial"].includes(this.data.activeSection) && this.bookOutput) {
       void this.refreshBookEditorialCopyProgress();
     }
   },
@@ -457,7 +458,7 @@ definePage<BookExportData>()({
       ]);
       this.bookDraftProgress = progress;
       this.applyBookExportData(plan, output);
-      if (this.data.activeSection === "editorial") {
+      if (["title", "editorial"].includes(this.data.activeSection)) {
         await this.refreshBookEditorialCopyProgress();
       }
     } catch (error) {
@@ -511,6 +512,11 @@ definePage<BookExportData>()({
         if (submissionVersion !== this.bookEditorialCopySubmissionVersion) {
           return;
         }
+        // The author may have started editing while the job/refresh was in flight.
+        if (this.data.bookTitleSaving || bookDesignHasChanges(this.data)) {
+          this.scheduleBookEditorialCopyPoll();
+          return;
+        }
         this.applyBookExportData(this.bookPlan, output, true);
       }
       this.applyBookEditorialCopyJobs(jobs);
@@ -541,7 +547,7 @@ definePage<BookExportData>()({
     if (
       this.bookEditorialCopyPoller.pending
       || !this.bookEditorialCopyPageVisible
-      || this.data.activeSection !== "editorial"
+      || !["title", "editorial"].includes(this.data.activeSection)
       || (
         !this.data.bookEditorialCopyStatusError
         && !EDITORIAL_TARGETS.some((target) => this.data.bookEditorialCopyJobs[target].active)
@@ -665,7 +671,7 @@ definePage<BookExportData>()({
       if (routeAuthError(error, "login")) {
         return;
       }
-      this.setData({ error: error instanceof Error ? error.message : "小余起名失败" });
+      this.setData({ error: error instanceof Error ? error.message : "书名生成失败" });
     } finally {
       this.setData({ bookTitleSuggesting: false });
     }
@@ -1205,7 +1211,7 @@ definePage<BookExportData>()({
       wx.pageScrollTo({ scrollTop: 0, duration: 0 });
     });
     setPageNavigationTitle(SECTION_TITLES[section]);
-    if (section === "editorial") {
+    if (section === "title" || section === "editorial") {
       void this.refreshBookEditorialCopyProgress();
     }
   },

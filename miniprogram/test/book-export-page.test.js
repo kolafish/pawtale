@@ -1342,3 +1342,34 @@ for (const field of ['title', 'preface']) {
     assert.deepEqual(updates, [field === 'title' ? { title: '新的书名' } : { preface: '' }]);
   });
 }
+
+test("subtitle generation in title settings refreshes saved copy without discarding typing", async () => {
+  const saved = sampleBookOutput();
+  saved.latest_version.manuscript.profile.subtitle = "老街的桂花香";
+  const requests = [];
+  global.wx = { showToast() {} };
+  const { page } = loadBookExportPage({
+    enqueueMemoirBookOutputEditorialCopyGeneration: async (_project, payload) => {
+      requests.push(payload.targets);
+      return sampleAutomationEvent({ editing_job_id: "subtitle-job" });
+    },
+    getMemoirBookEditorialCopyJobs: async () => ({ items: [sampleEditorialJob("subtitle", "succeeded")] }),
+    getMemoirBookOutput: async () => saved,
+  });
+  const context = pageContext(page, { projectId: "project/1", activeSection: "title" });
+  page.applyBookExportData.call(context, samplePlan(), sampleBookOutput());
+  try {
+    await context.regenerateBookEditorialCopy({ currentTarget: { dataset: { target: "subtitle" } } });
+    assert.deepEqual(requests, [["subtitle"]]);
+    assert.equal(context.bookEditorialCopyPoller.pending, true);
+    context.setData({ bookTitleInput: "正在编辑的书名", bookTitleChanged: true });
+    await context.refreshBookEditorialCopyProgress();
+    assert.equal(context.data.bookTitleInput, "正在编辑的书名");
+    context.setData({ bookTitleChanged: false });
+    await context.refreshBookEditorialCopyProgress();
+    assert.equal(context.data.bookSubtitleInput, "老街的桂花香");
+    assert.equal(context.data.bookEditorialCopyJobs.subtitle.active, false);
+  } finally {
+    context.clearBookEditorialCopyPoll();
+  }
+});
