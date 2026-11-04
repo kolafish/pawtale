@@ -31,13 +31,12 @@ export interface BookTTSHost {
   audioPlayback: AudioPlaybackController;
   ttsProgress: VoiceAssistantTTSProgressRuntime;
   playToken: number;
-  bookTTSChunk?: MemoirBookAudioSegment | null;
+  bookTTSChunk?: (MemoirBookAudioSegment & { text: string; bookCharacters: string[] }) | null;
   bookTTSPollTimer?: PollingTimer;
   bookTTSWake?: () => void;
   onBookAudioPosition?(index: number, seconds: number): void;
-  // A host with its own text projection receives progress and reset/completion
-  // events instead of duplicating the text in the standalone player view.
-  onBookTTSProgressPatch?(patch: VoiceAssistantTTSProgressPatch): void;
+  // Unicode code-point offset in the audio source, or null to clear the highlight.
+  onBookTTSOffset?(offset: number | null): void;
 }
 
 export function applyBookTTSProgressPatch(
@@ -45,28 +44,24 @@ export function applyBookTTSProgressPatch(
   patch: VoiceAssistantTTSProgressPatch,
 ): void {
   const chunk = host.bookTTSChunk;
-  if (chunk) {
-    const chars = Array.from(host.data.bookTTSActiveText);
-    const spoken = chunk.text_start + Array.from(patch.ttsSpokenText).length;
-    const current = Array.from(patch.ttsCurrentText).length;
-    patch = {
-      ...patch,
-      ttsSpokenText: chars.slice(0, spoken).join(""),
-      ttsRemainingText: chars.slice(spoken + current).join(""),
-      ttsProgressPercent: Math.min(100, Math.floor(spoken / Math.max(1, chars.length) * 100)),
-    };
+  const spoken = chunk || patch.ttsCurrentText
+    ? (chunk?.text_start ?? 0) + Array.from(patch.ttsSpokenText).length : 0;
+  const progress = chunk
+    ? Math.min(100, Math.floor(spoken / Math.max(1, chunk.bookCharacters.length) * 100))
+    : patch.ttsProgressPercent;
+  if (host.onBookTTSOffset) {
+    host.setData({ bookTTSProgressPercent: progress });
+    host.onBookTTSOffset(patch.ttsCurrentText ? spoken : null);
+    return;
   }
   host.setData({
-    // Readers project the position into their existing body. Only standalone
-    // players need another copy of the spoken/current/remaining text in setData.
-    ...(!host.onBookTTSProgressPatch ? {
-      bookTTSSpokenText: patch.ttsSpokenText,
-      bookTTSCurrentText: patch.ttsCurrentText,
-      bookTTSRemainingText: patch.ttsRemainingText,
-    } : {}),
-    bookTTSProgressPercent: patch.ttsProgressPercent,
+    bookTTSSpokenText: chunk ? chunk.bookCharacters.slice(0, spoken).join("") : patch.ttsSpokenText,
+    bookTTSCurrentText: patch.ttsCurrentText,
+    bookTTSRemainingText: chunk
+      ? chunk.bookCharacters.slice(spoken + Array.from(patch.ttsCurrentText).length).join("")
+      : patch.ttsRemainingText,
+    bookTTSProgressPercent: progress,
   });
-  host.onBookTTSProgressPatch?.(patch);
 }
 
 export type AudioPlanHost = Pick<BookTTSHost,
@@ -149,6 +144,7 @@ export async function playBookAudioPlan(
   resume: { index: number; seconds: number } = { index: 0, seconds: 0 },
 ): Promise<void> {
   if (token !== host.playToken) return;
+  const bookCharacters = Array.from(activeText);
   host.setData({
     bookTTSActiveTarget: target, bookTTSActiveText: activeText,
     bookTTSDurationSeconds: 0, bookTTSAlignment: [],
@@ -158,7 +154,7 @@ export async function playBookAudioPlan(
       host.setData({ playingTarget: "", ttsBusyTarget: target,
         bookTTSPreparingText: `正在准备第 ${index + 1} 段，共 ${count} 段…` });
     }, async (segment) => {
-      host.bookTTSChunk = segment;
+      host.bookTTSChunk = { ...segment, bookCharacters, text: bookCharacters.slice(segment.text_start, segment.text_end).join("") };
       host.setData({ ttsBusyTarget: "", playingTarget: target, bookTTSPreparingText: "" });
       await playBookAudioFile(host, segment.audio_file_id!, token, 0, positiveFiniteSeconds(segment.duration_seconds), segment.index === resume.index ? resume.seconds : 0);
     }, resume.index);
@@ -246,7 +242,7 @@ export function updateBookTTSProgress(
   }
   const chunk = host.bookTTSChunk;
   host.ttsProgress.updateAudioFileProgress(
-    chunk ? Array.from(activeText).slice(chunk.text_start, chunk.text_end).join("") : activeText,
+    chunk?.text ?? activeText,
     currentTimeSeconds,
     chunk ? positiveFiniteSeconds(chunk.duration_seconds) : positiveFiniteSeconds(durationSeconds) || host.data.bookTTSDurationSeconds,
     0,
@@ -273,9 +269,7 @@ export function startBookTTSProgressTimer(
     isActive: () => token === host.playToken && host.audioPlayback.currentAudio() === audio,
     currentTimeOffsetSeconds: elapsedBeforeSeconds,
     durationSeconds: () => host.data.bookTTSDurationSeconds || elapsedBeforeSeconds + durationSeconds,
-    text: () => host.bookTTSChunk
-      ? Array.from(host.data.bookTTSActiveText).slice(host.bookTTSChunk.text_start, host.bookTTSChunk.text_end).join("")
-      : host.data.bookTTSActiveText,
+    text: () => host.bookTTSChunk?.text ?? host.data.bookTTSActiveText,
     alignment: () => host.bookTTSChunk?.alignment || host.data.bookTTSAlignment,
     fallbackDurationSeconds: host.data.bookTTSDurationSeconds || elapsedBeforeSeconds + durationSeconds,
     applyPatch: (patch) => applyBookTTSProgressPatch(host, patch),
@@ -300,9 +294,7 @@ export function resetBookTTSProgress(host: BookTTSHost): void {
     bookTTSAlignment: [],
     bookTTSPreparingText: "",
   });
-  host.onBookTTSProgressPatch?.({
-    ttsSpokenText: "", ttsCurrentText: "", ttsRemainingText: "", ttsProgressPercent: 0,
-  });
+  host.onBookTTSOffset?.(null);
 }
 
 export function playbackTimeForProgress(
