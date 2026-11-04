@@ -41,7 +41,7 @@ async def test_book_card_is_public_jpeg_with_real_metadata_and_revocable(client,
         assert response.headers["cache-control"] == "no-store"
         with Image.open(BytesIO(response.content)) as image:
             assert image.size == (1000, 800)
-        assert captured[-1] == dict(title="外婆回忆录", image_content=None, picture_label="",
+        assert captured[-1] == dict(title="外婆回忆录", tagline="", image_content=None, picture_label="",
                                    chapter_count=1, char_count=len(version.content))
         chapter = version.chapter_snapshot_json[0]
         chapter_token = (await client.put(path, params={"chapter_id": chapter["chapter_id"]})).json()["token"]
@@ -53,6 +53,27 @@ async def test_book_card_is_public_jpeg_with_real_metadata_and_revocable(client,
         await client.delete(path)
         assert (await guest.get(url)).status_code == 404
         assert len(captured) == 2
+
+
+@pytest.mark.parametrize(("subtitle", "quote", "expected"), [
+    ("一个基层干部的口述人生", "记得家乡的河。", "一个基层干部的口述人生"),
+    ("  ", "记得家乡的河。", "记得家乡的河。"),
+    ("", "", ""),
+])
+async def test_book_card_uses_saved_subtitle_then_back_cover_quote(client, test_db, monkeypatch, subtitle, quote, expected):
+    from app.services.memoir.book_output_manuscript import manuscript_from_snapshot
+
+    project_id = await ensure_mobile_memoir_project(client)
+    output, version = await _shareable_output(test_db, project_id, "已经入书的正文。")
+    manuscript = manuscript_from_snapshot(title=output.title, content=version.content, snapshot=version.chapter_snapshot_json)
+    manuscript.profile.subtitle = subtitle
+    manuscript.render_settings.back_cover_quote = quote
+    version.manuscript_json = manuscript.model_dump(mode="json")
+    await test_db.commit()
+    token = (await client.put(f"/api/mobile/memoir/projects/{project_id}/book-output/share")).json()["token"]
+    monkeypatch.setattr(reading_share_card, "render_book_share_card", lambda **kw: kw["tagline"].encode())
+    response = await client.get(f"/api/mobile/memoir/book-shares/{token}/card.jpg")
+    assert response.status_code == 200 and response.text == expected
 
 
 async def test_story_card_only_excerpts_its_confirmed_scoped_version(client, test_db, monkeypatch):

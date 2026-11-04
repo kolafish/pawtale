@@ -38,7 +38,7 @@ from app.services.memoir.access import load_memoir_project
 from app.services.memoir.book_output_versions import book_output_version_title, load_latest_book_output_version
 from app.services.memoir.book_outputs import _output_version_response
 from app.services.memoir.book_output_snapshots import chapter_snapshot, normalized_section_snapshots
-from app.services.memoir.book_output_manuscript import manuscript_from_snapshot, safe_str
+from app.services.memoir.book_output_manuscript import manuscript_from_snapshot, safe_str, stored_manuscript_metadata
 from app.services.memoir.image_assets import manuscript_image_snapshots, image_asset_file_path
 from app.services.memoir.book_source_links import chapter_source_change_states_by_chapter
 from app.services.memoir.share_likes import ShareLikeTarget, book_target, chapter_target, section_target, like_summary
@@ -636,7 +636,9 @@ async def shared_card(db: AsyncSession, token: str, *, version_id: str = "", exc
                 except HTTPException as exc:
                     if exc.status_code not in (404, 422):
                         raise
-        return await asyncio.to_thread(render_book_share_card, title=result.title,
+        metadata = stored_manuscript_metadata(version.manuscript_json)
+        tagline = metadata.get("subtitle") or metadata.get("back_cover_quote", "")
+        return await asyncio.to_thread(render_book_share_card, title=result.title, tagline=tagline,
             chapter_count=len(manuscript.chapters) if manuscript else 0, char_count=len(reading.content.strip()),
             image_content=image, picture_label=cover.caption if cover else "")
 
