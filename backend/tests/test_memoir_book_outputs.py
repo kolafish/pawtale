@@ -1677,13 +1677,21 @@ async def test_mobile_memoir_book_output_detects_stale_chapter_versions(client, 
     )
     await test_db.commit()
 
-    stale = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output")
+    path = f"/api/mobile/memoir/projects/{project_id}/book-output"
+    stale = await client.get(path)
 
     assert stale.status_code == 200
     stale_data = stale.json()
     assert stale_data["latest_version"]["version"] == 1
     assert stale_data["is_stale"] is True
     assert stale_data["stale_chapter_titles"] == ["外婆家的童年"]
+
+    saved = await client.patch(path, json={"preface": "写给家人的话"})
+    assert saved.status_code == 200
+    assert saved.json()["is_stale"] is True
+    assert saved.json()["stale_chapter_titles"] == stale_data["stale_chapter_titles"]
+    assert saved.json()["latest_version"]["id"] != stale_data["latest_version"]["id"]
+
 
 async def test_mobile_memoir_book_output_detects_reordered_chapters(client, test_db):
     project_id = await ensure_mobile_memoir_project(client)

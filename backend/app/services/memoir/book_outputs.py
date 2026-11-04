@@ -565,10 +565,7 @@ async def update_book_output(
     if version_changed or title_changed:
         invalidate_book_output(output)
     await db.commit()
-    refreshed = await _load_output(db, project_id=project_id)
-    if not refreshed:
-        raise HTTPException(status_code=500, detail="全书稿保存失败")
-    return _output_response(refreshed)
+    return await get_book_output(db, user_id=user_id, project_id=project_id, allow_admin=allow_admin)
 
 
 async def regenerate_book_output_editorial_copy(
