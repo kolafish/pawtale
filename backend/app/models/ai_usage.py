@@ -42,6 +42,8 @@ class AIUsageRecord(Base):
     image_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     audio_duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     estimated_cost_rmb: Mapped[Decimal | None] = mapped_column(Numeric(14, 6), nullable=True)
+    # NULL marks historical records, whose corrected estimate is the user-facing charge.
+    charged_rmb: Mapped[Decimal | None] = mapped_column(Numeric(14, 6), nullable=True)
     cost_status: Mapped[str] = mapped_column(String(20), nullable=False)
     error_type: Mapped[str | None] = mapped_column(String(120), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow_naive, index=True)

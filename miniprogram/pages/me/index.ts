@@ -76,6 +76,7 @@ interface MeData {
   voiceStatsLoading: boolean;
   creditLoading: boolean;
   creditAvailable: boolean;
+  creditMultiplier: string;
   creditError: string;
   creditTotalText: string;
   creditUsedText: string;
@@ -188,6 +189,7 @@ function creditUsageDayGroup(day: AIUsageDay): CreditUsageDayGroup {
 function creditData(summary: AICreditSummary): Pick<
   MeData,
   | "creditAvailable"
+  | "creditMultiplier"
   | "creditError"
   | "creditTotalText"
   | "creditUsedText"
@@ -199,6 +201,7 @@ function creditData(summary: AICreditSummary): Pick<
   const used = creditAmount(summary.used_rmb);
   return {
     creditAvailable: true,
+    creditMultiplier: summary.billing_multiplier,
     creditError: "",
     creditTotalText: formatCreditAmount(total),
     creditUsedText: formatCreditAmount(used),
@@ -275,6 +278,7 @@ function loggedOutData(): Partial<MeData> {
     voiceStatsLoading: false,
     creditLoading: false,
     creditAvailable: false,
+    creditMultiplier: "",
     creditError: "",
     creditTotalText: "0.00",
     creditUsedText: "0.00",
@@ -322,6 +326,7 @@ definePage<MeData>()({
     voiceStatsLoading: false,
     creditLoading: false,
     creditAvailable: false,
+    creditMultiplier: "",
     creditError: "",
     creditTotalText: "0.00",
     creditUsedText: "0.00",

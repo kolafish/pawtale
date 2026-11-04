@@ -3,6 +3,7 @@ import { memoirRequest } from "./memoir-api-client";
 
 export interface AICreditSummary {
   currency: string;
+  billing_multiplier: string;
   free_credit_rmb: number;
   manual_grant_rmb: number;
   recharged_credit_rmb: number;

@@ -41,6 +41,10 @@ def _money(value: Decimal | int | float | None) -> Decimal:
     return Decimal(str(value or 0)).quantize(MONEY_QUANTUM, rounding=ROUND_HALF_UP)
 
 
+def ai_usage_charge(provider_cost_rmb: Decimal | float) -> Decimal:
+    return _money(Decimal(str(provider_cost_rmb)) * get_settings().ai_billing_multiplier)
+
+
 async def ensure_ai_credit_account(
     db: AsyncSession,
     user_id: str,
@@ -93,6 +97,7 @@ async def retain_ai_credit_account(db: AsyncSession, user_id: str) -> None:
     legacy = (await db.scalars(select(AIUsageRecord).where(
         AIUsageRecord.user_id == user_id,
         AIUsageRecord.status == "succeeded",
+        AIUsageRecord.charged_rmb.is_(None),
         AIUsageRecord.estimated_cost_rmb > 0,
         ~exists(select(AICreditTransaction.id).where(
             AICreditTransaction.usage_record_id == AIUsageRecord.id,
@@ -192,6 +197,7 @@ async def credit_account_summary(db: AsyncSession, account: AICreditAccount) -> 
             AIUsageRecord.user_id == account.user_id,
             account.user_id is not None,
             AIUsageRecord.status == "succeeded",
+            AIUsageRecord.charged_rmb.is_(None),
             AIUsageRecord.estimated_cost_rmb.is_not(None),
             ~exists(
                 select(AICreditTransaction.id).where(
@@ -214,6 +220,7 @@ async def credit_account_summary(db: AsyncSession, account: AICreditAccount) -> 
     total_credit_rmb = _money(free_credit_rmb + manual_grant_rmb + recharged_credit_rmb)
     used = _money(_money(debit_used_rmb) + _money(legacy_used_rmb))
     return AICreditSummaryResponse(
+        billing_multiplier=get_settings().ai_billing_multiplier,
         free_credit_rmb=free_credit_rmb,
         manual_grant_rmb=manual_grant_rmb,
         recharged_credit_rmb=recharged_credit_rmb,

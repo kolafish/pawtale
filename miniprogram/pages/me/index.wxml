@@ -124,7 +124,7 @@
         <view class="credit-progress-track" aria-label="AI 额度已使用 {{creditProgressPercent}}%">
           <view class="credit-progress-fill" style="width: {{creditProgressPercent}}%;"></view>
         </view>
-        <text class="credit-hint">额度按 AI 厂商公开价格原价扣除，不加价。</text>
+        <text class="credit-hint">AI 使用费按模型预估成本的 {{creditMultiplier}} 倍扣除。</text>
         <button
           wx:if="{{creditPacks.length}}"
           class="credit-recharge-button support-action ui-pressable {{creditPurchasing ? 'is-disabled' : ''}}"
@@ -284,7 +284,7 @@
       <view class="credit-sheet-head">
         <view class="credit-sheet-heading">
           <text class="credit-sheet-title">充值 AI 额度</text>
-          <text class="credit-sheet-subtitle">付多少到账多少，按 AI 厂商原价扣除，不加价</text>
+          <text class="credit-sheet-subtitle">付多少到账多少，使用时按模型预估成本的 {{creditMultiplier}} 倍扣除</text>
         </view>
         <view class="credit-sheet-close ui-pressable" aria-role="button" aria-label="关闭" bindtap="closeCreditPurchase">×</view>
       </view>

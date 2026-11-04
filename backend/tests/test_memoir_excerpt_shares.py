@@ -290,10 +290,10 @@ async def test_excerpt_image_reuses_jobs_styles_and_asset_management_with_single
     assert (await client.post(path + "/image-jobs", json=payload)).json()["job_id"] == job["job_id"]
     assert len(calls) == 1
     summary = (await client.get("/api/billing/ai-credit-summary")).json()
-    assert Decimal(summary["used_rmb"]) == Decimal("0.12")
+    assert Decimal(summary["used_rmb"]) == Decimal("0.18")
     [day] = (await client.get("/api/billing/ai-usage")).json()["days"]
     assert [(item["purpose"], Decimal(item["cost_rmb"])) for item in day["purposes"]] == [
-        ("图片生成", Decimal("0.12")),
+        ("图片生成", Decimal("0.18")),
     ]
 
     changed = await client.post(path + "/image-jobs", json={**payload, "background_note": "我和哥哥，那年我八岁"})

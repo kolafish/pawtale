@@ -7,6 +7,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
 from app.clock import utcnow_naive
+from app.config import get_settings
 from app.main import app
 from app.models.ai_credits import AICreditTransaction
 from app.models.ai_usage import AIUsageRecord
@@ -19,7 +20,7 @@ from app.services.ai_usage_records import AIUsageContext, record_ai_usage
 
 
 @pytest.mark.parametrize(("at", "expected_used", "unpriced"), [
-    (datetime(2026, 10, 7, 2, 0, tzinfo=UTC), Decimal("0.001408"), 0),
+    (datetime(2026, 10, 7, 2, 0, tzinfo=UTC), Decimal("0.002112"), 0),
     (datetime(2027, 1, 4, 2, 0, tzinfo=UTC), Decimal("0"), 1),
 ])
 async def test_deepseek_holiday_or_unknown_calendar_charges_no_peak_price(client, test_db, at, expected_used, unpriced):
@@ -38,7 +39,28 @@ async def test_deepseek_holiday_or_unknown_calendar_charges_no_peak_price(client
     assert record.input_tokens == 1_000
     assert record.cached_input_tokens == 400
     assert record.output_tokens == 200
-    assert record.estimated_cost_rmb == (None if unpriced else expected_used)
+    assert record.estimated_cost_rmb == (None if unpriced else Decimal("0.001408"))
+
+
+async def test_rate_change_only_affects_new_billable_calls(client, test_db, monkeypatch):
+    user_id = (await client.get("/api/auth/me")).json()["id"]
+    context = AIUsageContext(operation_id=str(uuid4()), operation="voice", user_id=user_id)
+    cost = AICostEstimate(1.0, "estimated", "deepseek", "test-model")
+
+    async def record(*, billable=True):
+        await record_ai_usage(provider="deepseek", model="test-model", status="succeeded",
+                              cost=cost, billable=billable, context=context)
+
+    await record()
+    monkeypatch.setattr(get_settings(), "ai_billing_multiplier", Decimal("2"))
+    await record()
+    await record(billable=False)
+    summary = (await client.get("/api/billing/ai-credit-summary")).json()
+    assert Decimal(summary["billing_multiplier"]) == 2
+    assert Decimal(summary["used_rmb"]) == Decimal("3.5")
+    [day] = (await client.get("/api/billing/ai-usage")).json()["days"]
+    assert Decimal(day["cost_rmb"]) == Decimal("3.5")
+    assert day["purposes"][0]["count"] == 2
 
 
 async def test_usage_details_only_show_current_users_successful_charges(client, test_db):
@@ -128,7 +150,7 @@ async def test_usage_refund_and_recharge_correct_balance_and_billing_details(cli
         assert debit.amount_rmb == Decimal("-0.25")
 
 
-async def test_usage_categories_distinguish_interview_audio_and_share_candidates_without_changing_charges(client, test_db):
+async def test_usage_categories_distinguish_interview_audio_and_share_candidates_at_current_rate(client, test_db):
     user_id = (await client.get("/api/auth/me")).json()["id"]
     # The paths and job names come from the October 10 production investigation.
     session_path = "/api/mobile/memoir/voice-sessions/session"
@@ -146,14 +168,14 @@ async def test_usage_categories_distinguish_interview_audio_and_share_candidates
             cost=AICostEstimate(float(amount), "estimated", provider, model),
             context=AIUsageContext(operation_id=str(uuid4()), operation=operation, user_id=user_id),
         )
-    expected_cost = Decimal("1.072594")
+    expected_cost = Decimal("1.608891")
     [day] = (await client.get("/api/billing/ai-usage")).json()["days"]
     assert Decimal(day["cost_rmb"]) == expected_cost
     assert {item["purpose"]: (item["count"], Decimal(item["cost_rmb"])) for item in day["purposes"]} == {
-        "访谈语音回复": (2, Decimal("0.040200")),
-        "语音朗读": (1, Decimal("0.150000")),
-        "分享片段筛选": (1, Decimal("0.001984")),
-        "分享视频生成": (2, Decimal("0.880410")),
+        "访谈语音回复": (2, Decimal("0.060300")),
+        "语音朗读": (1, Decimal("0.225000")),
+        "分享片段筛选": (1, Decimal("0.002976")),
+        "分享视频生成": (2, Decimal("1.320615")),
     }
     summary = (await client.get("/api/billing/ai-credit-summary")).json()
     assert Decimal(summary["used_rmb"]) == expected_cost
@@ -193,7 +215,7 @@ async def test_billable_failure_is_debited_and_listed_but_plain_failure_is_not(c
                           status="failed", cost=cost, audio_duration_seconds=60, context=context)
 
     summary = await get_ai_credit_summary(test_db, user_id=user_id)
-    assert summary.used_rmb == Decimal("0.016667")
+    assert summary.used_rmb == Decimal("0.025001")
     [day] = (await client.get("/api/billing/ai-usage")).json()["days"]
     assert [(item["purpose"], item["count"]) for item in day["purposes"]] == [("语音识别", 1)]
 

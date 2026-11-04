@@ -113,6 +113,8 @@ async def ai_usage_details(
     current_user: User = Depends(get_current_user),
 ) -> AIUsageDetailResponse:
     """Charges grouped by day and purpose, plus credit additions; paginated by day."""
+    # Old records use the original estimate, including historical refund corrections.
+    charge = func.coalesce(AIUsageRecord.charged_rmb, AIUsageRecord.estimated_cost_rmb)
     charged = (
         or_(
             AIUsageRecord.user_id == current_user.id,
@@ -121,7 +123,7 @@ async def ai_usage_details(
                 AICreditTransaction.usage_record_id == AIUsageRecord.id,
             )),
         ),
-        AIUsageRecord.estimated_cost_rmb > 0,
+        charge > 0,
         # Same rule as the balance: debited records, plus successful records
         # from before the ledger existed.
         or_(
@@ -151,16 +153,16 @@ async def ai_usage_details(
     end = datetime.combine(max(days) + timedelta(days=1), time.min) - BEIJING_OFFSET
 
     purposes: dict[date, dict[str, list]] = defaultdict(dict)
-    records = (await db.scalars(
-        select(AIUsageRecord)
+    records = (await db.execute(
+        select(AIUsageRecord, charge)
         .where(*charged, AIUsageRecord.created_at >= start, AIUsageRecord.created_at < end)
         .order_by(AIUsageRecord.created_at.desc())
     )).all()
-    for record in records:
+    for record, amount in records:
         day = (record.created_at + BEIJING_OFFSET).date()
         totals = purposes[day].setdefault(_usage_purpose(record), [0, Decimal("0")])
         totals[0] += 1
-        totals[1] += record.estimated_cost_rmb or Decimal("0")
+        totals[1] += amount
 
     credits: dict[date, list[AICreditEntry]] = defaultdict(list)
     transactions = (await db.scalars(
