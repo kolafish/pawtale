@@ -897,9 +897,10 @@ test("new complete templates preview without saving and apply cover with interio
     assert.equal(option?.label, label);
     assert.equal(option?.previewClass, previewClass);
     assert.equal(option?.coverStyle, template);
-    assert.equal(option?.coverPreviewImage, `/assets/book_covers/${template}.jpg`);
+    const coverUrl = new URL(option.coverPreviewImage);
+    assert.equal(coverUrl.protocol, "https:");
+    assert.equal(coverUrl.pathname, `/api/mobile/memoir/book-covers/${template}.jpg`);
     assert.equal(option?.ornamentThumbnail, `/assets/book_ornaments/${template}.png`);
-    assert.ok(fs.existsSync(path.join(__dirname, `../assets/book_covers/${template}.jpg`)));
     assert.ok(fs.existsSync(path.join(__dirname, `../assets/book_ornaments/${template}.png`)));
     const event = { currentTarget: { dataset: { template } } };
     await page.previewBookLayout.call(context, event);
@@ -915,7 +916,7 @@ test("new complete templates preview without saving and apply cover with interio
     assert.equal(context.data.bookManuscriptTemplateLabel, label);
     assert.equal(context.data.bookLayoutTemplate, template);
     assert.equal(context.data.bookCoverStyle, template);
-    assert.equal(context.data.bookCoverStylePreviewImage, `/assets/book_covers/${template}.jpg`);
+    assert.equal(context.data.bookCoverStylePreviewImage, option.coverPreviewImage);
   }
 });
 

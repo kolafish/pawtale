@@ -55,6 +55,7 @@ import {
   type PageTextInputEvent,
 } from "../../services/page-input";
 import {
+  bookCoverImageUrl,
   bookOutputData,
   trimText,
   type BookOutputData,
@@ -174,7 +175,7 @@ const BOOK_LAYOUT_OPTIONS = [
     description: "银杏纹样与典雅章首页，适合家族故事",
     previewClass: "heritage",
     coverStyle: "heritage_classic",
-    coverPreviewImage: "/assets/book_covers/heritage_classic.jpg",
+    coverPreviewImage: bookCoverImageUrl("heritage_classic"),
     ornamentThumbnail: "/assets/book_ornaments/heritage_classic.png",
   },
   {
@@ -183,7 +184,7 @@ const BOOK_LAYOUT_OPTIONS = [
     description: "信笺、桂花与温暖的阅读节奏",
     previewClass: "journal",
     coverStyle: "warm_journal",
-    coverPreviewImage: "/assets/book_covers/warm_journal.jpg",
+    coverPreviewImage: bookCoverImageUrl("warm_journal"),
     ornamentThumbnail: "/assets/book_ornaments/warm_journal.png",
   },
   {
@@ -192,7 +193,7 @@ const BOOK_LAYOUT_OPTIONS = [
     description: "深青封面与清晰的章节层级",
     previewClass: "modern",
     coverStyle: "modern_minimal",
-    coverPreviewImage: "/assets/book_covers/modern_minimal.jpg",
+    coverPreviewImage: bookCoverImageUrl("modern_minimal"),
     ornamentThumbnail: "/assets/book_ornaments/modern_minimal.png",
   },
 ] satisfies BookLayoutOption[];

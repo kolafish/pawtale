@@ -1,3 +1,4 @@
+import { BACKEND_HTTP_BASE_URL } from "../../config";
 import { DEFAULT_BOOK_DESIGN } from "../../domain/memoir-book";
 import type {
   MemoirBookChapterDraft,
@@ -153,7 +154,6 @@ export interface BookManuscriptChapterView {
 interface BookCoverStyleOptionView {
   value: MemoirBookCoverStyle;
   previewClass: string;
-  previewImage?: string;
 }
 
 const BOOK_COVER_STYLE_OPTIONS: BookCoverStyleOptionView[] = [
@@ -180,17 +180,14 @@ const BOOK_COVER_STYLE_OPTIONS: BookCoverStyleOptionView[] = [
   {
     value: "heritage_classic",
     previewClass: "heritage-classic",
-    previewImage: "/assets/book_covers/heritage_classic.jpg",
   },
   {
     value: "warm_journal",
     previewClass: "warm-journal",
-    previewImage: "/assets/book_covers/warm_journal.jpg",
   },
   {
     value: "modern_minimal",
     previewClass: "modern-minimal",
-    previewImage: "/assets/book_covers/modern_minimal.jpg",
   },
 ];
 
@@ -659,6 +656,11 @@ function bookManuscriptDesignData(manuscript: MemoirBookManuscript | null) {
   };
 }
 
+export function bookCoverImageUrl(style: MemoirBookCoverStyle): string {
+  if (style === "classic_plain" || style === "dark_album" || style === "warm_gray") return "";
+  return `${BACKEND_HTTP_BASE_URL}/api/mobile/memoir/book-covers/${style}.jpg`;
+}
+
 export function selectedBookCoverStyle(
   output: MemoirBookOutput | null,
   selectedVersion: MemoirBookOutputVersion | null = null,
@@ -679,7 +681,7 @@ function bookCoverStyleData(
   return {
     bookCoverStyle: option.value,
     bookCoverStylePreviewClass: option.previewClass,
-    bookCoverStylePreviewImage: option.previewImage || "",
+    bookCoverStylePreviewImage: bookCoverImageUrl(style),
   };
 }
 
