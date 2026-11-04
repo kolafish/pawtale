@@ -100,19 +100,13 @@ def _caption_height(text: str, *, width: int) -> int:
 
 
 @lru_cache(maxsize=64)
-def render_reading_share_card(*, title: str, book_title: str, is_book: bool,
-                              chapter_count: int = 0, char_count: int = 0, excerpt: str = "") -> bytes:
-    with Image.open(_ASSETS / "reading-share" / ("book.jpg" if is_book else "chapter.jpg")) as source:
+def render_chapter_share_card(*, title: str, book_title: str, excerpt: str = "") -> bytes:
+    with Image.open(_ASSETS / "reading-share" / "chapter.jpg") as source:
         image = source.convert("RGB")
-    if is_book:
-        _text(image, title, (325, 165, 690, 350), size=48)
-        footer = f"{chapter_count}章 · {char_count}字"
-    else:
-        _text(image, title, (105, 205, 450, 420), size=42)
-        if excerpt:
-            _text(image, f"“{excerpt}”", (550, 190, 890, 525), size=32, minimum=28)
-        footer = f"选自《{book_title}》"
-    _text(image, footer, (80, 735, 920, 790), size=28)
+    _text(image, title, (105, 205, 450, 420), size=42)
+    if excerpt:
+        _text(image, f"“{excerpt}”", (550, 190, 890, 525), size=32, minimum=28)
+    _text(image, f"选自《{book_title}》", (80, 735, 920, 790), size=28)
     output = BytesIO()
     image.save(output, "JPEG", quality=88, optimize=True)
     return output.getvalue()
@@ -120,26 +114,38 @@ def render_reading_share_card(*, title: str, book_title: str, is_book: bool,
 
 def render_excerpt_share_card(*, book_title: str, chapter_title: str, content: str,
                               summary: str = "", image_content: bytes | None = None, ai_image: bool = False, caption: str = "") -> bytes:
-    picture, paper = _excerpt_picture(image_content)
-    image = Image.new("RGB", (1000, 800), paper)
-    _text(image, "老余口述 · 一个家庭的回忆录", (56, 24, 944, 80), size=32, align="left")
     # Older snapshots have no confirmed summary; retain a bounded original-text teaser.
     compact = " ".join(content.split())
     limit = min(64, max(1, len(compact) - 12)) if len(compact) > 24 else len(compact)
     preview = summary or compact[:limit].rstrip("，。！？；：、,.;!?: ") + ("…" if limit < len(compact) else "")
+    label = "AI 意象插图" if ai_image else " ".join(caption.split())
+    return _render_story_card(headline=preview, footer_title=f"选自《{book_title}》", footer_detail=chapter_title,
+                              image_content=image_content, picture_label=label)
+
+
+def render_book_share_card(*, title: str, chapter_count: int, char_count: int,
+                           image_content: bytes | None = None, picture_label: str = "") -> bytes:
+    return _render_story_card(headline=title, footer_title="阅读全书", footer_detail=f"{chapter_count} 章 · {char_count} 字",
+                              image_content=image_content, picture_label=picture_label, book=True)
+
+
+def _render_story_card(*, headline: str, footer_title: str, footer_detail: str,
+                       image_content: bytes | None, picture_label: str, book: bool = False) -> bytes:
+    picture, paper = _excerpt_picture(image_content)
+    image = Image.new("RGB", (1000, 800), paper)
+    _text(image, "老余口述 · 一个家庭的回忆录", (56, 24, 944, 80), size=32, align="left")
     if picture is not None:
-        label = "AI 意象插图" if ai_image else " ".join(caption.split())
-        caption_height = min(300, _caption_height(label, width=888))
+        caption_height = min(300, _caption_height(picture_label, width=888))
         picture = ImageOps.fit(picture, (1000, max(96, 396 - caption_height)))
         _paste_excerpt_picture(image, picture, (0, 96))
-        if label:
-            _text(image, label, (56, 492 - caption_height, 944, 492), size=22)
-        _text(image, preview, (56, 506, 944, 634), size=40, minimum=40, align="left")
+        if picture_label:
+            _text(image, picture_label, (56, 492 - caption_height, 944, 492), size=22)
+        _text(image, headline, (56, 506, 944, 634), size=54 if book else 40, minimum=40, align="left", bold=book)
     else:
-        _text(image, preview, (64, 154, 936, 592), size=58, minimum=48, align="left")
+        _text(image, headline, (64, 154, 936, 592), size=76 if book else 58, minimum=48, align="left", bold=book)
     ImageDraw.Draw(image).line((56, 642, 944, 642), fill="#d5c5b3", width=2)
-    _text(image, f"选自《{book_title}》", (56, 650, 944, 726), size=48, minimum=48, align="left")
-    _text(image, chapter_title, (56, 736, 944, 790), size=32, minimum=32, align="left")
+    _text(image, footer_title, (56, 650, 944, 726), size=36 if book else 48, minimum=36 if book else 48, align="left")
+    _text(image, footer_detail, (56, 736, 944, 790), size=32, minimum=32, align="left")
     output = BytesIO()
     image.save(output, "JPEG", quality=88, optimize=True)
     return output.getvalue()

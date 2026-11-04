@@ -113,7 +113,7 @@ test("reading share and forwarding use the dedicated public card without an impl
   try {
     const { readingShareMessage, readingShareImageUrl } = require("../services/share.ts");
     const url = readingShareMessage("真实书名", "c1.token").imageUrl;
-    assert.equal(url, "https://example.test/api/mobile/memoir/book-shares/c1.token/card.jpg?design=1");
+    assert.equal(url, "https://example.test/api/mobile/memoir/book-shares/c1.token/card.jpg?design=2");
     const selected = readingShareImageUrl("c1.token", { text: "敏感原文不进URL", start: 5, length: 8, versionId: "version-1" });
     assert.ok(selected.endsWith("&version_id=version-1&excerpt_start=5&excerpt_length=8"));
     assert.ok(!selected.includes("敏感"));

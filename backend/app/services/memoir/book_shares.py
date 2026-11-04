@@ -615,34 +615,46 @@ async def excerpt_share_poster(db: AsyncSession, token: str, *, user_id: str, qu
 
 
 async def shared_card(db: AsyncSession, token: str, *, version_id: str = "", excerpt_start: int = 0, excerpt_length: int = 0) -> bytes:
-    from app.services.memoir.reading_share_card import render_reading_share_card
+    from app.services.memoir.reading_share_card import render_book_share_card, render_chapter_share_card
 
     # Use the same revocation and withdrawn-material checks as the reader, even
     # when rendering an already cached card. Never read private source material.
     resource, version = await readable_share(db, token)
-    result = await _resource_reading_response(db, resource, version, presentation=False)
     is_book = share_scope(resource) == "book"
-    book_title = result.title
-    if not is_book:
-        output = await db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == resource.project_id))
-        saved = await load_latest_book_output_version(db, output_id=output.id) if output else None
-        project = await db.get(Project, resource.project_id)
-        book_title = book_output_version_title(saved, fallback=output.title) if saved else (output.title if output else project.title)
+    result = await _resource_reading_response(db, resource, version, token=token, presentation=is_book)
     reading = result.latest_version
+    if is_book:
+        manuscript = reading.manuscript
+        cover = manuscript.render_settings.cover_image if manuscript else None
+        image = None
+        if cover:
+            asset = await db.get(MemoirImageAsset, cover.image_asset_id)
+            if asset and asset.project_id == resource.project_id and asset.status == "ready":
+                try:
+                    path = await asyncio.to_thread(image_asset_file_path, asset, reading=True)
+                    image = await asyncio.to_thread(path.read_bytes)
+                except HTTPException as exc:
+                    if exc.status_code not in (404, 422):
+                        raise
+        return await asyncio.to_thread(render_book_share_card, title=result.title,
+            chapter_count=len(manuscript.chapters) if manuscript else 0, char_count=len(reading.content.strip()),
+            image_content=image, picture_label=cover.caption if cover else "")
+
+    output = await db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == resource.project_id))
+    saved = await load_latest_book_output_version(db, output_id=output.id) if output else None
+    project = await db.get(Project, resource.project_id)
+    book_title = book_output_version_title(saved, fallback=output.title) if saved else (output.title if output else project.title)
     # Selection offsets refer to this exact scoped reading version. An update
     # must never replace confirmed words with newly added, unconfirmed content.
     excerpt = ""
-    if not is_book and version_id == reading.id and excerpt_length:
+    if version_id == reading.id and excerpt_length:
         model, _ = _share_table(share_scope(resource))
         share = await db.get(model, resource.id, populate_existing=True)
         if (_active(share) and share.card_version_id == version_id
                 and share.card_excerpt_start == excerpt_start and share.card_excerpt_length == excerpt_length
                 and hmac.compare_digest(token, _stable_token(resource.id, share.token_hash, scope=share_scope(resource)))):
             excerpt = reading.content[excerpt_start:excerpt_start + excerpt_length].strip()
-    chapters = reading.manuscript.chapters if reading.manuscript else []
-    return await asyncio.to_thread(render_reading_share_card,
-        title=result.title, book_title=book_title, is_book=is_book,
-        chapter_count=len(chapters), char_count=len(reading.content.strip()), excerpt=excerpt)
+    return await asyncio.to_thread(render_chapter_share_card, title=result.title, book_title=book_title, excerpt=excerpt)
 
 
 async def _resource_reading_response(
