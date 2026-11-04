@@ -108,11 +108,11 @@ async def test_directory_contract_rejects_replacing_an_existing_chapter_with_a_n
         return None
 
     async def summaries(*_args, **_kwargs):
-        return {}, {}, []
+        return {}
 
     ai = DirectoryAI()
     monkeypatch.setattr(structure, 'generate_or_reuse_chapter_digest', cached_digests)
-    monkeypatch.setattr(structure, 'load_structure_summaries', summaries)
+    monkeypatch.setattr(structure, '_chapter_digests', summaries)
     monkeypatch.setattr(structure, 'get_ai_service', lambda _: ai)
     assert await structure.review_story_structure(test_db, user_id=uid, project_id=pid)
     _, after, _ = await _load_tree(test_db, project_id=pid)
@@ -218,7 +218,7 @@ def _provider(monkeypatch, answer, *, during_call=None):
     async def digest(*args, **kwargs):
         return None
     async def summaries(*args, **kwargs):
-        return {}, {}, []
+        return {}
     async def generate(context, **kwargs):
         prompt = structure.build_structure_prompt(context, chapters=kwargs['chapters'], sections=kwargs['sections'],
             review_findings=kwargs['review_findings'])
@@ -227,7 +227,7 @@ def _provider(monkeypatch, answer, *, during_call=None):
             await during_call()
         return answer(prompt) if callable(answer) else answer
     monkeypatch.setattr(structure, 'generate_or_reuse_chapter_digest', digest)
-    monkeypatch.setattr(structure, 'load_structure_summaries', summaries)
+    monkeypatch.setattr(structure, '_chapter_digests', summaries)
     monkeypatch.setattr(structure, 'generate_structure_proposal', generate)
     return calls
 
@@ -341,14 +341,9 @@ async def test_growth_receives_valid_chapter_and_section_summaries(client, test_
         return SimpleNamespace(digest_json={'summary': '小时候跟妈妈去课堂。'}) if section_id == sections[0].id else None
     monkeypatch.setattr(structure, 'get_current_chapter_digest', chapter_digest)
     monkeypatch.setattr(structure, 'get_current_section_digest', section_digest)
-    cs, ss, findings = await structure.load_structure_summaries(test_db, project_id=pid, chapters=chapters, sections=sections)
+    cs, ss = await structure.load_structure_summaries(test_db, project_id=pid, chapters=chapters, sections=sections)
     assert cs == {chapters[0].id: '妈妈在学校教书。'}
     assert ss == {sections[0].id: '小时候跟妈妈去课堂。'}
-    assert findings[0].section_ids == [sections[0].id]
-    directory = structure.build_structure_prompt(
-        await structure.structure_context(test_db, plan, chapters, sections), chapters=chapters, sections=sections,
-        review_findings=findings)
-    assert '标题应覆盖课堂经历。' in directory
     prompt, _, _ = build_story_growth_prompt(utterances=[], chapters=chapters, sections=sections,
         interviewer_lines={}, chapter_summaries=cs, section_summaries=ss)
     assert '妈妈在学校教书。' in prompt and '小时候跟妈妈去课堂。' in prompt
@@ -1148,14 +1143,14 @@ async def test_unreadable_chapter_does_not_block_other_chapter_review(client, te
     unreadable_group = context.outline.chapters[0].model_copy(deep=True)
     output = context.outline.model_copy(deep=True)
     output.chapters[-1].title = '工作岁月'
-    real_digest, real_summaries = structure.generate_or_reuse_chapter_digest, structure.load_structure_summaries
+    real_digest, real_summaries = structure.generate_or_reuse_chapter_digest, structure._chapter_digests
     calls = _provider(monkeypatch, output)
     prepared = []
     async def digest(db, **kwargs):
         prepared.append(kwargs['chapter_id'])
         return await real_digest(db, **kwargs)
     monkeypatch.setattr(structure, 'generate_or_reuse_chapter_digest', digest)
-    monkeypatch.setattr(structure, 'load_structure_summaries', real_summaries)
+    monkeypatch.setattr(structure, '_chapter_digests', real_summaries)
     fake = FakeChapterAI(section_material_id='', chapter_section_id='', chapter_material_id='', draft_material_ids=[])
     monkeypatch.setattr(chapter_digests, 'get_ai_service', lambda _: fake)
     monkeypatch.setattr(section_digests, 'get_ai_service', lambda _: fake)

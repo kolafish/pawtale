@@ -51,12 +51,12 @@ def mock_models(monkeypatch, answers):
     async def digest(*args, **kwargs):
         return None
     async def summaries(*args, **kwargs):
-        return {}, {}, []
+        return {}
     async def generate(*args, **kwargs):
         calls.append(args[2])
         return SimpleNamespace(value=kwargs['output_model'].model_validate(answers.pop(0)))
     monkeypatch.setattr(st, 'generate_or_reuse_chapter_digest', digest)
-    monkeypatch.setattr(st, 'load_structure_summaries', summaries)
+    monkeypatch.setattr(st, '_chapter_digests', summaries)
     monkeypatch.setattr(st, 'get_ai_service', lambda _: None)
     monkeypatch.setattr(st, 'generate_structured_with_client', generate)
     return calls
