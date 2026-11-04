@@ -636,7 +636,7 @@ async def shared_card(db: AsyncSession, token: str, *, version_id: str = "", exc
                 except HTTPException as exc:
                     if exc.status_code not in (404, 422):
                         raise
-        return await asyncio.to_thread(render_book_share_card,
+        return await asyncio.to_thread(render_book_share_card, title=result.title,
             chapter_count=len(manuscript.chapters) if manuscript else 0, char_count=len(reading.content.strip()),
             image_content=image, picture_label=cover.caption if cover else "")
 
