@@ -42,6 +42,7 @@ import { enableMiniProgramShareMenu, hideMiniProgramShareMenu, readingShareMessa
 import { INITIAL_SHARE_LIKE_DATA, shareLikeMethods, type ShareLikeData } from "../../services/share-likes";
 import type { MemoirShareLikeTarget } from "../../domain/memoir-share-likes";
 import {
+  bookCoverImageUrl,
   selectedBookCoverStyle,
   bookReadingData,
   readingParagraphs,
@@ -796,10 +797,11 @@ definePage<BookReaderData>()({
         ...(scope === "book" ? {
           readerSubtitle: trimText(output.latest_version?.manuscript?.profile.subtitle || ""),
           editionStyle: style,
-          editionArt: ["classic_plain", "dark_album", "warm_gray"].includes(style) ? "" : `/assets/book_covers/${style}.jpg`,
         } : {}),
       });
-      const presentation = this.applyReadingPresentation(output.latest_version || null, this.data.sharePreview, generation);
+      const presentation = this.applyReadingPresentation(
+        output.latest_version || null, this.data.sharePreview, generation, scope === "book" ? bookCoverImageUrl(style) : "",
+      );
       if (this.readingToken) this.restoreReadingProgress(output);
       if (this.readingToken) enableMiniProgramShareMenu();
       this.setData({ loading: false });
@@ -811,19 +813,21 @@ definePage<BookReaderData>()({
     }
   },
 
-  async applyReadingPresentation(version: MemoirBookOutputVersion | null, privateImages: boolean, generation: number) {
+  async applyReadingPresentation(version: MemoirBookOutputVersion | null, privateImages: boolean, generation: number, templateArt = "") {
     const manuscript = version?.manuscript;
+    const cover = manuscript?.render_settings.cover_image;
     this.setData({
+      editionArt: cover ? "" : templateArt,
       shareImages: [], imageGallerySections: {}, shareCoverUrl: "",
       shareByline: [manuscript?.profile.narrator_name ? `${manuscript.profile.narrator_name} 口述` : "", manuscript?.profile.prepared_by || ""].filter(Boolean).join(" · "),
       sharePreface: (manuscript?.front_matter || []).filter(item => item.kind === "preface" && item.enabled).map(item => item.content).join("\n\n"),
       shareAfterword: manuscript?.back_matter.afterword.enabled ? manuscript.back_matter.afterword.content : "",
     });
     await this.loadReadingImages(manuscript?.chapters || [], privateImages, generation);
-    const cover = manuscript?.render_settings.cover_image;
     const coverUrl = cover ? await readingImageUrl(cover, privateImages ? this.data.projectId : "") : "";
     if (generation !== this.sharedReadGeneration) return;
     this.setData({
+      editionArt: coverUrl ? "" : templateArt,
       shareCoverUrl: coverUrl, coverCaption: cover?.disclosure ? "AI 意象插图" : (cover?.caption || ""),
     });
   },

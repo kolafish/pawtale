@@ -19,6 +19,19 @@ from tests.test_memoir_story_shares import saved_stories
 from tests.test_memoir_share_likes import _family_member
 
 
+async def test_mobile_template_covers_are_public_cacheable_jpegs():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as guest:
+        for style in ("heritage_classic", "warm_journal", "modern_minimal", "moonlit_courtyard", "navy_gilt"):
+            response = await guest.get(f"/api/mobile/memoir/book-covers/{style}.jpg")
+            assert response.status_code == 200
+            assert response.headers["content-type"] == "image/jpeg"
+            assert "public" in response.headers["cache-control"]
+            with Image.open(BytesIO(response.content)) as image:
+                assert image.format == "JPEG"
+                image.verify()
+        assert (await guest.get("/api/mobile/memoir/book-covers/classic_plain.jpg")).status_code == 404
+
+
 async def test_book_card_is_public_jpeg_with_real_metadata_and_revocable(client, test_db, monkeypatch):
     project_id = await ensure_mobile_memoir_project(client)
     _, version = await _shareable_output(test_db, project_id, "# 外婆回忆录\n\n真实的书稿正文。")

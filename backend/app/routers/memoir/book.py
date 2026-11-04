@@ -14,6 +14,7 @@ from app.models.users import User
 from app.services.memoir.book_output_export_cache import PreparedBookExport, has_cached_export, export_cache_path
 from app.services.file_exports import content_disposition
 from app.schemas.memoir_book import (
+    MemoirBookCoverStyle,
     MemoirBookCustomFontScale,
     MemoirBookCustomFontFamily,
     MemoirBookCustomLineSpacing,
@@ -70,6 +71,15 @@ from app.services.memoir import image_assets as memoir_image_assets
 
 
 router = APIRouter()
+_MOBILE_BOOK_COVERS = Path(__file__).resolve().parents[2] / "assets" / "mobile_book_covers"
+
+
+@router.get("/book-covers/{style}.jpg", response_class=FileResponse)
+def get_mobile_book_cover(style: MemoirBookCoverStyle):
+    path = _MOBILE_BOOK_COVERS / f"{style}.jpg"
+    if not path.is_file():
+        raise HTTPException(404, "该封面样式没有底图")
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
 
 
 @router.get("/projects/{project_id}/book-output/share", response_model=MemoirBookShareStatusResponse)
