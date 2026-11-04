@@ -279,7 +279,7 @@ test('saves chapter sections as a new version, retains history, and refreshes th
   const prose = await page.findByRole('textbox', { name: '小节正文：院子' });
   fireEvent.change(prose, { target: { value: '人工校订后的院子。' } });
   fireEvent.click(page.getByRole('button', { name: '保存正文' }));
-  await page.findByText('已保存，正在更新全书');
+  await page.findByText('章节正文已保存');
   const write = transport.mock.calls.map(([config]) => config).find(config => config.method === 'post');
   expect(JSON.parse(write.data)).toEqual({ expected_version_id: 'draft-version-2', sections: [
     { section_id: 'section-1', content: '人工校订后的院子。' }, { section_id: 'section-2', content: '后来去上学。' },
