@@ -1693,6 +1693,40 @@ async def test_mobile_memoir_book_output_detects_stale_chapter_versions(client, 
     assert saved.json()["latest_version"]["id"] != stale_data["latest_version"]["id"]
 
 
+async def test_book_only_edit_remains_exportable_until_its_sources_change(client, test_db):
+    from app.models.memoir import MemoirSectionMaterial
+
+    pid = await ensure_mobile_memoir_project(client)
+    plan, chapters = await _create_confirmed_book_plan(test_db, project_id=pid)
+    for uid in ("baseline-a", "baseline-b"):
+        await _add_output_source_link(test_db, project_id=pid, plan_id=plan.id,
+            chapter_id=chapters[0].id, utterance_id=uid, quote="已收录的口述")
+    version = await _seed_confirmed_book_output(test_db, project_id=pid)
+    saved = json.loads(json.dumps(version.chapter_snapshot_json))
+    saved[0].update(content="家庭校订后的段落。", sections=[], source_refs=list(reversed(saved[0]["source_refs"])))
+    version.chapter_snapshot_json = saved
+    version.content = saved[0]["content"]
+    version.created_by = "user"
+    await test_db.commit()
+    path = f"/api/mobile/memoir/projects/{pid}/book-output"
+    assert (await client.get(path)).json()["is_stale"] is False
+    exported = await client.get(path + "/export?format=txt")
+    assert exported.status_code == 200 and saved[0]["content"] in exported.text
+
+    # A second copy of the underlying chapter must not invalidate the author's edit either.
+    base = await test_db.get(MemoirBookChapterDraftVersion, saved[0]["draft_version_id"])
+    test_db.add(MemoirBookChapterDraftVersion(draft_id=base.draft_id, project_id=pid,
+        chapter_id=base.chapter_id, version=base.version + 1, content=base.content,
+        section_snapshot_json=base.section_snapshot_json, created_by=base.created_by))
+    await test_db.commit()
+    assert (await client.get(path)).json()["is_stale"] is False
+    ref = await test_db.scalar(select(MemoirSectionMaterial).where(
+        MemoirSectionMaterial.project_id == pid, MemoirSectionMaterial.utterance_id == "baseline-b"))
+    ref.include_in_book = False
+    await test_db.commit()
+    assert (await client.get(path)).json()["stale_chapter_titles"] == [chapters[0].title]
+
+
 async def test_mobile_memoir_book_output_detects_reordered_chapters(client, test_db):
     project_id = await ensure_mobile_memoir_project(client)
     _, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)

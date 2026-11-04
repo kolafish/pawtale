@@ -72,6 +72,7 @@ from app.services.memoir.book_output_manuscript import (
 from app.services.memoir.book_output_snapshots import (
     load_book_plan_drafts,
     latest_chapter_version,
+    normalized_section_snapshots,
     readable_chapter_versions,
     book_content_from_chapter_snapshots,
     chapter_snapshot,
@@ -85,7 +86,7 @@ from app.services.memoir.book_output_export import (
     render_book_output_export,
 )
 from app.services.memoir.book_output_export_cache import PreparedBookExport, render_cached_book_export
-from app.services.memoir.book_source_links import plan_source_ref_dicts_by_chapter
+from app.services.memoir.book_source_links import plan_source_ref_dicts_by_chapter, source_ref_utterance_id
 from app.services.memoir.sections import lock_project_chapters
 from app.services.memoir.book_output_state import invalidate_book_output
 from app.services.memoir.book_output_versions import (
@@ -103,17 +104,6 @@ from app.services.memoir.project_ai_preferences import (
     resolve_project_ai_model,
     select_project_ai_model,
     project_transcript_polish_level,
-)
-
-
-SNAPSHOT_COMPARE_KEYS = (
-    "chapter_id",
-    "chapter_title",
-    "chapter_sort_order",
-    "draft_id",
-    "content",
-    "sections",
-    "source_refs",
 )
 
 
@@ -272,20 +262,27 @@ async def synchronize_book_output_title(
     return True
 
 
-def _current_book_snapshot(
+def _ordered_source_refs(refs: list[dict]) -> list[dict]:
+    return sorted(refs, key=source_ref_utterance_id)
+
+
+def _output_stale_chapter_titles(
+    output: MemoirBookOutput,
     plan: MemoirBookPlan,
     *,
-    source_refs_by_chapter: dict[str, list[dict[str, object]]] | None = None,
-    blocked_chapter_ids: set[str] | None = None,
-) -> tuple[list[dict[str, object]], list[str]]:
+    source_refs_by_chapter: dict[str, list[dict[str, object]]],
+    blocked_chapter_ids: set[str],
+) -> list[str]:
     if plan.status != MemoirBookPlanStatus.CONFIRMED.value:
-        return [], ["章节规划"]
-    chapters = included_book_chapters(plan)
-    blocked_ids = blocked_chapter_ids or set()
-    snapshot: list[dict[str, object]] = []
+        return ["章节规划"]
+    saved = output.versions[-1].chapter_snapshot_json if output.versions else []
+    stored_by_id = {item["chapter_id"]: item for item in saved or []
+                    if isinstance(item, dict) and item.get("chapter_id")}
+    current_count = 0
+    stale_titles: list[str] = []
     unavailable_titles: list[str] = []
-    for chapter in chapters:
-        if chapter.id in blocked_ids:
+    for chapter in included_book_chapters(plan):
+        if chapter.id in blocked_chapter_ids:
             continue
         version = latest_chapter_version(chapter.draft)
         if (
@@ -302,7 +299,6 @@ def _current_book_snapshot(
         ):
             if (
                 (version is None or not version.content.strip())
-                and source_refs_by_chapter is not None
                 and not source_refs_by_chapter.get(chapter.id)
             ):
                 # Empty planned chapters are omitted by partial book assembly.
@@ -310,60 +306,31 @@ def _current_book_snapshot(
                 continue
             unavailable_titles.append(chapter.title)
             continue
-        snapshot.append(
-            chapter_snapshot(
-                chapter,
-                version,
-                chapter_index=len(snapshot) + 1,
-                source_refs=(source_refs_by_chapter or {}).get(chapter.id),
-            )
-        )
-    return snapshot, unavailable_titles
-
-
-def _snapshot_stale_chapter_titles(
-    latest_version: MemoirBookOutputVersion | None,
-    current_snapshot: list[dict[str, object]],
-    unavailable_titles: list[str],
-) -> list[str]:
+        current_count += 1
+        stored = stored_by_id.get(chapter.id)
+        if not stored:
+            stale_titles.append(chapter.title)
+            continue
+        current = chapter_snapshot(chapter, version, chapter_index=current_count,
+                                   source_refs=source_refs_by_chapter.get(chapter.id))
+        if (any(stored.get(k) != current[k] for k in ("chapter_title", "chapter_sort_order", "draft_id"))
+                or _ordered_source_refs(stored.get("source_refs") or []) != _ordered_source_refs(current["source_refs"])):
+            stale_titles.append(chapter.title)
+            continue
+        # The book may have been edited independently of its immutable source draft.
+        # Compare chapter revisions to one another, not to the author's finished prose.
+        if stored.get("draft_version_id") != version.id:
+            baseline = next((v for v in chapter.draft.versions if v.id == stored.get("draft_version_id")), None)
+            if (baseline is None or baseline.content.strip() != current["content"]
+                    or normalized_section_snapshots(baseline.section_snapshot_json) != current["sections"]):
+                stale_titles.append(chapter.title)
     if unavailable_titles:
         return unavailable_titles
-    if not latest_version:
+    if not output.versions:
         return []
-    stored_snapshot = [
-        item for item in (latest_version.chapter_snapshot_json or [])
-        if isinstance(item, dict)
-    ]
-    stored_by_chapter_id = {
-        item.get("chapter_id"): item
-        for item in stored_snapshot
-        if isinstance(item.get("chapter_id"), str)
-    }
-    stale_titles: list[str] = []
-    for current in current_snapshot:
-        chapter_id = current.get("chapter_id")
-        stored = stored_by_chapter_id.get(chapter_id)
-        if not stored or any(stored.get(key) != current.get(key) for key in SNAPSHOT_COMPARE_KEYS):
-            stale_titles.append(str(current.get("chapter_title") or "未命名章节"))
-    if len(stored_snapshot) != len(current_snapshot) and not stale_titles:
-        stale_titles.append("章节结构")
+    if len(saved or []) != current_count and not stale_titles:
+        return ["章节结构"]
     return stale_titles
-
-
-def _output_stale_chapter_titles(
-    output: MemoirBookOutput,
-    plan: MemoirBookPlan,
-    *,
-    source_refs_by_chapter: dict[str, list[dict[str, object]]] | None = None,
-    blocked_chapter_ids: set[str] | None = None,
-) -> list[str]:
-    current_snapshot, unavailable_titles = _current_book_snapshot(
-        plan,
-        source_refs_by_chapter=source_refs_by_chapter,
-        blocked_chapter_ids=blocked_chapter_ids,
-    )
-    latest_version = output.versions[-1] if output.versions else None
-    return _snapshot_stale_chapter_titles(latest_version, current_snapshot, unavailable_titles)
 
 
 async def _load_output(
