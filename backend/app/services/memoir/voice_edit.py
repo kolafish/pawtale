@@ -928,7 +928,8 @@ async def apply_voice_edit(db: AsyncSession, *, user_id: str, project_id: str, r
             )
         undoable = all(op.action in _REVERSIBLE_ACTIONS for op in operations)
         _remember_last_batch(project, {**undo, "user_id": user_id, "applied_at": utcnow_naive().isoformat()} if undoable else None)
-        await schedule_book_draft(db, project_id=project_id, source="structure")
+        if not all(op.action == "rename_chapter" for op in operations):
+            await schedule_book_draft(db, project_id=project_id, source="structure")
         await db.commit()
     except Exception:
         await db.rollback()
@@ -1001,7 +1002,8 @@ async def undo_voice_edit(db: AsyncSession, *, user_id: str, project_id: str) ->
         for change in reversed(changes):
             await _revert_change(db, user_id=user_id, project=project, change=change)
         _remember_last_batch(project, None)
-        await schedule_book_draft(db, project_id=project_id, source="structure")
+        if record.get("writing") or not all(change.get("type") == "chapter_title" for change in changes):
+            await schedule_book_draft(db, project_id=project_id, source="structure")
         await db.commit()
     except Exception:
         await db.rollback()

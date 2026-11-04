@@ -3555,3 +3555,22 @@ def test_revision_plan_job_signature_includes_user_evidence_even_if_plan_is_unch
     before = book_revision_proposals.revision_plan_signature(proposal)
     proposal.generation_json = {"user_inputs": [{"text": "叫李明"}]}
     assert book_revision_proposals.revision_plan_signature(proposal) != before
+
+
+@pytest.mark.parametrize("status,expected_count", [("open", 1), ("closed", 0)])
+def test_review_reuses_rephrased_question_only_in_the_same_chapters(status, expected_count):
+    from app.models.memoir import MemoirCompletionIssue
+    from app.services.memoir import book_reviews
+
+    context = BookReviewContext(project_id="p", plan_id="plan", book_metadata={}, input_signature="sig",
+        chapters=(BookReviewChapter(chapter_id="c", title="故乡", sort_order=0, draft_version_id="d",
+            draft_hash="hash", material_ids=frozenset()),))
+    prior = MemoirCompletionIssue(id="i", issue_type="conflict", channel="manual_review", status=status,
+        question="哪年搬家？", related_chapter_ids_json=["c"], fingerprint="a" * 64)
+    item = {"issue_type": "conflict", "question": "搬去新家的时间是哪一年？", "resolution": "user_decision",
+        "chapter_ids": ["C1"], "previous_issue": "Q1", "reason": "两处时间不同"}
+    review = book_reviews.normalize_book_review({"summary": "故乡的故事", "candidate_issues": [
+        item, {**item, "question": "迁居是哪年？"}]}, context=context, previous={"Q1": prior})
+    assert len(review["candidate_issues"]) == expected_count
+    if expected_count:
+        assert review["candidate_issues"][0]["fingerprint"] == prior.fingerprint

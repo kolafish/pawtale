@@ -208,6 +208,38 @@ def book_editorial_copy_signature(title: str, snapshot: list[dict[str, object]])
     ]})
 
 
+def refresh_book_level_copy(previous: list[dict], current: list[dict], *, preserved: set[str]) -> bool:
+    """Keep front matter on reorder and additive narration within existing chapters.
+    Removed or corrected evidence can invalidate factual claims in the front matter.
+    """
+    before = {chapter["chapter_id"]: chapter for chapter in previous}
+    if set(before) != {chapter["chapter_id"] for chapter in current}:
+        return True
+    for chapter in current:
+        old = before[chapter["chapter_id"]]
+        if chapter["chapter_id"] in preserved or (old["content"] == chapter["content"] and old.get("source_refs") == chapter.get("source_refs")):
+            continue
+        old_sources = {(ref["utterance_id"], ref.get("quote")) for ref in old.get("source_refs", [])}
+        new_sources = {(ref["utterance_id"], ref.get("quote")) for ref in chapter.get("source_refs", [])}
+        if not old_sources < new_sources:
+            return True
+    return False
+
+
+def _corrected_excerpt(text: str, stored: dict, snapshot: dict, candidates: tuple[str, ...]) -> str | None:
+    # A unique one-character correction in the same section can keep its place
+    # as the opening excerpt. Never guess between repeated or ambiguous passages.
+    sections = [s for s in stored.get("sections", []) if text in s.get("content", "")]
+    if len(sections) != 1 or sections[0]["content"].count(text) != 1:
+        return None
+    contents = [s["content"] for s in snapshot.get("sections", []) if s["section_id"] == sections[0]["section_id"]]
+    if len(contents) != 1:
+        return None
+    matches = [line for line in candidates if len(line) == len(text) and contents[0].count(line) == 1
+        and sum(a != b for a, b in zip(line, text)) == 1]
+    return matches[0] if len(matches) == 1 else None
+
+
 def retained_chapter_quotes(
     stored: dict[str, object], snapshot: dict[str, object], *, preserve_manual: bool = False,
     polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.HIGH,
@@ -220,6 +252,14 @@ def retained_chapter_quotes(
     originals = original_quote_candidates(snapshot, max_chars=90) if polish_level == MemoirTranscriptPolishLevel.LOW else {}
     retained = []
     for quote in quotes:
+        if (not preserve_manual and quote.source in {"editorial_generated", "original_quote"}
+                and quote.text not in str(snapshot.get("content") or "")):
+            corrected = _corrected_excerpt(quote.text, stored, snapshot, excerpts)
+            if corrected:
+                # A correction in prose is an excerpt of that prose, even if
+                # the previous wording also matched the original recording.
+                retained.append(MemoirBookManuscriptQuote(text=corrected, source="editorial_generated"))
+                continue
         if not all(
             source_id in new_refs and (
                 (new_refs[source_id].get("transcript_version_id"), new_refs[source_id].get("quote"))

@@ -108,6 +108,7 @@ class ChapterProgress(BaseModel):
 class DraftProgress(BaseModel):
     stage: str = "queued"
     chapters: dict[str, ChapterProgress] = Field(default_factory=dict)
+    skipped_review_signature: str = ""
     output_id: str | None = None
     output_version_id: str | None = None
     omitted_chapter_ids: list[str] = Field(default_factory=list)
@@ -129,6 +130,9 @@ class DraftProgress(BaseModel):
         self.review_error = ""
 
 
+MANUSCRIPT_ONLY_SOURCES = {"manual_draft", "chapter_title"}
+
+
 async def schedule_book_draft(
     db: AsyncSession, *, project_id: str, source: str = "materials", settled: bool = False,
 ) -> MemoirEditingJob:
@@ -140,6 +144,14 @@ async def schedule_book_draft(
     if (existing is not None and existing.status in editing_jobs.ACTIVE_EDITING_JOB_STATUSES
             and (existing.payload_json or {}).get("source") == "retry"):
         source = "retry"
+    run_after = utcnow_naive() + timedelta(seconds=0 if settled else get_settings().memoir_story_settle_seconds)
+    # An edit can share a job with an interview. Never downgrade the interview
+    # (or a user retry) to a manuscript-only update.
+    if (source in MANUSCRIPT_ONLY_SOURCES and existing is not None
+            and existing.status in editing_jobs.ACTIVE_EDITING_JOB_STATUSES):
+        source = (existing.payload_json or {}).get("source", "materials")
+        if source not in MANUSCRIPT_ONLY_SOURCES:
+            run_after = existing.run_after
     # Incoming source changes retain their debounce. A completed upstream step or
     # explicit user decision can advance immediately; the worker still checks dependencies.
     return await editing_jobs.enqueue_editing_job(
@@ -154,7 +166,7 @@ async def schedule_book_draft(
             existing and existing.status in editing_jobs.ACTIVE_EDITING_JOB_STATUSES
             and (existing.payload_json or {}).get("retry_editorial_copy")
         )},
-        run_after=utcnow_naive() + timedelta(seconds=0 if settled else get_settings().memoir_story_settle_seconds),
+        run_after=run_after,
         replace_completed=True,
         preserve_progress=True,
         reschedule_running=True,
@@ -281,6 +293,9 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
     ).all()
     progress.chapters = {chapter.id: progress.chapters.get(chapter.id, ChapterProgress()) for chapter in chapters}
     source = (job.payload_json or {}).get("source")
+    sync_only = source in MANUSCRIPT_ONLY_SOURCES and bool(progress.output_id or await db.scalar(
+        select(MemoirBookOutput.id).where(MemoirBookOutput.project_id == project_id)
+    ))
     batch_retry = source == "retry" or (job.payload_json or {}).get("retry") is True
     if source == "retry":
         progress.retry_stages = ["chapters", "review"]
@@ -331,6 +346,13 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
             state.draft_version_id = latest.id
             continue
 
+        if sync_only:
+            # The user edited an existing book. Keep any unrelated unfinished
+            # chapter in its prior state until its own source change or retry.
+            if state.status == "ready":
+                state.status = "needs_review"
+            continue
+
         async def record_child(child: MemoirEditingJob) -> None:
             state.job_id = child.id
             job.result_json = progress.model_dump(mode="json")
@@ -358,10 +380,10 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
     # Consume once per stage; asynchronous chapter work must not consume the
     # later review retry, and dependency polls must not redispatch it.
     progress.retry_stages = [stage for stage in progress.retry_stages if stage != "chapters"]
-    job.payload_json = {"source": "progress", "retry": batch_retry,
+    job.payload_json = {"source": source if sync_only else "progress", "retry": batch_retry,
         "retry_editorial_copy": (job.payload_json or {}).get("retry_editorial_copy") is True}
     current = {chapter_id for chapter_id, item in progress.chapters.items() if item.status == "ready"}
-    if current and len(current) == len(progress.chapters) and source != "assembly_policy":
+    if current and len(current) == len(progress.chapters) and source != "assembly_policy" and not sync_only:
         from app.services.memoir.chapter_structure import review_story_structure
         user_id = project.user_id
         lease_token = job.lease_token
@@ -377,7 +399,7 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
             progress.stage = "writing_chapters"
             return _waiting(job, progress)
     if readable or progress.output_id:
-        assembled = await assemble_book_output(db, project_id=project_id, eligible_chapter_ids=readable, automatic=True)
+        assembled = await assemble_book_output(db, project_id=project_id, eligible_chapter_ids=readable, automatic=True, preserve_copy=sync_only)
         progress.output_id = assembled.output_id
         progress.output_version_id = assembled.output_version_id
         progress.omitted_chapter_ids = assembled.omitted_chapter_ids
@@ -385,7 +407,7 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
         # Persist deterministic assembly before any review dispatch or external request.
         job.result_json = progress.model_dump(mode="json")
         await db.commit()
-    if any(item.status in editing_jobs.ACTIVE_EDITING_JOB_STATUSES for item in progress.chapters.values()):
+    if not sync_only and any(item.status in editing_jobs.ACTIVE_EDITING_JOB_STATUSES for item in progress.chapters.values()):
         progress.clear_review()
         progress.stage = "writing_chapters"
         return _waiting(job, progress)
@@ -393,7 +415,7 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
         previous_draft_ids.get(chapter_id) == item.draft_version_id
         for chapter_id, item in progress.chapters.items()
     )
-    if readable and progress.output_id and not progress.preserved_manual:
+    if readable and progress.output_id and not progress.preserved_manual and not sync_only:
         from app.services.memoir.book_generation_jobs import schedule_book_editorial_copy_generation
         event = await schedule_book_editorial_copy_generation(
             db, user_id=project.user_id, project_id=project_id,
@@ -417,10 +439,16 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
         progress.clear_review()
     progress.stage = "partial_ready" if readable else "needs_attention"
     if current and len(current) == len(progress.chapters):
-        if policy_only:
+        if sync_only:
+            progress.skipped_review_signature = review_signature
+        if not batch_retry and progress.skipped_review_signature == review_signature:
+            progress.stage = "ready"
+        elif policy_only:
             # Reassembling unchanged chapters must not supersede unanswered decisions.
             progress.stage = "ready" if progress.review_status == "succeeded" else "ready_review_failed"
         else:
+            progress.skipped_review_signature = ""
+
             async def record_review(child: MemoirEditingJob) -> None:
                 progress.review_job_id = child.id
                 job.result_json = progress.model_dump(mode="json")

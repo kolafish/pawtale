@@ -23,6 +23,7 @@ from app.models.memoir import (
     MemoirBookPlanChapter,
     MemoirBookRevisionProposal,
     MemoirBookReview,
+    MemoirCompletionIssue,
     MemoirSection,
     MemoirSectionMaterial,
 )
@@ -59,7 +60,7 @@ from app.services.memoir.book_output_manuscript import (
 from app.services.memoir.book_output_snapshots import load_book_plan_drafts, readable_chapter_versions
 from app.services.memoir.chapter_generation import latest_chapter_draft_version
 from app.services.memoir.transcript_projection import TranscriptEdit, current_material_text, load_transcript_edits
-from app.services.memoir.prompt_budget import checked_review_prompt
+from app.services.memoir.prompt_budget import MAX_REVIEW_PROMPT_CHARS, checked_review_prompt
 from app.services.memoir.semantic_state import (
     semantic_json_signature,
     semantic_text_hash,
@@ -123,6 +124,7 @@ class _BookReviewIssueOutput(BaseModel):
     reason: str = ""
     priority: str = ""
     chapter_ids: list[str] = Field(default_factory=list)
+    previous_issue: str = ""
     evidence_quote: str = ""
     resolution: Literal[
         "new_material",
@@ -376,7 +378,7 @@ def _review_chapter_text(chapter: BookReviewChapter, sections: ModelReferenceMap
         for section in chapter.draft_sections)
 
 
-def build_book_review_prompt(context: BookReviewContext) -> str:
+def build_book_review_prompt(context: BookReviewContext, previous: dict[str, MemoirCompletionIssue] | None = None) -> str:
     references = _chapter_references(context)
     sections = _section_references(context)
     chapters = "\n\n".join(
@@ -388,6 +390,11 @@ def build_book_review_prompt(context: BookReviewContext) -> str:
         )
         for chapter in context.chapters
     )
+    prior_questions = (
+        f"{ref}（{', '.join(references.encode(cid) for cid in issue.related_chapter_ids_json)}，"
+        f"{issue.outcome or issue.status}）：{issue.question}"
+        for ref, issue in (previous or {}).items()
+    )
     prompt = f"""请通读下面这本回忆录。
 
 当前成书信息：
@@ -395,6 +402,10 @@ def build_book_review_prompt(context: BookReviewContext) -> str:
 
 有序章节：
 {chapters}
+
+已有核对问题附在末尾，仅用来辨认同一件事，不能当作事实或新增问题的依据。
+同一事实只列一次。如果只是旧问题换了问法或引用，previous_issue 填对应编号；已答或拒答的不再问。
+只有新增矛盾证据确实需要再次核对时才新建问题，指出新证据，并将 previous_issue 留空。
 
 请输出严格 JSON：
 {{
@@ -418,6 +429,7 @@ def build_book_review_prompt(context: BookReviewContext) -> str:
       "reason": "为什么这会明显影响全书理解或用户决定",
       "priority": "high|medium|low",
       "chapter_ids": ["相关 chapter_id"],
+      "previous_issue": "同一事项的已有编号，否则留空",
       "evidence_quote": "事实冲突事项所依据的章节正文短原句；其他事项留空",
       "resolution": "new_material|editorial_change|user_decision"
     }}
@@ -453,13 +465,21 @@ def build_book_review_prompt(context: BookReviewContext) -> str:
 - 事实冲突事项的 evidence_quote 必须逐字摘自相关章节当前正文，选能指认这件事的最短完整片段；找不到可核对原文时留空，不要编造。
 - summary、strengths、structure_guidance、editorial_actions 的 title/reason、question 和 reason 会直接展示给用户；引用章节时使用章节标题。
 """
-    return checked_review_prompt(prompt, subject="全书")
+    # The current manuscript always gets the input budget first.
+    room = MAX_REVIEW_PROMPT_CHARS - len(prompt) - 1
+    history = []
+    for line in prior_questions:
+        if len(line) + 1 <= room:
+            history.append(line)
+            room -= len(line) + 1
+    return checked_review_prompt(prompt + "\n" + "\n".join(history), subject="全书")
 
 
 def normalize_book_review(
     payload: dict[str, Any],
     *,
     context: BookReviewContext,
+    previous: dict[str, MemoirCompletionIssue] | None = None,
 ) -> dict:
     summary = _user_visible_text(
         payload.get("summary"),
@@ -483,6 +503,7 @@ def normalize_book_review(
         "structure",
         "conflict",
     }
+    matched_prior = set()
     for candidate in candidates:
         if not isinstance(candidate, dict):
             continue
@@ -543,6 +564,13 @@ def normalize_book_review(
                 if chapter.chapter_id in chapter_ids
             ):
                 issue["evidence_quote"] = evidence_quote
+        prior = (previous or {}).get(candidate.get("previous_issue", ""))
+        if (prior and prior.issue_type == issue_type and prior.channel == normalized_channel
+                and set(prior.related_chapter_ids_json) == set(chapter_ids)):
+            if prior.status == "closed" or prior.id in matched_prior:
+                continue
+            matched_prior.add(prior.id)
+            issue["fingerprint"] = prior.fingerprint
         issues.append(issue)
     anchor_counts: dict[tuple[str, tuple[str, ...], str], int] = {}
     for issue in issues:
@@ -556,7 +584,7 @@ def normalize_book_review(
             key = (issue["issue_type"], tuple(sorted(issue["chapter_ids"])), quote)
             if anchor_counts[key] > 1:
                 issue.pop("evidence_quote", None)
-        issue["fingerprint"] = completion_issues.stable_book_issue_fingerprint(issue)
+        issue.setdefault("fingerprint", completion_issues.stable_book_issue_fingerprint(issue))
     model_guidance = _user_visible_string_list(
         payload.get("structure_guidance"),
         context=context,
@@ -761,7 +789,14 @@ async def generate_or_reuse_book_review(
         )
         return existing
     client = ai_client or get_ai_service(ai_model)
-    prompt = build_book_review_prompt(context)
+    chapter_ids = {chapter.chapter_id for chapter in context.chapters}
+    old_issues = (await db.scalars(select(MemoirCompletionIssue).where(
+        MemoirCompletionIssue.project_id == project_id, MemoirCompletionIssue.scope == "book",
+        MemoirCompletionIssue.issue_type != "privacy", MemoirCompletionIssue.outcome != "superseded",
+    ).order_by(MemoirCompletionIssue.updated_at.desc(), MemoirCompletionIssue.id))).all()
+    previous = {f"Q{index}": issue for index, issue in enumerate(old_issues, start=1)
+        if issue.related_chapter_ids_json and set(issue.related_chapter_ids_json) <= chapter_ids}
+    prompt = build_book_review_prompt(context, previous)
     policy = ai_text_workload_policy(AITextWorkload.GENERATION_STRUCTURED)
     timeout_seconds = ai_text_timeout_seconds(policy.timeout_profile)
     started_at = time.monotonic()
@@ -788,6 +823,7 @@ async def generate_or_reuse_book_review(
         review_json = normalize_book_review(
             generated.value.model_dump(),
             context=context,
+            previous=previous,
         )
         # Re-read committed inputs without invalidating the caller's job,
         # directory or voice-session objects.

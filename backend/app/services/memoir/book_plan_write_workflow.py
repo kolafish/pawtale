@@ -614,7 +614,7 @@ async def _save_chapter_title(
     db.add(chapter)
     db.add(plan)
     from app.services.memoir.automatic_book_draft import schedule_book_draft
-    await schedule_book_draft(db, project_id=project_id, source="structure")
+    await schedule_book_draft(db, project_id=project_id, source="chapter_title")
     await (db.commit() if commit else db.flush())
     refreshed = await _load_plan(db, project_id)
     if not refreshed:
@@ -713,6 +713,7 @@ async def update_book_plan(
         for chapter_id, chapter in existing_by_id.items()
         if chapter_id not in retained_ids
     ]
+    renamed = any(u.id and existing_by_id[u.id].title != u.title.strip()[:200] for u in chapter_updates)
     manual_order_changed = (
         [chapter.id for chapter in _sorted_plan_chapters(plan) if chapter.id in retained_ids]
         != [chapter.id for chapter in chapter_updates if chapter.id]
@@ -798,7 +799,9 @@ async def update_book_plan(
         },
     )
     db.add(plan)
-    await finalize_section_changes(db, project_id=project_id, section_ids=changed_ids, source="structure")
+    title_only = renamed and not (manual_order_changed or removed_chapters or changed_chapter_ids)
+    await finalize_section_changes(db, project_id=project_id, section_ids=changed_ids,
+        source="chapter_title" if title_only else "structure")
     await db.commit()
     refreshed = await _load_plan(db, project_id)
     if not refreshed:
