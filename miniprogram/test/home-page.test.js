@@ -361,7 +361,7 @@ test("home keeps completed videos in the library after handling the latest sugge
   assert.equal(navigations.length, 3);
 });
 
-test("a ready recommendation keeps the manual clip picker reachable before any video exists", () => {
+test("the share library is reachable before any video exists", () => {
   const navigations = [];
   const { page } = loadHomePage();
   const context = pageContext(page, {
@@ -369,7 +369,7 @@ test("a ready recommendation keeps the manual clip picker reachable before any v
   });
   global.wx = { navigateTo({ url }) { navigations.push(url); } };
   context.openShareCard();
-  assert.deepEqual(navigations, ["/pages/transcripts/index?purpose=video"]);
+  assert.deepEqual(navigations, ["/pages/share-videos/index?projectId=p1"]);
 });
 
 test("a failed first home load exposes retry and recovers without leaving the page", async () => {

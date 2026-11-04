@@ -2,6 +2,7 @@ import type { MemoirChapterCompletionSummary } from "./chapter-completion";
 import type { MemoirChapterDraftSection, MemoirChapterSectionSummary, MemoirBookManuscriptIllustration } from "./memoir-book";
 
 export interface MemoirChapterWorkspace {
+  family_notes?: import("./memoir-book").FeaturedFamilyNote[];
   illustrations?: MemoirBookManuscriptIllustration[];
   input_signature?: string;
   server_revision: number;

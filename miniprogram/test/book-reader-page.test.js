@@ -972,7 +972,7 @@ test("excerpt selection previews only the chosen text and forwards the same immu
   context.changeExcerptTitle({ detail: { value: "奶奶等我回家" } });
   context.changeExcerptSummary({ detail: { value: "熟悉的门口，总有人等我回家。" } });
   await context.confirmExcerptCard();
-  assert.deepEqual(request, ["p", "c", { version_id: "v1", content: "奶奶坐在门口。", title: "奶奶等我回家", summary: "熟悉的门口，总有人等我回家。" }]);
+  assert.deepEqual(request, ["p", "c", { version_id: "v1", content: "奶奶坐在门口。", allow_book_link: false, title: "奶奶等我回家", summary: "熟悉的门口，总有人等我回家。" }]);
   assert.equal(context.data.excerptMode, "preview");
   assert.equal(context.data.excerptContent, "奶奶坐在门口。");
   assert.equal(context.data.excerptImageReady, false);
@@ -999,7 +999,7 @@ test("excerpt recipient reads only the snapshot and uses its token for the chapt
   assert.equal(context.data.bookPreviewChapters.length, 1);
   assert.deepEqual(context.data.bookPreviewChapters[0].sections[0].paragraphs, ["只公开这句话。"]);
   assert.equal(context.data.bookPreviewTocItems.length, 0);
-  assert.equal(context.data.responseToken, "");
+  assert.equal(context.data.responseToken, "x1.token");
   assert.equal(context.data.shareImages.length, 1);
   assert.ok(context.data.shareImages[0].url.endsWith("/excerpt-shares/x1.token/image"));
   assert.equal(context.data.imageGallerySections.excerpt, true);
@@ -1041,12 +1041,11 @@ for (const leave of ["onHide", "onUnload"]) {
   });
 }
 
-test("excerpt viewer only exposes an authorized continuation link and no audio or response entry points", () => {
+test("excerpt selections stay read-only and do not start chapter audio", () => {
   const template = fs.readFileSync(path.join(__dirname, "../pages/book-reader/index.wxml"), "utf8");
   assert.match(template, /read-only="\{\{true\}\}"/);
   assert.match(template, /catchtouchend="previewExcerptSelection"/);
   assert.match(template, /wx:if="\{\{!excerptMode &&[^"\n]+"[\s\S]*?bindtap="playReaderAudio"/);
-  assert.match(template, /wx:if="\{\{readerShared && !excerptMode &&[^"\n]+"[^>]*>\s*<share-response-form/);
 });
 
 test("excerpt editor readiness ignores missing or detached nodes after page exit", () => {
@@ -1145,7 +1144,7 @@ test("a saved chapter awaiting rewrite remains available for selected-text shari
       return { title: "那条长长的回家路", summary: "回家的路很长。" };
     },
     createMemoirExcerptShare: async (_p, _c, value) => {
-      assert.deepEqual(value, { ...selection, title: "那条长长的回家路", summary: "回家的路很长。" });
+      assert.deepEqual(value, { ...selection, allow_book_link: false, title: "那条长长的回家路", summary: "回家的路很长。" });
       return { ...value, token: "x1.saved", book_title: "回忆录", chapter_title: "放学的路" };
     },
   });

@@ -40,6 +40,10 @@
       </block>
     </block>
     <view class="excerpt-selected-copy"><text class="excerpt-eyebrow">完整选文 · {{excerptSelectionCount}} 字</text><text user-select="{{true}}">{{excerptContent}}</text></view>
+    <label class="excerpt-selected-copy">允许从这张卡片继续读全书
+      <switch checked="{{excerptAllowBookLink}}" bindchange="changeExcerptBookLink" disabled="{{excerptBusy}}" color="#b65d49" />
+    </label>
+    <text class="excerpt-help">{{excerptAllowBookLink ? '全书分享开启时，持有这张卡片的人也能读全书。' : '持有这张卡片的人只能阅读选文。'}}</text>
     <text class="excerpt-help">确认标题、摘要、选文和图片均适合公开。卡片只展示引子，好友点开可读全部选文。</text>
     <view class="excerpt-actions"><button class="ui-share-more" bindtap="reselectExcerpt">重新选文</button><button class="excerpt-share-button" bindtap="confirmExcerptCard" loading="{{excerptBusy}}" disabled="{{excerptBusy || excerptTitleBusy || excerptPhotoBusy || excerptReloadRequired}}">预览分享卡片</button></view>
   </block>
@@ -52,7 +56,7 @@
     </view>
     <block wx:if="{{excerptOutput === 'card'}}">
       <image class="excerpt-card-image" src="{{excerptImageUrl}}" data-url="{{excerptImageUrl}}" mode="widthFix" bindload="onExcerptImageLoad" binderror="onExcerptImageError" />
-      <text class="excerpt-help">已选 {{excerptSelectionCount}} 字 · 好友点开可读全部选文</text>
+      <text class="excerpt-help">已选 {{excerptSelectionCount}} 字 · {{excerptAllowBookLink ? "全书分享开启时可继续读全书" : "仅这段选文"}}</text>
       <view class="excerpt-actions">
         <button class="ui-share-more" bindtap="editExcerptCard">修改卡片</button>
         <button class="excerpt-share-button" open-type="{{excerptImageReady ? 'share' : ''}}" disabled="{{!excerptImageReady}}">分享给好友</button>
@@ -197,7 +201,7 @@
           <text class="chapter-title">{{chapter.title}}</text>
         </block>
         <block wx:if="{{excerptMode === 'select'}}">
-          <text class="excerpt-help excerpt-select-help">长按正文，拖动选区选择 1–512 字。好友只会看到选中的文字。</text>
+          <text class="excerpt-help excerpt-select-help">长按正文，拖动选区选择 1–512 字。下一步可设置卡片的阅读范围。</text>
           <editor id="excerpt-editor" class="excerpt-selector chapter-content" read-only="{{true}}" bindready="onExcerptEditorReady" />
           <text wx:if="{{error}}" class="excerpt-selection-error">{{error}}</text>
           <view class="excerpt-actions excerpt-selection-actions ui-fixed-action-dock">
@@ -246,6 +250,10 @@
           </view>
         </view>
         <view wx:else class="chapter-content"><template is="readerHighlightedText" data="{{text: chapter.content, active: readerChapterIndex === readerHighlightChapterIndex && readerHighlightSectionId === '', before: readerHighlightBefore, current: readerHighlightCurrent, after: readerHighlightAfter}}" /></view>
+        <view wx:if="{{chapter.familyNotes.length}}" class="reader-section">
+          <text class="section-label">家人留言</text>
+          <view wx:for="{{chapter.familyNotes}}" class="chapter-content"><text user-select>{{item.display_name}}：{{item.content}}</text></view>
+        </view>
         </block>
       </view>
     </view>
@@ -276,7 +284,7 @@
     </block>
     <template is="shareLikeBar" data="{{shareLikeVisible, shareLiked, shareCanLike, shareLikeBusy, shareLikeAvatars, shareLikeText, shareLikeProfileMissing, shareForward: readerShared && !sharePreview}}" />
   </block>
-  <view wx:if="{{readerShared && !excerptMode && !sharePreview}}" hidden="{{loading || error}}">
+  <view wx:if="{{readerShared && (!excerptMode || excerptMode === 'shared') && !sharePreview}}" hidden="{{loading || error}}">
     <share-response-form id="shared-response" reading-token="{{responseToken}}" active="{{!loading && !error}}" bindunavailable="onResponseUnavailable" />
   </view>
 

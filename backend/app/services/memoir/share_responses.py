@@ -10,13 +10,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import WECHAT_PLACEHOLDER_DISPLAY_NAME
 from app.clock import utcnow_naive
 from app.models.memoir import (
-    MemoirShareResponse, MemoirShareResponseVoice, MemoirVoiceSession, MemoirVoiceUtterance,
+    MemoirBookPlanChapter, MemoirExcerptShare, MemoirSection, MemoirShareResponse, MemoirShareResponseVoice, MemoirVoiceSession, MemoirVoiceUtterance,
     MemoirTranscriptVersion, MemoirChatMessage,
 )
 from app.models.projects import Project
 from app.models.users import User
 from app.schemas.memoir_share_likes import MemoirShareLikeTarget
-from app.schemas.memoir_share_responses import ShareResponseCreate, ShareResponseItem, ShareResponseList
+from app.schemas.memoir_share_responses import FeaturedFamilyNote, ShareResponseCreate, ShareResponseItem, ShareResponseList
 from app.services.memoir import audio_files, book_shares, share_video_shares
 from app.models.memoir_common import AudioFile
 from app.services.memoir.access import load_memoir_project
@@ -27,7 +27,7 @@ from app.services.memoir.utterance_editing_pipeline import schedule_ready_uttera
 @dataclass(frozen=True)
 class ResponseTarget:
     project_id: str
-    kind: Literal["book", "chapter", "story", "video"]
+    kind: Literal["book", "chapter", "story", "video", "excerpt"]
     id: str
     title: str
     share_key: str
@@ -35,6 +35,9 @@ class ResponseTarget:
 
 async def response_target(db: AsyncSession, req: MemoirShareLikeTarget) -> ResponseTarget:
     # Serialize validation with stopping a share. Re-read after waiting on the lock.
+    if req.reading_token and req.reading_token.startswith(("x1.", "x2.")):
+        excerpt = await book_shares.resolve_excerpt(db, req.reading_token, lock=True)
+        return ResponseTarget(excerpt.project_id, "excerpt", excerpt.id, excerpt.title, excerpt.token_hash)
     if req.reading_token is not None:
         resource, _ = await book_shares.readable_share(db, req.reading_token)
         locked = await db.scalar(select(type(resource)).where(type(resource).id == resource.id)
@@ -81,13 +84,13 @@ async def create_response(db: AsyncSession, user: User, req: ShareResponseCreate
     await db.execute(insert(MemoirShareResponse).values(
         project_id=target.project_id, user_id=user.id, request_id=req.request_id,
         target_kind=target.kind, target_id=target.id, target_title=target.title,
-        display_name=name, content=req.content, voice_capture_id=req.voice_capture_id,
+        display_name=name, content=req.content, can_feature=req.can_feature, voice_capture_id=req.voice_capture_id,
     ).on_conflict_do_nothing(index_elements=["user_id", "request_id"]))
     row = await db.scalar(select(MemoirShareResponse).where(
         MemoirShareResponse.user_id == user.id, MemoirShareResponse.request_id == req.request_id,
     ))
     if (row.content != req.content or row.target_id != target.id or row.target_kind != target.kind
-            or row.voice_capture_id != req.voice_capture_id):
+            or row.voice_capture_id != req.voice_capture_id or row.can_feature != req.can_feature):
         raise HTTPException(status_code=409, detail="这次回应已提交，请勿重复修改")
     await db.commit()
     return ShareResponseItem.model_validate(row)
@@ -127,6 +130,40 @@ async def mark_read(db: AsyncSession, response_id: str, user_id: str) -> ShareRe
     row.read_at = row.read_at or utcnow_naive()
     await db.commit()
     return ShareResponseItem.model_validate(row)
+
+
+async def source_chapter_id(db: AsyncSession, row: MemoirShareResponse) -> str | None:
+    if row.target_kind == "chapter":
+        return await db.scalar(select(MemoirBookPlanChapter.id).where(
+            MemoirBookPlanChapter.id == row.target_id, MemoirBookPlanChapter.project_id == row.project_id))
+    elif row.target_kind in ("excerpt", "story"):
+        source = MemoirExcerptShare if row.target_kind == "excerpt" else MemoirSection
+        return await db.scalar(select(source.chapter_id).where(source.id == row.target_id, source.project_id == row.project_id))
+    return None
+
+
+async def feature_response(db: AsyncSession, response_id: str, user_id: str, featured: bool, chapter_id: str | None) -> ShareResponseItem:
+    row = await private_response(db, response_id, user_id, owner_only=True, lock=True)
+    if featured and not row.can_feature:
+        raise HTTPException(409, "这条回应提交时约定仅私下可见")
+    if featured and chapter_id is None:
+        chapter_id = await source_chapter_id(db, row)
+    if featured and chapter_id is not None:
+        chapter = await db.get(MemoirBookPlanChapter, chapter_id)
+        if chapter is None or chapter.project_id != row.project_id:
+            raise HTTPException(404, "章节不存在")
+    row.featured_at = (row.featured_at or utcnow_naive()) if featured else None
+    row.featured_chapter_id = chapter_id if featured else None
+    await db.commit()
+    return ShareResponseItem.model_validate(row)
+
+
+async def featured_for_target(db: AsyncSession, target: ResponseTarget) -> list[FeaturedFamilyNote]:
+    rows = await db.execute(select(MemoirShareResponse.display_name, MemoirShareResponse.content).where(
+        MemoirShareResponse.project_id == target.project_id, MemoirShareResponse.target_kind == target.kind,
+        MemoirShareResponse.target_id == target.id, MemoirShareResponse.featured_at.is_not(None),
+    ).order_by(MemoirShareResponse.created_at, MemoirShareResponse.id))
+    return [FeaturedFamilyNote(display_name=name, content=content) for name, content in rows]
 
 
 async def adopt_response(db: AsyncSession, response_id: str, user_id: str) -> ShareResponseItem:

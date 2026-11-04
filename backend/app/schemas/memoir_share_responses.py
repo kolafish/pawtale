@@ -7,6 +7,7 @@ from app.schemas.memoir_share_likes import MemoirShareLikeTarget
 
 class ShareResponseCreate(MemoirShareLikeTarget):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    can_feature: bool = False
     request_id: str = Field(min_length=1, max_length=80)
     content: str = Field(min_length=1, max_length=2000)
     voice_capture_id: str | None = Field(default=None, max_length=36)
@@ -19,7 +20,10 @@ class ShareResponseVoiceTicket(BaseModel):
 class ShareResponseItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
-    target_kind: Literal["book", "chapter", "story", "video"]
+    can_feature: bool
+    featured_at: datetime | None
+    featured_chapter_id: str | None
+    target_kind: Literal["book", "chapter", "story", "video", "excerpt"]
     target_title: str
     display_name: str
     content: str
@@ -28,6 +32,16 @@ class ShareResponseItem(BaseModel):
     read_at: datetime | None
     adopted_at: datetime | None
     adopted_utterance_id: str | None
+
+
+class FeatureResponseRequest(BaseModel):
+    featured: bool
+    chapter_id: str | None = None
+
+
+class FeaturedFamilyNote(BaseModel):
+    display_name: str
+    content: str
 
 
 class ShareResponseList(BaseModel):

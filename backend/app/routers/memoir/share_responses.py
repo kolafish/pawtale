@@ -5,7 +5,7 @@ from app.auth import get_current_user
 from app.database import get_db
 from app.models.users import User
 from app.schemas.memoir_share_responses import (
-    ShareResponseCreate, ShareResponseItem, ShareResponseList, ShareResponseVoiceTicket,
+    FeaturedFamilyNote, FeatureResponseRequest, ShareResponseCreate, ShareResponseItem, ShareResponseList, ShareResponseVoiceTicket,
 )
 from app.services.memoir import share_responses as service, share_response_voice as voice_service
 from app.schemas.memoir_share_likes import MemoirShareLikeTarget
@@ -26,6 +26,16 @@ router = APIRouter(dependencies=[Depends(no_store)])
 @router.post("/share-responses", response_model=ShareResponseItem)
 async def create_response(req: ShareResponseCreate, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     return await service.create_response(db, user, req)
+
+
+@router.post("/share-responses/featured", response_model=list[FeaturedFamilyNote])
+async def featured_responses(target: MemoirShareLikeTarget, db: AsyncSession = Depends(get_db)):
+    return await service.featured_for_target(db, await service.response_target(db, target))
+
+
+@router.put("/share-responses/{response_id}/feature", response_model=ShareResponseItem)
+async def feature_response(response_id: str, req: FeatureResponseRequest, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    return await service.feature_response(db, response_id, user.id, req.featured, req.chapter_id)
 
 
 @router.get("/share-responses/{response_id}", response_model=ShareResponseItem)

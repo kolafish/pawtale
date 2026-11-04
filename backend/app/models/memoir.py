@@ -1357,6 +1357,7 @@ class MemoirBookShare(Base):
 
 
 class MemoirExcerptShare(Base):
+    allow_book_link: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     __tablename__ = "memoir_excerpt_shares"
     __table_args__ = (CheckConstraint("char_length(content) BETWEEN 1 AND 512", name="ck_memoir_excerpt_share_length"),)
 
@@ -1443,7 +1444,7 @@ class MemoirShareResponse(Base):
     __tablename__ = "memoir_share_responses"
     __table_args__ = (
         UniqueConstraint("user_id", "request_id", name="uq_memoir_share_responses_request"),
-        CheckConstraint("target_kind IN ('book','chapter','story','video')", name="ck_memoir_share_responses_target"),
+        CheckConstraint("target_kind IN ('book','chapter','story','video','excerpt')", name="ck_memoir_share_responses_target"),
         Index("ix_memoir_share_responses_project_created", "project_id", "created_at"),
     )
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -1461,6 +1462,9 @@ class MemoirShareResponse(Base):
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, nullable=False)
     read_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    can_feature: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    featured_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    featured_chapter_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("memoir_book_plan_chapters.id", ondelete="SET NULL"))
     adopted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     adopted_utterance_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("memoir_voice_utterances.id", ondelete="SET NULL"), nullable=True,
@@ -1471,7 +1475,7 @@ class MemoirShareResponseVoice(Base):
     """A visitor-owned original recording with immutable ASR text and source timing."""
     __tablename__ = "memoir_share_response_voices"
     __table_args__ = (
-        CheckConstraint("target_kind IN ('book','chapter','story','video')", name="ck_memoir_share_response_voices_target"),
+        CheckConstraint("target_kind IN ('book','chapter','story','video','excerpt')", name="ck_memoir_share_response_voices_target"),
         Index("ix_memoir_share_response_voices_project_created", "project_id", "created_at"),
     )
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))

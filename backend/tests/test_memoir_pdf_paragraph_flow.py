@@ -287,3 +287,13 @@ def test_max_length_photo_caption_paginates_in_large_type_with_wide_margins(tmp_
                 assert center == pytest.approx(layout.page_width / 2 + offset, abs=0.5)
             for image in page.images:
                 assert line.y >= image.y + image.height or line.y + line.font_size <= image.y
+
+
+@pytest.mark.parametrize("edition", list(MemoirBookOutputExportLayout))
+def test_featured_family_note_follows_its_chapter(edition):
+    builder = PDFBookBuilder(title="回忆录", layout=PDF_LAYOUTS[edition])
+    _add_chapters(builder, [{"title": "第一章", "content": "正文", "family_notes": [
+        {"display_name": "小姑", "content": "我也记得这件事。"}]}, {"title": "第二章", "content": "下一章的正文"}])
+    lines = [command.text for page in builder.pages for command in page.commands if hasattr(command, "text")]
+    text = "".join(lines)
+    assert text.index("家人留言") < text.index("小姑：我也记得这件事。") < text.index("下一章的正文")

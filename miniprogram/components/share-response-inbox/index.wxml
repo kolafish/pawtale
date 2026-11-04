@@ -5,12 +5,20 @@
       <text class="response-person">{{selected.display_name}} · {{selected.target_title}}</text>
       <text class="response-content" user-select>{{selected.content}}</text>
       <button wx:if="{{selected.voice_capture_id}}" class="ui-button ui-share-more" bindtap="playOriginal">{{audioPlaying ? '停止原音' : '听家人原音'}}</button>
-      <text class="response-hint">仅您与回应人可见，收录不会直接改写书稿。</text>
+      <text class="response-hint">{{selected.featured_at ? "已精选。署名文字对读者可见，原音仅您与回应人可听。" : "当前仅您与回应人可见。"}}</text>
+      <block wx:if="{{selected.can_feature}}">
+        <text class="response-hint">精选后，署名文字在分享页公开。有对应章节时也收入章末及导出文件；没有对应章节时可另选。</text>
+        <button class="ui-button ui-share-primary" disabled="{{busy}}" bindtap="toggleFeatured">{{selected.featured_at ? '取消精选' : '精选留言'}}</button>
+        <button wx:if="{{selected.featured_at && !selected.featured_chapter_id && !chapterChoices.length}}" class="ui-share-more" disabled="{{busy}}" bindtap="chooseFeatureChapter">选择入书章节</button>
+        <picker wx:if="{{selected.featured_at && chapterChoices.length}}" range="{{chapterChoices}}" range-key="title" bindchange="selectFeatureChapter" disabled="{{busy}}">
+          <view class="ui-share-primary">选择收录章节 ›</view>
+        </picker>
+      </block>
       <button class="ui-button ui-share-primary" bindtap="adopt" disabled="{{busy || selected.adopted_at}}" loading="{{busy}}">{{selected.adopted_at ? '已收为补充素材' : '收为补充素材'}}</button>
       <button class="ui-button ui-share-more" bindtap="back">返回回应列表</button>
     </view>
     <block wx:else>
-      <button wx:for="{{items}}" wx:key="id" data-id="{{item.id}}" class="response-row ui-button" bindtap="select">{{item.display_name}} · {{item.target_title}}{{item.adopted_at ? ' · 已收录' : ''}}</button>
+      <button wx:for="{{items}}" wx:key="id" data-id="{{item.id}}" class="response-row ui-button" bindtap="select">{{item.display_name}} · {{item.target_title}}{{item.featured_at ? ' · 已精选' : ''}}{{item.adopted_at ? ' · 已收录' : ''}}</button>
       <button wx:if="{{next}}" class="ui-button ui-share-more" bindtap="loadMore" disabled="{{busy}}">查看更多回应</button>
     </block>
   </view>

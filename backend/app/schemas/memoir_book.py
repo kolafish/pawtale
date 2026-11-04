@@ -1,12 +1,16 @@
 from datetime import datetime
 from typing import Literal
 
+from app.schemas.memoir_share_responses import FeaturedFamilyNote
+
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
     field_validator,
     model_validator,
+    model_serializer,
+    SerializerFunctionWrapHandler,
 )
 
 from app.domain.memoir.types import (
@@ -626,6 +630,7 @@ class MemoirBookManuscriptIllustration(BaseModel):
 
 
 class MemoirBookManuscriptChapter(BaseModel):
+    family_notes: list[FeaturedFamilyNote] = Field(default_factory=list)
     chapter_id: str
     index: int
     title: str
@@ -640,6 +645,16 @@ class MemoirBookManuscriptChapter(BaseModel):
     sections: list[MemoirBookOutputSectionResponse] = Field(default_factory=list)
     source_refs: list[MemoirBookManuscriptSourceRef] = Field(default_factory=list)
     illustrations: list[MemoirBookManuscriptIllustration] = Field(default_factory=list)
+
+
+    @model_serializer(mode="wrap")
+    def serialize_chapter(self, handler: SerializerFunctionWrapHandler):
+        data = handler(self)
+        # Ordinary stored manuscripts predate this reader projection. Keep no-op
+        # saves and cached exports stable when the chapter has no selected notes.
+        if not self.family_notes:
+            data.pop("family_notes", None)
+        return data
 
 
 class MemoirBookManuscriptRenderSettings(BaseModel):
@@ -725,7 +740,17 @@ class MemoirExcerptImageRequest(MemoirExcerptSelection):
     background_note: str = Field(default="", max_length=300)
 
 
+class MemoirShareCardItem(BaseModel):
+    allow_book_link: bool
+    id: str
+    scope: Literal["excerpt", "book", "chapter", "story"]
+    title: str
+    token: str
+    created_at: datetime
+
+
 class MemoirExcerptShareRequest(MemoirExcerptSelection):
+    allow_book_link: bool = True
     title: str = Field(default="", max_length=40)
     summary: str = Field(default="", max_length=48)
     image_asset_id: str | None = Field(default=None, min_length=1, max_length=36)

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import HTTPException
-from sqlalchemy import delete, select
+from sqlalchemy import delete, literal, select, union_all
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute
@@ -27,12 +27,13 @@ from app.models.projects import Project
 from app.schemas.memoir_book import (
     MemoirBookOutputResponse, MemoirBookManuscriptIllustration, MemoirFeaturedBookResponse,
     MemoirExcerptSelection, MemoirExcerptTitle, MemoirExcerptReadingLink,
-    MemoirExcerptShareRequest, MemoirExcerptShareResponse, MemoirExcerptShareCreated,
+    MemoirShareCardItem, MemoirExcerptShareRequest, MemoirExcerptShareResponse, MemoirExcerptShareCreated,
     MemoirBookOutputVersionSummaryResponse,
     MemoirBookShareCreateResponse,
     MemoirReadingShareCardSelection, MemoirReadingShareCardRequest,
     MemoirBookShareStatusResponse, MemoirAudioPlanRequest, MemoirSharedAudioPlanResponse,
 )
+from app.services.memoir.featured_family_notes import attach_chapter_notes
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.book_output_versions import book_output_version_title, load_latest_book_output_version
 from app.services.memoir.book_outputs import _output_version_response
@@ -49,7 +50,7 @@ ShareResource = MemoirBookOutput | MemoirBookPlanChapter | MemoirSection
 ShareVersion = MemoirBookOutputVersion | MemoirBookChapterDraftVersion
 
 
-def _stable_token(output_id: str, token_hash: str, *, scope: ShareScope = "book") -> str:
+def _stable_token(output_id: str, token_hash: str, *, scope: Literal["book", "chapter", "story", "excerpt"] = "book") -> str:
     # Legacy shares retain only a hash; bind a recoverable token to that hash
     # without making the stored hash usable as a public link.
     namespace = f"memoir-{scope}-share:v1"
@@ -58,7 +59,7 @@ def _stable_token(output_id: str, token_hash: str, *, scope: ShareScope = "book"
         f"{namespace}\0{output_id}\0{token_hash}".encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()
-    return f"{dict(book='v1', chapter='c1', story='s1')[scope]}.{output_id}.{signature}"
+    return f"{dict(book='v1', chapter='c1', story='s1', excerpt='x2')[scope]}.{output_id}.{signature}"
 
 
 def share_scope(resource: ShareResource) -> ShareScope:
@@ -358,8 +359,8 @@ def _like_target(resource: ShareResource) -> ShareLikeTarget:
 
 async def reading_like_target(db: AsyncSession, token: str) -> ShareLikeTarget:
     """Readers like what the link shows: the whole book or one chapter."""
-    if token.startswith("x1."):
-        excerpt = await _excerpt_share(db, token)
+    if token.startswith(("x1.", "x2.")):
+        excerpt = await resolve_excerpt(db, token)
         chapter = await db.get(MemoirBookPlanChapter, excerpt.chapter_id)
         if chapter is None:
             raise HTTPException(404, "分享链接已失效")
@@ -458,18 +459,45 @@ async def create_excerpt_share(
     project = await db.get(Project, project_id)
     token = "x1." + secrets.token_urlsafe(32)
     share = MemoirExcerptShare(project_id=project_id, chapter_id=chapter_id, version_id=version.id,
-        token_hash=session_token_hash(token), book_title=project.title, chapter_title=chapter.title, content=content,
+        allow_book_link=selection.allow_book_link, token_hash=session_token_hash(token), book_title=project.title, chapter_title=chapter.title, content=content,
         title=selection.title.strip() or chapter.title, summary=selection.summary.strip(), image_asset_id=selection.image_asset_id)
     db.add(share)
     await db.commit()
     return MemoirExcerptShareCreated(token=token, **(await _excerpt_response(db, share, token, viewer_id=user_id)).model_dump())
 
 
-async def _excerpt_share(db: AsyncSession, token: str) -> MemoirExcerptShare:
-    if not re.fullmatch(r"x1\.[A-Za-z0-9_-]{43}", token):
+async def list_share_cards(db: AsyncSession, project_id: str, user_id: str, offset: int, limit: int) -> list[MemoirShareCardItem]:
+    await load_memoir_project(db, project_id, user_id)
+    excerpt = MemoirExcerptShare
+    queries = [select(excerpt.id, literal("excerpt").label("scope"), excerpt.title,
+                      excerpt.token_hash, excerpt.created_at, excerpt.allow_book_link).where(excerpt.project_id == project_id)]
+    for scope, resource in (("book", MemoirBookOutput), ("chapter", MemoirBookPlanChapter), ("story", MemoirSection)):
+        table, key = _share_table(scope)
+        queries.append(select(resource.id, literal(scope), resource.title, table.token_hash, table.created_at, literal(False))
+            .join(table, key == resource.id).where(resource.project_id == project_id,
+                table.expires_at.is_(None) | (table.expires_at > utcnow_naive())))
+    cards = union_all(*queries).subquery()
+    rows = await db.execute(select(cards).order_by(cards.c.created_at.desc(), cards.c.id, cards.c.scope).offset(offset).limit(limit))
+    return [MemoirShareCardItem(id=row.id, allow_book_link=row.allow_book_link, scope=row.scope, title=row.title, created_at=row.created_at,
+            token=_stable_token(row.id, row.token_hash, scope=row.scope)) for row in rows]
+
+
+async def revoke_excerpt(db: AsyncSession, project_id: str, user_id: str, excerpt_id: str) -> None:
+    await load_memoir_project(db, project_id, user_id)
+    await db.execute(delete(MemoirExcerptShare).where(MemoirExcerptShare.project_id == project_id, MemoirExcerptShare.id == excerpt_id))
+    await db.commit()
+
+
+async def resolve_excerpt(db: AsyncSession, token: str, *, lock: bool = False) -> MemoirExcerptShare:
+    stable = re.fullmatch(r"x2\.([0-9a-f-]{36})\.[0-9a-f]{64}", token)
+    if stable:
+        query = select(MemoirExcerptShare).where(MemoirExcerptShare.id == stable[1])
+    elif re.fullmatch(r"x1\.[A-Za-z0-9_-]{43}", token):
+        query = select(MemoirExcerptShare).where(MemoirExcerptShare.token_hash == session_token_hash(token))
+    else:
         raise HTTPException(404, "分享链接已失效")
-    share = await db.scalar(select(MemoirExcerptShare).where(MemoirExcerptShare.token_hash == session_token_hash(token)))
-    if share is None:
+    share = await db.scalar(query.with_for_update() if lock else query)
+    if share is None or (stable and not hmac.compare_digest(token, _stable_token(share.id, share.token_hash, scope="excerpt"))):
         raise HTTPException(404, "分享链接已失效")
     return share
 
@@ -480,6 +508,8 @@ async def _excerpt_image(db: AsyncSession, share: MemoirExcerptShare) -> MemoirI
 
 
 async def _excerpt_reading_link(db: AsyncSession, share: MemoirExcerptShare) -> MemoirExcerptReadingLink | None:
+    if not share.allow_book_link:
+        return None
     output_id = await db.scalar(select(MemoirBookOutput.id).where(MemoirBookOutput.project_id == share.project_id))
     publication = await db.get(MemoirBookShare, output_id, populate_existing=True) if output_id else None
     if not _active(publication):
@@ -507,11 +537,11 @@ async def _excerpt_response(db: AsyncSession, share: MemoirExcerptShare, token: 
 
 
 async def read_excerpt_share(db: AsyncSession, token: str, *, viewer_id: str | None = None) -> MemoirExcerptShareResponse:
-    return await _excerpt_response(db, await _excerpt_share(db, token), token, viewer_id=viewer_id)
+    return await _excerpt_response(db, await resolve_excerpt(db, token), token, viewer_id=viewer_id)
 
 
 async def excerpt_share_image(db: AsyncSession, token: str) -> Path:
-    asset = await _excerpt_image(db, await _excerpt_share(db, token))
+    asset = await _excerpt_image(db, await resolve_excerpt(db, token))
     if asset is None:
         raise HTTPException(404, "图片已移除")
     return await asyncio.to_thread(image_asset_file_path, asset, reading=True)
@@ -519,7 +549,7 @@ async def excerpt_share_image(db: AsyncSession, token: str) -> Path:
 
 async def excerpt_share_card(db: AsyncSession, token: str) -> bytes:
     from app.services.memoir.reading_share_card import render_excerpt_share_card
-    share = await _excerpt_share(db, token)
+    share = await resolve_excerpt(db, token)
     asset = await _excerpt_image(db, share)
     image = None
     if asset:
@@ -535,7 +565,7 @@ async def excerpt_share_poster(db: AsyncSession, token: str, *, user_id: str, qu
     from app.services.memoir.reading_share_card import render_excerpt_share_poster
     from app.services.wechat_miniprogram_code import fetch_miniprogram_code, WeChatMiniProgramCodeError
 
-    share = await _excerpt_share(db, token)
+    share = await resolve_excerpt(db, token)
     project = await db.get(Project, share.project_id)
     if project is None or project.user_id != user_id:
         raise HTTPException(404, "分享链接已失效")
@@ -621,6 +651,8 @@ async def _resource_reading_response(
         result = public_reading_response(output, reading_version)
     else:
         result = public_reading_response(resource, version, include_book_details=True)
+    if scope in ("book", "chapter") and result.latest_version:
+        await attach_chapter_notes(db, resource.project_id, result.latest_version.manuscript)
     return await _share_presentation(db, result, token=token, scope=scope) if presentation else result
 
 

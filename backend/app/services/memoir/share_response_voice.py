@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow_naive
 from app.database import async_session_maker
-from app.models.memoir import MemoirShareResponse, MemoirShareResponseVoice
+from app.models.memoir import MemoirExcerptShare, MemoirShareResponse, MemoirShareResponseVoice
 from app.models.memoir_common import AudioFile
 from app.models.projects import Project
 from app.models.users import User
@@ -36,7 +36,11 @@ async def valid_capture(db: AsyncSession, capture_id: str, user_id: str) -> Memo
         raise HTTPException(status_code=404, detail="录音已失效，请重新录制")
     if capture.audio_file_id:
         raise HTTPException(status_code=409, detail="这段录音已完成")
-    if capture.target_kind == "video":
+    if capture.target_kind == "excerpt":
+        excerpt = await db.get(MemoirExcerptShare, capture.target_id, populate_existing=True)
+        if not excerpt or excerpt.token_hash != capture.share_key:
+            raise HTTPException(404, "选文分享已停止")
+    elif capture.target_kind == "video":
         await share_video_shares.validate_share_key(db, capture.target_id, capture.share_key)
     else:
         await book_shares.validate_share_key(db, capture.target_kind, capture.target_id, capture.share_key)
@@ -49,7 +53,9 @@ async def active_capture_ticket(db: AsyncSession, capture_id: str, user_id: str)
     if (capture is None or capture.user_id != user_id or capture.audio_file_id
             or capture.expires_at <= utcnow_naive()):
         return False
-    if capture.target_kind == "video":
+    if capture.target_kind == "excerpt":
+        key = await db.scalar(select(MemoirExcerptShare.token_hash).where(MemoirExcerptShare.id == capture.target_id))
+    elif capture.target_kind == "video":
         key = await share_video_shares.active_share_key(db, capture.target_id)
     else:
         key = await book_shares.active_share_key(db, capture.target_kind, capture.target_id)

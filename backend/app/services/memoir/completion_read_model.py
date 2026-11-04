@@ -700,7 +700,10 @@ async def chapter_workspace(
     )
     from app.services.memoir.image_assets import manuscript_image_snapshots
     chapter_images, _, _ = await manuscript_image_snapshots(db, project_id=project_id)
+    from app.services.memoir.featured_family_notes import chapter_notes
+    notes = await chapter_notes(db, project_id, [chapter_id])
     return MemoirChapterWorkspaceResponse(
+        family_notes=notes.get(chapter_id, []),
         illustrations=[{**image, "storage_path": "", "image_url": f"/api/mobile/memoir/projects/{project_id}/image-assets/{image['image_asset_id']}/file?variant=reading"}
                        for image in chapter_images.get(chapter_id, [])],
         server_revision=server_revision or 0,

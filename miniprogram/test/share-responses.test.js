@@ -317,3 +317,19 @@ test('old private audio download cannot change newly selected response playback 
   await latest;
   assert.equal(ctx.data.audioPlaying, false);
 });
+
+test("the author can feature an excerpt response in its own chapter and unfeature it", async () => {
+  const row = { id: "r", can_feature: true, featured_chapter_id: null };
+  const changes = [];
+  mockModule("../services/share-responses.ts", { featureShareResponse: async (id, chapter, featured) => {
+    changes.push([id, featured]);
+    return { ...row, featured_at: featured ? "now" : null, featured_chapter_id: featured ? (chapter || "chapter") : null };
+  } });
+  const { component } = loadComponentModule("../components/share-response-inbox/index.ts");
+  const ctx = componentContext(component, { projectId: "p", userId: "owner" });
+  ctx.setData({ items: [row], selected: row });
+  await ctx.toggleFeatured();
+  assert.equal(ctx.data.selected.featured_chapter_id, "chapter");
+  await ctx.toggleFeatured();
+  assert.deepEqual(changes, [["r", true], ["r", false]]);
+});

@@ -1414,16 +1414,17 @@ def _add_chapters(builder: PDFBookBuilder, chapters: list[Any]) -> None:
                 )
             ]
             _add_illustration_gallery(builder, unanchored_illustrations)
-            builder.finish_image_wrap()
-            continue
-        content = _without_leading_quote_overlap(
-            _str(chapter.get("content")),
-            quote,
-        )
-        if content:
-            builder.add_body_text(content)
-        _add_illustration_gallery(builder, inline_illustrations)
+        else:
+            content = _without_leading_quote_overlap(_str(chapter.get("content")), quote)
+            if content:
+                builder.add_body_text(content)
+            _add_illustration_gallery(builder, inline_illustrations)
         builder.finish_image_wrap()
+        notes = _list(chapter.get("family_notes"))
+        if notes:
+            builder.add_heading("家人留言")
+            for note in notes:
+                builder.add_body_text(f"{note['display_name']}：{note['content']}")
 
 
 def _add_unconfirmed_facts(builder: PDFBookBuilder, facts: list[Any]) -> None:

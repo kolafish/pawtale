@@ -447,3 +447,57 @@ def test_card_and_poster_share_light_edge_tints_without_recoloring_the_subject()
             papers.append(paper)
     assert papers[0][2] > papers[0][0]  # blue edge, despite the warm subject
     assert papers[1][0] > papers[1][2]  # pink edge
+
+
+async def test_library_reshare_private_and_featured_responses(client, test_db):
+    project_id, chapter, _, version, _, _, _ = await saved_stories(client, test_db)
+    root = "/api/mobile/memoir"
+    project = f"{root}/projects/{project_id}"
+    card = (await client.post(f"{project}/chapters/{chapter.id}/excerpt-shares",
+        json={"version_id": version.id, "content": "院子里的正文", "allow_book_link": False})).json()
+    listing = await client.get(f"{project}/share-cards")
+    assert listing.status_code == 200, listing.text
+    item, = listing.json()
+    family = await _family_member(test_db, "小姑")
+    async with family, AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as guest:
+        token = {"reading_token": item["token"]}
+        read = await guest.post(f"{root}/excerpt-shares/read", json={"token": item["token"]})
+        assert read.json()["content"] == card["content"]
+        assert (await family.get(f"{project}/share-cards")).status_code == 404
+        text = "我记得那棵树。"
+        message = await family.post(f"{root}/share-responses", json={**token, "request_id": "family",
+            "content": text, "can_feature": True})
+        assert message.status_code == 200, message.text
+        path = f"{root}/share-responses/{message.json()['id']}/feature"
+        public = f"{root}/share-responses/featured"
+        assert (await guest.post(public, json=token)).json() == []
+        assert (await family.put(path, json={"featured": True, "chapter_id": chapter.id})).status_code == 404
+        selected = await client.put(path, json={"featured": True})
+        assert selected.status_code == 200 and selected.json()["featured_chapter_id"] == chapter.id
+        assert (await guest.post(public, json=token)).json() == [{"display_name": "小姑", "content": text}]
+        from app.models.memoir import MemoirBookOutput, MemoirBookOutputVersion
+        from app.services.memoir.book_output_snapshots import chapter_snapshot
+        output = MemoirBookOutput(project_id=project_id, plan_id=chapter.plan_id, title="回忆录")
+        test_db.add(output)
+        await test_db.flush()
+        test_db.add(MemoirBookOutputVersion(output_id=output.id, project_id=project_id,
+            plan_id=chapter.plan_id, version=1, content=version.content,
+            chapter_snapshot_json=[chapter_snapshot(chapter, version, chapter_index=1)]))
+        await test_db.commit()
+        book_token = (await client.put(f"{project}/book-output/share")).json()["token"]
+        reading = (await guest.post(f"{root}/book-shares/read", json={"token": book_token})).json()
+        assert reading["latest_version"]["manuscript"]["chapters"][0]["family_notes"] == [{"display_name": "小姑", "content": text}]
+        assert (await guest.post(f"{root}/excerpt-shares/read", json={"token": item["token"]})).json()["reading_link"] is None
+        txt = await client.get(f"{project}/book-output/export", params={"format": "txt"})
+        assert txt.status_code == 200 and "小姑：" + text in txt.text
+        pdf_info = f"{project}/book-output/export/info"
+        key = (await client.get(pdf_info)).json()["cache_key"]
+        assert (await client.put(path, json={"featured": False})).status_code == 200
+        assert (await client.get(pdf_info)).json()["cache_key"] != key
+        assert text not in (await client.get(f"{project}/book-output/export", params={"format": "txt"})).text
+        assert (await guest.post(public, json=token)).json() == []
+        legacy = (await family.post(f"{root}/share-responses", json={**token, "request_id": "legacy", "content": text})).json()
+        assert (await client.put(f"{root}/share-responses/{legacy['id']}/feature", json={"featured": True, "chapter_id": chapter.id})).status_code == 409
+        assert (await client.delete(f"{project}/excerpt-shares/{item['id']}")).status_code == 204
+        for old_token in (card["token"], item["token"]):
+            assert (await guest.post(f"{root}/excerpt-shares/read", json={"token": old_token})).status_code == 404
