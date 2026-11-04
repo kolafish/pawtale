@@ -678,6 +678,7 @@ test("shared reading restores its chapter and scroll position, then resets obsol
   await reopened.onLoad({ shareToken: "family" });
   assert.equal(reopened.data.readerChapterIndex, 0);
   assert.equal(reopened.data.resumeAvailable, true);
+  reopened.onPageScroll({ scrollTop: 24 });
   reopened.onHide();
   reopened.continueSharedReading();
   assert.equal(reopened.data.readerChapterIndex, 1);
