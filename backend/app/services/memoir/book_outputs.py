@@ -111,10 +111,9 @@ SNAPSHOT_COMPARE_KEYS = (
     "chapter_title",
     "chapter_sort_order",
     "draft_id",
-    "draft_version_id",
-    "draft_version",
-    "content_char_count",
-    "section_count",
+    "content",
+    "sections",
+    "source_refs",
 )
 
 
@@ -205,17 +204,6 @@ def _compose_book_content(
             )
         )
     return book_content_from_chapter_snapshots(title=title, snapshots=snapshot), snapshot
-
-
-def _compose_book_content_from_snapshot(
-    *,
-    title: str,
-    snapshot: list[dict[str, object]],
-) -> str:
-    return book_content_from_chapter_snapshots(
-        title=title,
-        snapshots=[item for item in snapshot if isinstance(item, dict)],
-    )
 
 
 def _replace_book_content_title(content: str, title: str) -> str:
@@ -538,7 +526,9 @@ async def update_book_output(
     stored_metadata = stored_manuscript_metadata(latest.manuscript_json)
     claim_editorial_copy_fields(output, targets=[key for key in ("subtitle", "preface", "afterword", "back_cover_quote")
         if key in metadata_patch and metadata_patch[key] != stored_metadata[key]], chapter_fields={})
-    content = _compose_book_content_from_snapshot(title=title, snapshot=snapshot)
+    content = latest.content
+    if title != book_output_version_title(latest, fallback=output.title):
+        content = _replace_book_content_title(content, title)
     manuscript_json = _updated_manuscript_payload(
         title=title,
         stored=latest.manuscript_json or {},
@@ -719,11 +709,11 @@ async def regenerate_book_output_editorial_copy(
             failed |= chapter_ids
         state.failed_chapter_ids = sorted(failed)
         state.status = "failed" if failed or (not editorial_copy and targets) else "succeeded"
-    manuscript_json = manuscript.model_dump(mode="json") if editorial_copy else latest.manuscript_json
+    manuscript_json = manuscript.model_dump(mode="json", exclude_unset=True) if editorial_copy else latest.manuscript_json
     review_metadata_changed = stored_manuscript_metadata(manuscript_json) != protected_book_copy
     parent_id = await db.scalar(select(MemoirEditingJob.id).where(
         MemoirEditingJob.dedupe_key == f"update-book-draft:{project_id}",
-    )) if review_metadata_changed else None
+    )) if automatic and review_metadata_changed else None
     if parent_id:
         # The parent takes directory locks before writing its job/output. Keep
         # that order and commit the copy plus its wake-up together.

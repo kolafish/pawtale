@@ -1207,3 +1207,49 @@ async def test_generate_subtitle_for_saved_book(client, test_db, monkeypatch, au
     manuscript = result.latest_version.manuscript
     assert manuscript.profile.subtitle == "老街的桂花香"
     assert all("老街的桂花香" in item.content for item in manuscript.front_matter if item.kind in ("cover", "title_page"))
+
+
+async def test_copy_on_family_proofread_book_preserves_body_and_export(client, test_db, monkeypatch):
+    from app.models.memoir import MemoirBookChapterDraftVersion
+    from app.services.memoir import chapter_generation
+    from tests.test_memoir_continuous_book import _ready_book
+
+    pid, cid, _, _, parent = await _ready_book(client, test_db, monkeypatch)
+    version = await test_db.get(MemoirBookOutputVersion, parent.result_json["output_version_id"])
+    authored = await chapter_generation.latest_chapter_draft_version(test_db, project_id=pid, chapter_id=cid)
+    authored.created_by, authored.prompt_snapshot = "user", ""
+    version.content = "家人校订本\n\n" + authored.content
+    manuscript = copy.deepcopy(version.manuscript_json)
+    manuscript["chapters"][0]["intro"] = ""
+    version.manuscript_json = manuscript
+    await test_db.commit()
+    context = await chapter_generation.load_chapter_generation_context(test_db, project_id=pid, chapter_id=cid)
+    assert chapter_generation.chapter_draft_render_policy_current(context, authored)
+
+    # Some existing books already have an equivalent newer chapter version.
+    test_db.add(MemoirBookChapterDraftVersion(
+        draft_id=authored.draft_id, project_id=pid, chapter_id=cid, version=authored.version + 1,
+        content=authored.content, created_by="ai", input_signature=authored.input_signature,
+        used_material_ids_json=authored.used_material_ids_json, material_snapshot_json=authored.material_snapshot_json,
+        section_snapshot_json=authored.section_snapshot_json,
+    ))
+    await test_db.commit()
+    async def generate(**kwargs):
+        assert kwargs["targets"] == ["afterword"]
+        return _copy(kwargs["snapshot"])
+    monkeypatch.setattr(book_outputs, "generate_manuscript_editorial_copy", generate)
+    path = f"/api/mobile/memoir/projects/{pid}/book-output"
+    response = await client.post(path + "/editorial-copy/regenerate", json={"targets": ["afterword"]})
+    assert response.status_code == 200, response.text
+    saved = await client.patch(path, json={"subtitle": "家人保存的副标题"})
+    assert saved.status_code == 200, saved.text
+    current = saved.json()
+    assert not current["is_stale"] and not current["stale_chapter_titles"]
+    latest = current["latest_version"]
+    assert latest["content"] == version.content
+    assert latest["manuscript"]["chapters"][0]["intro"] == ""
+    assert latest["manuscript"]["back_matter"]["afterword"]["content"] == "自动后记1"
+    assert not await test_db.scalar(select(MemoirEditingJob.id).where(
+        MemoirEditingJob.project_id == pid, MemoirEditingJob.status.in_(["running", "pending"])))
+    exported = await client.get(path + "/export?format=txt")
+    assert exported.status_code == 200 and authored.content in exported.text

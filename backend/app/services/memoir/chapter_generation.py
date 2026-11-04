@@ -706,6 +706,10 @@ def chapter_draft_render_policy_current(
     if latest is None:
         return False
     prompt_snapshot = str(getattr(latest, "prompt_snapshot", "") or "")
+    # An authored chapter with no generator stamp has no automatic style to upgrade.
+    # Its source, section and fact freshness are still checked independently.
+    if not prompt_snapshot and latest.created_by == MemoirCreatedBy.USER.value:
+        return True
     if prompt_snapshot.startswith(f"{CHAPTER_GENERATION_ENGINE}:polish="):
         recorded = prompt_snapshot.split(":polish=", 1)[1].split(":", 1)[0]
         return recorded == context.polish_level.value

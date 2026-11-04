@@ -543,16 +543,10 @@ def editable_manuscript(
     snapshot: list[dict[str, object]],
     stored: object,
 ) -> MemoirBookManuscript | None:
-    if isinstance(stored, dict) and stored:
-        try:
-            manuscript = MemoirBookManuscript.model_validate(
-                sanitize_manuscript_payload(title=title, manuscript=stored)
-            )
-            manuscript.schema_version = 5
-            return manuscript
-        except ValueError:
-            pass
-    return manuscript_from_snapshot(title=title, content=content, snapshot=snapshot)
+    manuscript = manuscript_response(title=title, content=content, snapshot=snapshot, stored=stored)
+    if manuscript:
+        manuscript.schema_version = 5
+    return manuscript
 
 
 def updated_manuscript_payload(
@@ -574,25 +568,29 @@ def updated_manuscript_payload(
     )
     if not manuscript:
         return {}
-    metadata = effective_book_metadata(project=None, stored=stored, patch=metadata_patch, include_empty=True)
+    patch = metadata_patch or {}
+    cover_changed = manuscript.profile.title != title
     manuscript.profile.title = title
     if manuscript_template is not None:
         manuscript.profile.template = manuscript_template
         manuscript.render_settings.custom_layout = MemoirBookCustomLayout()
     if custom_layout is not None:
         manuscript.render_settings.custom_layout = custom_layout
-    manuscript.profile.subtitle = metadata["subtitle"]
-    manuscript.profile.narrator_name = metadata["narrator_name"]
-    manuscript.profile.prepared_by = metadata["prepared_by"]
     if cover_style_value:
         manuscript.render_settings.cover_style = cover_style(cover_style_value)
-    manuscript.render_settings.back_cover_quote = metadata["back_cover_quote"]
-    _sync_cover_text(manuscript)
-    for section in manuscript.front_matter:
-        if section.kind == "preface":
-            section.content = metadata["preface"]
-    manuscript.back_matter.afterword.content = metadata["afterword"]
-    return manuscript.model_dump(mode="json")
+    for field in BOOK_PROFILE_TEXT_FIELDS:
+        if field in patch:
+            setattr(manuscript.profile, field, patch[field] or ("家人整理" if field == "prepared_by" else ""))
+            cover_changed = True
+    if cover_changed:
+        _sync_cover_text(manuscript)
+    if "preface" in patch:
+        _set_preface(manuscript, patch["preface"])
+    if "afterword" in patch:
+        manuscript.back_matter.afterword.content = patch["afterword"]
+    if "back_cover_quote" in patch:
+        manuscript.render_settings.back_cover_quote = patch["back_cover_quote"]
+    return manuscript.model_dump(mode="json", exclude_unset=True)
 
 
 def _sync_cover_text(manuscript: MemoirBookManuscript) -> None:
