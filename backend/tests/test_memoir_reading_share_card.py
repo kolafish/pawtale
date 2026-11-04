@@ -41,7 +41,7 @@ async def test_book_card_is_public_jpeg_with_real_metadata_and_revocable(client,
         assert response.headers["cache-control"] == "no-store"
         with Image.open(BytesIO(response.content)) as image:
             assert image.size == (1000, 800)
-        assert captured[-1] == dict(title="外婆回忆录", image_content=None, picture_label="",
+        assert captured[-1] == dict(image_content=None, picture_label="",
                                    chapter_count=1, char_count=len(version.content))
         chapter = version.chapter_snapshot_json[0]
         chapter_token = (await client.put(path, params={"chapter_id": chapter["chapter_id"]})).json()["token"]
@@ -185,7 +185,7 @@ async def test_card_selection_rechecks_story_after_waiting_for_directory_lock(cl
 
 def test_card_renderer_handles_long_titles_and_no_excerpt():
     title = "很长的真实书名" * 20
-    for data in (reading_share_card.render_book_share_card(title=title, chapter_count=8, char_count=12000),
+    for data in (reading_share_card.render_book_share_card(chapter_count=8, char_count=12000),
                  reading_share_card.render_chapter_share_card(title=title, book_title="家人的回忆录" * 20)):
         with Image.open(BytesIO(data)) as image:
             assert image.size == (1000, 800)

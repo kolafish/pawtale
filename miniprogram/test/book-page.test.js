@@ -239,7 +239,7 @@ test("one share action prepares the default book, reuses its link, and can stop 
   await context.prepareReadingShare();
   assert.equal(context.data.bookShareReady, true);
   assert.deepEqual(context.onShareAppMessage(), {
-    title: "外婆回忆录", path: "/pages/book-reader/index?shareToken=family-secret", imageUrl: "https://pawtale-api.spaceflows.cn/api/mobile/memoir/book-shares/family-secret/card.jpg?design=2",
+    title: "外婆回忆录", path: "/pages/book-reader/index?shareToken=family-secret", imageUrl: "https://pawtale-api.spaceflows.cn/api/mobile/memoir/book-shares/family-secret/card.jpg?design=3",
   });
   await context.revokeBookShare();
   assert.deepEqual(calls, [["ensure", "project/1", undefined, undefined], ["stop", "project/1", undefined, undefined]]);
