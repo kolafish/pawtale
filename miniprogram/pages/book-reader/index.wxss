@@ -601,8 +601,8 @@
 .edition-art { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
 .edition-cover-copy { position: relative; width: 100%; font-family: var(--ui-font-editorial); }
 .edition-title, .edition-subtitle, .edition-byline, .edition-caption { display: block; overflow-wrap: anywhere; }
-.edition-title { font-size: max(27px, 56rpx); line-height: 1.4; font-weight: 700; }
-.large-text .edition-title { font-size: max(32px, 64rpx); }
+.edition-title { text-wrap: balance; font-size: max(27px, 56rpx); line-height: 1.4; font-weight: 700; }
+.large-text .edition-title { text-wrap: balance; font-size: max(32px, 64rpx); }
 .edition-subtitle { margin-top: 18rpx; font-size: var(--ui-font-body); line-height: 1.65; }
 .edition-byline, .edition-caption { font-size: var(--ui-font-meta); line-height: 1.6; }
 .edition-byline { margin-top: 42rpx; }
