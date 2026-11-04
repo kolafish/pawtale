@@ -156,8 +156,7 @@ export function writeCachedMemoirHome(snapshot: MemoirHomeSnapshot): void {
   );
 }
 
-export function readCachedMemoirBook(): MemoirCacheReadResult<MemoirBookSnapshot> {
-  const identity = cachedIdentity();
+export function readCachedMemoirBook(identity = cachedIdentity()): MemoirCacheReadResult<MemoirBookSnapshot> {
   return identity
     ? readMemoirCache(bookDescriptor(identity))
     : { status: "miss" };

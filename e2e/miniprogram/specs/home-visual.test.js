@@ -25,8 +25,7 @@ function baseState() {
   return {
     loading: false, creatingVoice: false, voiceEntry: null, needsLogin: false,
     error: "", userId: "visual-user", displayName: "Kola", projectId: "visual-project",
-    hasProject: true, greetingText: "你好，Kola", voiceStartButtonClass: "",
-    voiceStartButtonHoverClass: "voice-start-button-hover", primaryVoiceButtonTitle: "开始讲述",
+    hasProject: true, greetingText: "你好，Kola", voiceStartDisabled: false, primaryVoiceButtonTitle: "开始讲述",
     voiceAuthorizationAgreed: true, voiceAuthorizationRequested: false, showVoiceAuthorizationPanel: false,
     largeTextEnabled: false, homePageClass: "home-page", storyLoaded: true, storyError: "", notice: null,
     shareCandidate: null, shareVideoTotal: 0, shareVideoActiveCount: 0, shareVideoFailedCount: 0,
@@ -44,7 +43,7 @@ function stateFixtures() {
     { name: "populated", data: base },
     { name: "logged-out", data: { ...base, needsLogin: true, userId: "", displayName: "", projectId: "", hasProject: false, greetingText: "你好" } },
     { name: "authorization-requested", data: { ...base, voiceAuthorizationAgreed: false, voiceAuthorizationRequested: true, showVoiceAuthorizationPanel: true } },
-    { name: "first-load-failure", data: { ...base, storyLoaded: false, hasProject: false, projectId: "", error: "网络暂不可用，请重试" }, retry: true },
+    { name: "first-load-failure", data: { ...base, voiceStartDisabled: true, storyLoaded: false, hasProject: false, projectId: "", error: "网络暂不可用，请重试" }, retry: true },
     { name: "cached-refresh-failure", data: { ...base, storyError: "进度暂未刷新，已保存的讲述和故事仍在，稍后会再试。" }, retry: true },
     { name: "video-recommendation", data: { ...base, shareCandidate: { id: "visual-candidate", status: "ready" }, shareVideoTotal: 3 } },
     { name: "large-text-long-copy", data: {
