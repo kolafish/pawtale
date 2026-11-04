@@ -550,6 +550,7 @@
 .large-text .voice-card-title { font-size: 58rpx; }
 .large-text .voice-card-subtitle { font-size: var(--ui-font-large-body); }
 .large-text .voice-start-button { min-height: var(--ui-hit-size); font-size: 37rpx; }
+.large-text .memoir-switch-action,
 .large-text .memoir-card-kicker { font-size: var(--ui-font-large-meta); }
 .large-text .memoir-card-title { font-size: 48rpx; }
 .large-text .memoir-card-progress { font-size: var(--ui-font-large-body); }

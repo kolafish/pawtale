@@ -1348,23 +1348,17 @@ for (const reconnectFirst of [false, true]) {
   });
 }
 
-test("embedded voice chat uses home as its only finish action and saves before returning", async () => {
-  const template = fs.readFileSync(path.join(__dirname, "../components/voice-session/index.wxml"), "utf8");
-  assert.match(template, /wx:if="\{\{!embedded\}\}"\s+id="voice-finish-action"/);
-  assert.match(template, /id="voice-home-action"[\s\S]*?bindtap="returnToHome"/);
+test("embedded home and finish buttons select different destinations on the same save path", async () => {
   const page = loadVoiceChatPage();
   const context = componentContext(page.definition, { embedded: true }, {
     voiceSessionId: "voice-1",
     finishingSession: false,
   });
-  let finishCalls = 0;
-  context.finishSession = async () => {
-    finishCalls += 1;
-  };
-
+  const destinations = [];
+  context.finishSession = async destination => { destinations.push(destination); };
   await context.returnToHome();
-
-  assert.equal(finishCalls, 1);
+  await context.finishAndOpenMaterial();
+  assert.deepEqual(destinations, [undefined, "material"]);
   assert.equal(context.runtime().pageSuspended, false);
   assert.deepEqual(context.events, []);
 });
@@ -3704,6 +3698,8 @@ test("finished audio-only pending utterances preserve saved audio without claimi
     assert.equal(context.events[0].detail.narrationSaved, narrationSaved);
     assert.equal(context.events[0].detail.finished, true);
     assert.equal(context.data.persistenceStateText, "已保存");
+    await context.finishSession("material");
+    assert.equal(context.events.at(-1).detail.utteranceId, utterance.id);
     assert.equal(utterance.audio_file_id, "original-audio");
   }
 });

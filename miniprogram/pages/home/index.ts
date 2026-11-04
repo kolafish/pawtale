@@ -1,4 +1,4 @@
-import { narrationModeForSession, type NarrationMode } from "../../domain/memoir-narration-mode";
+import { NARRATION_MODES, narrationModeForSession, type NarrationMode } from "../../domain/memoir-narration-mode";
 import type {
   VoiceSessionEntry,
   VoiceSessionExitEvent,
@@ -132,7 +132,7 @@ interface HomeData extends HomeStoryData {
   voiceAuthorizationRequested: boolean;
   voiceAuthorizationSaving: boolean;
   greetingText: string;
-  headerSubtitleText: string;
+  voiceSubtitleText: string;
   voiceStartButtonClass: string;
   voiceStartButtonHoverClass: string;
   primaryVoiceButtonTitle: string;
@@ -167,7 +167,7 @@ interface CheckboxChangeEvent {
 type HomeViewPatch = Pick<
   HomeData,
   | "greetingText"
-  | "headerSubtitleText"
+  | "voiceSubtitleText"
   | "voiceStartButtonClass"
   | "voiceStartButtonHoverClass"
   | "primaryVoiceButtonTitle"
@@ -209,15 +209,16 @@ export function homeResumeHint(item?: Pick<
 
 export function homeViewPatch(state: HomeData): HomeViewPatch {
   const blocked = state.loading || state.creatingVoice || state.voiceAuthorizationSaving || Boolean(state.voiceEntry);
+  const mode = NARRATION_MODES[state.selectedMode];
   const primaryVoiceButtonTitle = state.loading ? "正在加载"
     : state.voiceAuthorizationSaving ? "正在保存授权"
     : state.creatingVoice ? "正在准备"
-    : "开始讲述";
+    : mode.action;
   const greetingName = state.displayName.trim();
   return {
     homePageClass: `home-page${state.largeTextEnabled ? " large-text" : ""}${state.voiceEntry ? " is-narrating" : ""}`,
     greetingText: greetingName && greetingName !== "作者" ? `您好，${greetingName}` : "您好",
-    headerSubtitleText: "",
+    voiceSubtitleText: mode === NARRATION_MODES.guided_interview ? "AI 陪您慢慢聊" : mode.description,
     voiceStartButtonClass: blocked ? "button-blocked" : "",
     voiceStartButtonHoverClass: blocked ? "none" : "voice-start-button-hover",
     primaryVoiceButtonTitle,
@@ -357,7 +358,7 @@ definePage<HomeData>()({
     voiceAuthorizationRequested: false,
     voiceAuthorizationSaving: false,
     greetingText: "您好",
-    headerSubtitleText: "从一段回忆开始。",
+    voiceSubtitleText: "AI 陪您慢慢聊",
     voiceStartButtonClass: "",
     voiceStartButtonHoverClass: "voice-start-button-hover",
     primaryVoiceButtonTitle: "开始讲述",
@@ -1137,6 +1138,10 @@ definePage<HomeData>()({
       return;
     }
     setHomeData(this, { voiceEntry: null }, () => this.measureNarration());
+    if (detail.destination === "material") {
+      wx.navigateTo({ url: pageUrl("/pages/transcript-detail/index", { id: detail.utteranceId }) });
+      return;
+    }
     if (detail.destination === "transcripts") {
       navigateToTranscripts();
       return;

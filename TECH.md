@@ -25,7 +25,7 @@ Pawtale 是单仓库、单后端的多产品系统。认证、用户、项目、
 | 后端 | Python 3.12、FastAPI、async SQLAlchemy、Pydantic、PostgreSQL/asyncpg、Alembic、pytest |
 | Web | React 19、TypeScript 5.9、Vite 7、TailwindCSS 4、Zustand、TanStack Query、Vitest |
 | 小程序 | 微信原生小程序、TypeScript、Node test runner |
-| 文本 AI | Claude Fable 5 / Opus 4.8 / Sonnet 4.6 兼容代理、DeepSeek V4.1 Flash / V4 Pro、火山方舟 Doubao Seed 2.0 |
+| 文本 AI | DeepSeek 和火山方舟，产品模型见 [AI provider 架构](./backend/docs/AI_ARCHITECTURE.md) |
 | 语音 | 火山流式 ASR、火山双向/单向 TTS、StepFun 批量 ASR |
 | 导出 | TXT/Markdown/ZIP 项目导出，回忆录 TXT/PDF，分享视频后台渲染 |
 
@@ -74,7 +74,7 @@ backend/app/
 
 ### 共享 API
 
-- `/api/auth/*`：邮箱注册登录、微信登录/绑定、当前用户和凭据设置；
+- `/api/auth/*`：微信登录/绑定、当前用户与邮箱认证。生产环境仅开放已启用密码登录的管理员邮箱登录，注册和设置凭据仅限非生产环境；
 - `/api/projects/*`：项目、分组、文档、资料、活动、导出、AI 和 GitHub 同步；
 - `/api/audit/*`：客户端事件写入和管理员聚合查询；
 - `/api/github/*`：GitHub App 安装入口。
@@ -178,8 +178,8 @@ VoiceUtterance
   → 生成或调整章节规划
   → 评估一个当前 CompletionIssue
   → 生成完整章节正文版本
-  → 用户编辑并确认
-  → 组装 BookOutputVersion
+  → 目录确认后自动组装就绪章节，保留人工修改
+  → BookOutputVersion
   → 阅读、TXT、PDF
 ```
 
@@ -223,7 +223,7 @@ frontend/src/
 
 ```text
 miniprogram/
-├── app.json                        # 页面注册和四个 Tab
+├── app.json                        # 页面注册，启动页为 home
 ├── config.ts
 ├── domain/                         # 语音和 API 领域类型
 ├── services/                       # transport、播放、设置和页面辅助
@@ -235,8 +235,8 @@ miniprogram/
 
 小程序页面按职责分组：
 
-- 入口：home、login、projects、project-edit、me；
-- 语音：voice-authorization、voice-chat；
+- 入口：home、login、projects、project-edit、me（设置）；
+- 语音：voice-authorization、voice-chat、story-voice-edit（首页语音编辑）；
 - 素材：transcripts、transcript-detail、transcript-media、voice-progress（讲述概览）；
 - 成书：book、book-completion、chapter-workspace、book-export、book-reader、image-assets。
 
@@ -245,7 +245,7 @@ miniprogram/
 ## AI 与 provider
 
 - `AITextServiceBase` 定义文本 provider 合约；
-- `AIServiceFactory` 支持 Claude Fable 5、Opus 4.8、Sonnet 4.6、DeepSeek Flash/Pro 和 Doubao Seed；
+- `AIServiceFactory` 按产品模型选择文本 provider。普通用户请求使用默认的 `deepseek-flash`，管理员可选择其他受支持的模型；
 - provider 并发由共享 limiter 控制；
 - 回忆录访谈策略、素材整理、章节生成和全书文案各自拥有用例 service；
 - 流式 ASR/TTS 和离线 ASR 使用独立协议适配器；
@@ -263,25 +263,18 @@ miniprogram/
 ## 验证
 
 ```bash
-# 后端
-cd backend
+# 从仓库根目录运行，后端使用专用 ParadeDB 测试库
 TEST_POSTGRES_DATABASE_URL='postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/pawtale_test' \
-  venv/bin/python -m pytest -q
+  bash scripts/test-backend.sh
 
 # Web
-cd frontend
-npm run lint
-npm test
-npm run build
+npm --prefix frontend ci && bash scripts/test-frontend.sh
 
-# 小程序
-cd miniprogram
-npm run typecheck
-npm test
+# 老余小程序
+npm --prefix miniprogram ci && npm --prefix miniprogram run typecheck && npm --prefix miniprogram test
 
-cd ../xiaoyu-miniprogram
-npm run typecheck
-npm test
+# 小鱼小程序
+npm --prefix xiaoyu-miniprogram ci && npm --prefix xiaoyu-miniprogram run typecheck && npm --prefix xiaoyu-miniprogram test
 ```
 
 语音、权限、后台切换、滚动、音频播放和大字模式还需要开发者工具或真机 smoke。当前清单见 [MINIPROGRAM_REAL_DEVICE_SMOKE.md](./docs/MINIPROGRAM_REAL_DEVICE_SMOKE.md)。

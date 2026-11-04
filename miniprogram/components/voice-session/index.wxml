@@ -276,13 +276,12 @@
         <text class="mic-button-text">{{micButtonText}}</text>
       </view>
       <button
-        wx:if="{{!embedded}}"
         id="voice-finish-action"
         class="finish-button ui-button"
         loading="{{finishingSession}}"
         disabled="{{finishingSession}}"
-        bindtap="finishSession"
-        aria-label="{{sessionGoal === 'book_completion' ? '保存本次补充并离开' : '保存并结束本次访谈'}}"
+        bindtap="finishAndOpenMaterial"
+        aria-label="{{sessionGoal === 'book_completion' ? '保存本次补充并离开' : '结束并查看本次讲述'}}"
       >
         {{finishButtonText}}
       </button>

@@ -100,6 +100,7 @@ type DatasetEvent = PageDatasetEvent<BookDataset>;
 
 type BookPageData = BookHomeData & ReadingShareData & {
   pageClass: string;
+  loadError: string;
   showingCachedBook: boolean;
   bookActivityNotice: string;
   bookPendingMaterialCount: number;
@@ -128,7 +129,8 @@ definePage<BookPageData>()({
     bookActivityNotice: "",
     bookPendingMaterialCount: 0,
     bookCharCountText: "0",
-    loading: false,
+    loading: true,
+    loadError: "",
     needsLogin: false,
     retryingDraft: false,
     planNeedsActivation: false,
@@ -193,7 +195,7 @@ definePage<BookPageData>()({
     if (cached.payload) {
       this.applyBookSnapshot(cached.payload);
     } else {
-      this.setData({ loading: true, error: "", showingCachedBook: false });
+      this.setData({ loading: true, loadError: "", error: "", showingCachedBook: false });
     }
     try {
       const snapshot = await getMemoirBookSnapshot();
@@ -205,6 +207,10 @@ definePage<BookPageData>()({
         currentCache.status !== "miss"
         && (currentCache.localInvalidationRevision || 0) !== localInvalidationRevision
       ) {
+        if (!showedCachedData && currentCache.payload) {
+          this.applyBookSnapshot(currentCache.payload);
+          this.setData({ showingCachedBook: currentCache.status === "stale" });
+        }
         return;
       }
       writeCachedMemoirBook(snapshot);
@@ -240,7 +246,7 @@ definePage<BookPageData>()({
         this.setData({ showingCachedBook: true });
         console.warn("refresh memoir book snapshot failed", error);
       } else {
-        this.setData({ error: error instanceof Error ? error.message : "书稿页面加载失败" });
+        this.setData({ loadError: error instanceof Error && error.message ? error.message : "请稍后重试。" });
       }
     } finally {
       if (loadSequence === this.bookLoadSequence) {
@@ -268,6 +274,7 @@ definePage<BookPageData>()({
     }
     this.setData({
       loading: false,
+      loadError: "",
       error: "",
       needsLogin: false,
       projectId,

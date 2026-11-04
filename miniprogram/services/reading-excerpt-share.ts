@@ -45,7 +45,7 @@ export const readingExcerptMethods = methods({
   invalidateExcerptRequests() {
     this.excerptGeneration++;
     this.sharedReadGeneration++;
-    this.excerptImageController?.cancel();
+    this.excerptImageController?.pausePolling();
     this.setData({ excerptBusy: false, excerptTitleBusy: false, loading: false, excerptPosterBusy: false, excerptPosterSaving: false });
   },
   onExcerptEditorReady() {
@@ -178,10 +178,7 @@ export const readingExcerptMethods = methods({
       endChar: this.data.excerptSelectionCount, styleId: this.data.excerptIllustrationStyle });
   },
   resumeExcerptImage() {
-    const job = this.data.materialImageJob;
-    if (job && (job.status === "pending" || job.status === "running") && !this.data.materialImagePolling) {
-      void this.ensureExcerptImageController().refresh(job.job_id);
-    }
+    this.excerptImageController?.resumePolling();
   },
   async confirmExcerptCard() {
     if (this.data.excerptBusy || this.data.excerptTitleBusy || this.data.excerptPhotoBusy || this.data.excerptReloadRequired) return;
