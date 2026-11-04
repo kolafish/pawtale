@@ -31,7 +31,6 @@ import { setPageNavigationTitle } from "../../services/page-navigation";
 import { readBookTTSRequest } from "../../services/tts-settings";
 import {
   VoiceAssistantTTSProgressRuntime,
-  type VoiceAssistantTTSProgressPatch,
 } from "../../services/voice-assistant-tts-progress";
 import {
   datasetString,
@@ -55,7 +54,7 @@ import {
   type BookTTSState,
 } from "../book/book-tts-player";
 
-import { readerParagraphRanges, sentenceHighlight, textLength, type ReaderParagraphRange } from "./reader-highlight";
+import { readerParagraphRanges, sentenceHighlight, type ReaderParagraphRange } from "./reader-highlight";
 
 type BookReaderTocItem = BookReadingData["bookPreviewTocItems"][number] & {
   expanded: boolean;
@@ -644,12 +643,11 @@ definePage<BookReaderData>()({
     this.readerParagraphRanges = readerParagraphRanges(text, this.bookChapters, this.flatPages, onlyChapter);
   },
 
-  onBookTTSProgressPatch(patch: VoiceAssistantTTSProgressPatch) {
-    if (!patch.ttsCurrentText) {
+  onBookTTSOffset(currentTextStart: number | null) {
+    if (currentTextStart === null) {
       this.clearReaderHighlight();
       return;
     }
-    const currentTextStart = textLength(patch.ttsSpokenText);
     const range = this.readerParagraphRanges.find(
       (item) => currentTextStart >= item.start && currentTextStart < item.end,
     );

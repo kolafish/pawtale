@@ -12,6 +12,7 @@ export interface VoiceSessionEntry {
 
 export type VoiceSessionExit =
   | { destination: "story"; projectId: string; narrationSaved: boolean; finished?: boolean }
+  | { destination: "material"; utteranceId: string }
   | { destination: "completion" }
   | { destination: "transcripts" };
 

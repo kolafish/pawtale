@@ -102,6 +102,9 @@ Component({
   },
   methods: {
   runtime() { return voiceSessionRuntime(this); },
+  async finishAndOpenMaterial() {
+    await this.finishSession("material");
+  },
   async returnToHome() {
     if (!this.properties.embedded || this.data.finishingSession || this.runtime().pageSuspended) return;
     trackAuditAction("voice_chat.return_home", {}, { voiceSessionId: this.data.voiceSessionId });

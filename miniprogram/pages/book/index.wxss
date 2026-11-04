@@ -269,7 +269,7 @@
   min-height: 108rpx;
   padding: 14rpx 16rpx 14rpx 22rpx;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 264rpx;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 14rpx;
   transition-property: background-color;
@@ -298,10 +298,9 @@
   overflow-wrap: anywhere;
 }
 .chapter-order-actions {
-  width: 264rpx;
   min-width: 0;
   display: grid;
-  grid-template-columns: 88rpx 78rpx 78rpx;
+  grid-template-columns: repeat(3, var(--ui-hit-size));
   align-items: center;
   gap: 10rpx;
 }
@@ -309,7 +308,7 @@
 .chapter-order-button {
   width: 100%;
   min-width: 0;
-  min-height: 80rpx;
+  min-height: var(--ui-hit-size);
   padding: 0;
   border-radius: var(--ui-radius-control);
   display: flex;
@@ -623,11 +622,7 @@
 }
 .book-page.large-text .chapter-order-actions {
   width: 100%;
-  grid-template-columns: minmax(0, 1fr) 96rpx 96rpx;
-}
-.book-page.large-text .chapter-order-edit,
-.book-page.large-text .chapter-order-button {
-  min-height: 48px;
+  grid-template-columns: minmax(0, 1fr) repeat(2, var(--ui-hit-size));
 }
 .book-page.large-text .source-count,
 .book-page.large-text .section-count,

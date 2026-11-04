@@ -4,6 +4,8 @@ FastAPI 后端，统一提供账号认证、项目写作系统、回忆录语音
 
 ## 运行
 
+先准备支持 `pg_trgm`、`vector` 和 `pg_search` 的 PostgreSQL 开发实例，并确保迁移账号可创建这些扩展。CI 使用的 ParadeDB 镜像见[后端工作流](../.github/workflows/backend.yml)。
+
 ```bash
 cd backend
 python3.12 -m venv venv
@@ -59,10 +61,9 @@ venv/bin/python -m pytest -q tests/test_ai_base.py tests/test_volc_streaming_asr
 数据库/API 测试通过 `test_db` 显式依赖 `postgres_schema`，迁移测试直接使用该 fixture。运行完整测试仍必须配置独立的 ParadeDB 测试库，包含 `pg_search` 等运行时扩展；缺少配置或扩展会失败，不会跳过集成测试。
 
 ```bash
-cd backend
-venv/bin/ruff check app tests scripts
+# 从仓库根目录运行 Ruff 和全部后端测试
 TEST_POSTGRES_DATABASE_URL='postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/pawtale_test' \
-  venv/bin/python -m pytest -q
+  bash scripts/test-backend.sh
 ```
 
 常用范围：
