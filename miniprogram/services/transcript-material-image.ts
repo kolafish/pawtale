@@ -82,6 +82,7 @@ export class TranscriptMaterialImageController {
   private listener: MaterialImageStateListener | null = null;
   private pollTimer: PollTimer | null = null;
   private token = 0;
+  private pollingPaused = false;
   private pollFailureCount = 0;
 
   constructor(private readonly options: TranscriptMaterialImageControllerOptions) {}
@@ -106,6 +107,20 @@ export class TranscriptMaterialImageController {
       materialImageCreating: false,
       materialImagePolling: false,
     });
+  }
+
+  pausePolling(): void {
+    this.pollingPaused = true;
+    // The create response is the only way to learn the server's job ID.
+    if (!this.state.materialImageCreating) this.cancel();
+  }
+
+  resumePolling(): void {
+    this.pollingPaused = false;
+    const job = this.state.materialImageJob;
+    if (job && (job.status === "pending" || job.status === "running") && !this.state.materialImagePolling) {
+      void this.refresh(job.job_id);
+    }
   }
 
   async create(
@@ -206,12 +221,12 @@ export class TranscriptMaterialImageController {
     const failed = job.status === "failed" || job.asset_status === "failed";
     this.patchState({
       materialImageJob: job,
-      materialImagePolling: running,
+      materialImagePolling: running && !this.pollingPaused,
       materialImageStatusText: materialImageJobStatusText(job),
       materialImageStatusClass: failed ? "failed" : (running ? "running" : "succeeded"),
       materialImageError: failed ? (job.error_message || "图片生成失败") : "",
     });
-    if (running) {
+    if (running && !this.pollingPaused) {
       this.schedulePoll(job.job_id, requestToken);
       return;
     }

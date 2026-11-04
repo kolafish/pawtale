@@ -1301,6 +1301,28 @@ test("leaving title recommendation or publishing discards its late result", asyn
 });
 
 
+test("a backgrounded excerpt retains the new job and resumes polling on return", async () => {
+  let created;
+  const reads = [];
+  const context = excerptContext({
+    createMemoirExcerptImageJob: () => new Promise(resolve => { created = resolve; }),
+    getMemoirMaterialImageGenerationJob: async id => {
+      reads.push(id);
+      return { job_id: id, status: "succeeded", asset_status: "ready", asset_id: "picture" };
+    },
+  });
+  context.setData({ excerptMode: "compose", excerptContent: "选文" });
+  const pending = context.generateExcerptImage();
+  context.onHide();
+  created({ job_id: "image-job", status: "pending", asset_status: "pending" });
+  await pending;
+  assert.equal(context.data.materialImagePolling, false);
+  context.onShow();
+  await flushAsyncWork();
+  assert.deepEqual(reads, ["image-job"]);
+  assert.deepEqual(context.data.excerptAiAssetIds, ["picture"]);
+});
+
 test("excerpt image notes reach generation and changing them requires a fresh image", async () => {
   const requests = [];
   const context = excerptContext({
