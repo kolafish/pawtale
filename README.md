@@ -11,7 +11,7 @@ Pawtale 是一个以项目为单位的 AI 内容创作系统。仓库包含：
 
 ### Web 工作台
 
-- 邮箱注册、登录和基于用户/项目的访问隔离；
+- 生产 Web 仅允许已启用密码登录的管理员使用邮箱密码，开发和测试环境支持邮箱注册与登录；
 - 项目列表、重命名、删除和项目级导出；
 - 小说/公众号：分组与文档树、资料 Binder、自动保存、AI 续写、修改对比和项目分析；
 - 回忆录：素材校对、问答关系、方言词表、章节目录、章节稿、全书预览与 PDF/TXT 导出；
@@ -20,22 +20,22 @@ Pawtale 是一个以项目为单位的 AI 内容创作系统。仓库包含：
 
 ### “老余口述”小程序
 
-小程序以“首页、记录、书稿、我的”四个一级入口组织完整回忆录动线：
+访客可从首页书卡阅读已开放的示例回忆录。登录后，用户从首页原位开始讲述，点击回忆录书卡进入书稿，从“全部回忆”查看记录，右上角进入设置。
 
 ```text
 登录并选择回忆录
   → 同意语音授权
   → AI 访谈 / 真人访谈 / 成书补讲
   → Streaming ASR 实时转写
-  → LLM 动态回应 + Streaming TTS
+  → AI 访谈中由 LLM 回应并流式朗读
   → 保存原始音频、讲述和转写版本
   → 搜索、回听和校正讲述记录
-  → 生成章节规划并逐章补全
-  → 确认章节稿
-  → 生成、阅读和导出全书
+  → 后台整理目录和章节正文
+  → 目录确认后，按就绪章节自动组装可读书稿
+  → 阅读、修改和导出
 ```
 
-小程序还提供讲述概览、语音搜索、图片素材、分享视频、AI/TTS 偏好和大字模式。
+小程序还提供语音编辑、语音搜索、图片素材、分享视频、AI/TTS 偏好和大字模式。
 
 ### “小鱼口述”小程序
 
@@ -59,6 +59,8 @@ Pawtale/
 ## 快速开始
 
 ### 后端
+
+先准备支持 `pg_trgm`、`vector` 和 `pg_search` 的 PostgreSQL 开发实例，并确保迁移账号可创建这些扩展。CI 使用的 ParadeDB 镜像见[后端工作流](./.github/workflows/backend.yml)。
 
 ```bash
 cd backend
@@ -105,16 +107,15 @@ cd xiaoyu-miniprogram && npm install && npm run typecheck && npm test
 ## 常用验证
 
 ```bash
-# Web
-cd frontend && npm run lint && npm test && npm run build
-
-# 小程序
-cd miniprogram && npm run typecheck && npm test
-
-# 后端（TEST_POSTGRES_DATABASE_URL 指向专用测试库）
-cd backend && venv/bin/ruff check app tests scripts
+# 从仓库根目录运行，后端使用专用 ParadeDB 测试库
 TEST_POSTGRES_DATABASE_URL='postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/pawtale_test' \
-  venv/bin/python -m pytest -q
+  bash scripts/test-backend.sh
+
+# Web
+npm --prefix frontend ci && bash scripts/test-frontend.sh
+
+# 老余小程序
+npm --prefix miniprogram ci && npm --prefix miniprogram run typecheck && npm --prefix miniprogram test
 ```
 
 真机语音、后台切换、权限和播放体验不能只依赖单元测试，合入相关改动前还应执行 [小程序真机 Smoke](./docs/MINIPROGRAM_REAL_DEVICE_SMOKE.md)。
