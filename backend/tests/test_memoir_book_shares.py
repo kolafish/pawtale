@@ -422,7 +422,8 @@ async def test_friend_preview_and_public_media_have_identical_scope_without_publ
     chapter_id = version.chapter_snapshot_json[0]["chapter_id"]
     await add_test_section_materials(test_db, project_id=project_id, chapter_id=chapter_id,
                                      source_refs=[memoir_source_ref(source)])
-    inline = MemoirImageAsset(project_id=project_id, user_id=user_id, source_type="manual_upload",
+    inline = MemoirImageAsset(project_id=project_id, user_id=user_id, source_type="utterance_illustration",
+        caption="秘密口述素材", alt_text="秘密口述素材", source_quote="秘密口述素材",
         source_signature="inline", storage_path="inline.png", mime_type="image/png", status="ready")
     test_db.add(inline)
     await test_db.flush()
@@ -466,6 +467,9 @@ async def test_friend_preview_and_public_media_have_identical_scope_without_publ
         public_book = public["latest_version"]["manuscript"]
         assert public_book["chapters"][0]["content"] == book["chapters"][0]["content"]
         illustration = public_book["chapters"][0]["illustrations"][0]
+        assert "秘密口述素材" not in str(public)
+        assert illustration["caption"] == illustration["alt_text"] == "AI 意象插图"
+        assert public_book["render_settings"]["cover_image"]["caption"] == "外婆家的院子"
         assert illustration["image_asset_id"] == inline.id
         assert illustration["storage_path"] == illustration["source_quote"] == ""
         assert (await guest.get(illustration["image_url"])).status_code == 200

@@ -702,6 +702,7 @@ async def _share_presentation(db: AsyncSession, result: MemoirBookOutputResponse
         item = MemoirBookManuscriptIllustration.model_validate(raw)
         base = f"/api/mobile/memoir/book-shares/{token}/images" if token else f"/api/mobile/memoir/projects/{result.project_id}/image-assets"
         return item.model_copy(update={
+            **({"caption": "AI 意象插图", "alt_text": "AI 意象插图"} if item.disclosure else {}),
             "storage_path": "", "source_quote": "", "source_utterance_id": None, "source_utterance_ids": [],
             "image_url": f"{base}/{item.image_asset_id}" + ("" if token else "/file?variant=reading"),
         })
