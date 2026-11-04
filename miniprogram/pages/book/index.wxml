@@ -7,7 +7,15 @@
     <button class="book-cache-retry" size="mini" bindtap="loadBookHome">重试刷新</button>
   </view>
 
-  <view wx:if="{{needsLogin}}" class="empty-panel guest-panel ui-card">
+  <view wx:if="{{loading}}" class="empty-panel ui-card" aria-live="polite">正在读取书稿…</view>
+  <view wx:elif="{{loadError}}" class="empty-panel ui-card">
+    <text class="empty-title">暂时没能打开书稿</text>
+    <text class="empty-copy">{{loadError}}</text>
+    <view class="actions-row">
+      <button class="primary-button" bindtap="loadBookHome">重新读取</button>
+    </view>
+  </view>
+  <view wx:elif="{{needsLogin}}" class="empty-panel guest-panel ui-card">
     <image class="empty-icon" src="/assets/memoir-gramophone.png" mode="aspectFit" />
     <text class="empty-title">浏览书稿</text>
     <text class="empty-copy">登录后阅读、编辑和导出书稿。</text>
@@ -76,11 +84,7 @@
     </view>
   </view>
 
-  <view wx:if="{{loading && stage === 'empty'}}" class="empty-panel ui-card">
-    <text>正在加载</text>
-  </view>
-
-  <view wx:elif="{{stage === 'empty'}}" class="empty-panel ui-card">
+  <view wx:if="{{stage === 'empty'}}" class="empty-panel ui-card">
     <image class="empty-icon" src="/assets/memoir-gramophone.png" mode="aspectFit" />
     <text class="empty-title">讲述后会自动整理成书</text>
     <view class="actions-row">

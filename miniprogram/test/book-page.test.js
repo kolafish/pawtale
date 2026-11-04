@@ -612,6 +612,28 @@ test("book page stays available when login is required", async () => {
   assert.deepEqual(switches, []);
 });
 
+test("uncached book load failure can retry and resolve to a confirmed empty account", async () => {
+  let online = false;
+  const { page } = loadBookPage({ authExports: {
+    getMemoirIdentity: async () => {
+      if (!online) throw new Error("网络不可用");
+      return { active_project_id: "", active_project: null };
+    },
+  } });
+  const context = pageContext(page);
+  assert.equal(context.data.loading, true);
+  await context.loadBookHome();
+  assert.equal(context.data.loading, false);
+  assert.equal(context.data.loadError, "网络不可用");
+  online = true;
+  const retry = context.loadBookHome();
+  assert.equal(context.data.loading, true);
+  await retry;
+  assert.equal(context.data.loading, false);
+  assert.equal(context.data.loadError, "");
+  assert.equal(context.data.projectId, "");
+});
+
 test("book page labels a cached snapshot after refresh fails and clears it on retry", async () => {
   const snapshot = {
     server_revision: 1,

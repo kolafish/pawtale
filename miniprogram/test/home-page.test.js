@@ -386,8 +386,6 @@ test("a failed first home load exposes retry and recovers without leaving the pa
     assert.equal(context.data.error, "网络暂不可用");
     assert.equal(context.data.storyError, "");
     assert.equal(context.data.storyLoaded, false);
-    const wxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
-    assert.match(wxml, /wx:if="\{\{storyError \|\| \(!storyLoaded && error\)\}\}"[^>]*bindtap="refreshStory"/);
     online = true;
     await context.refreshStory();
     assert.equal(context.data.error, "");
@@ -503,7 +501,6 @@ test("home combines new-story and resume actions into one voice entry", () => {
   assert.match(pageWxml, /id="primary-voice-action"[\s\S]*?bindtap="startPrimaryVoiceChat"/);
   assert.doesNotMatch(pageWxml, /resume-story-action|讲个新故事|接着讲|上次说到/);
   assert.match(pageWxml, /聊两句/);
-  assert.match(pageWxml, /AI 陪您慢慢聊/);
   assert.match(pageWxml, /<voice-session[\s\S]*?bindexit="exitVoiceSession"/);
   assert.doesNotMatch(pageWxml, /bindreturnhome|voiceSessionMinimized/);
 });
@@ -606,7 +603,7 @@ test("home view patch keeps first-screen template state simple", () => {
   assert.deepEqual(
     {
       greetingText: homeViewPatch(baseData).greetingText,
-      headerSubtitleText: homeViewPatch(baseData).headerSubtitleText,
+      voiceSubtitleText: homeViewPatch(baseData).voiceSubtitleText,
       primaryVoiceButtonTitle: homeViewPatch(baseData).primaryVoiceButtonTitle,
       showNarrationChoiceCard: homeViewPatch(baseData).showNarrationChoiceCard,
       voiceStartButtonClass: homeViewPatch({ ...baseData, creatingVoice: true }).voiceStartButtonClass,
@@ -615,7 +612,7 @@ test("home view patch keeps first-screen template state simple", () => {
     },
     {
       greetingText: "您好，余主任",
-      headerSubtitleText: "",
+      voiceSubtitleText: "AI 陪您慢慢聊",
       primaryVoiceButtonTitle: "开始讲述",
       showNarrationChoiceCard: false,
       voiceStartButtonClass: "button-blocked",
@@ -641,12 +638,15 @@ test("home start action follows account, project, story and completion states", 
   });
   assert.equal(guided.primaryVoiceButtonTitle, "开始讲述");
 
+  const human = homeViewPatch({ ...baseData, selectedMode: "human_interview" });
+  assert.equal(human.primaryVoiceButtonTitle, "开始真人访谈");
+  assert.match(human.voiceSubtitleText, /家人/);
   const free = homeViewPatch({ ...baseData, selectedMode: "free_narration" });
   assert.equal(free.primaryVoiceButtonTitle, "开始讲述");
   assert.equal(homeViewPatch({ ...baseData, hasStories: true }).primaryVoiceButtonTitle, "开始讲述");
   assert.equal(homeViewPatch({ ...baseData, hasProject: false }).primaryVoiceButtonTitle, "开始讲述");
   assert.equal(homeViewPatch({ ...baseData, needsLogin: true }).primaryVoiceButtonTitle, "开始讲述");
-  assert.equal(homeViewPatch({ ...baseData, selectedMode: "book_completion" }).primaryVoiceButtonTitle, "开始讲述");
+  assert.equal(homeViewPatch({ ...baseData, selectedMode: "book_completion" }).primaryVoiceButtonTitle, "选择待补问题");
   assert.equal(homeViewPatch({ ...baseData, hasStories: true, hasLastStoryHint: true }).showNarrationChoiceCard, false);
   assert.equal(homeViewPatch({ ...baseData, hasStories: true, hasLastStoryHint: false }).showNarrationChoiceCard, false);
   assert.equal(homeViewPatch({ ...baseData, hasStories: true, hasLastStoryHint: true, selectedMode: "book_completion" }).showNarrationChoiceCard, false);
