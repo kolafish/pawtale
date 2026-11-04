@@ -51,12 +51,12 @@
         <text class="voice-card-subtitle">{{voiceSubtitleText}}</text>
         <view
           id="primary-voice-action"
-          class="voice-start-button ui-pressable {{voiceStartButtonClass}}"
+          class="voice-start-button ui-pressable {{voiceStartDisabled ? 'button-blocked' : ''}}"
           bindtap="startPrimaryVoiceChat"
-          hover-class="{{voiceStartButtonHoverClass}}"
+          hover-class="{{voiceStartDisabled ? 'none' : 'voice-start-button-hover'}}"
           aria-role="button"
           aria-label="{{primaryVoiceButtonTitle}}"
-          aria-disabled="{{loading || creatingVoice || voiceAuthorizationSaving}}"
+          aria-disabled="{{voiceStartDisabled}}"
         >
           <image class="voice-start-icon" src="/assets/memoir-microphone.png" mode="aspectFit" aria-hidden="true" />
           <text>{{primaryVoiceButtonTitle}}</text>

@@ -374,12 +374,14 @@ test("a ready recommendation keeps the manual clip picker reachable before any v
 
 test("a failed first home load exposes retry and recovers without leaving the page", async () => {
   let online = false;
+  let creates = 0;
   const { page } = loadHomePage({ authExports: { getMemoirIdentity: async () => {
     if (!online) throw new Error("网络暂不可用");
     return { id: "u1", display_name: "余老师", email: "test@example.com",
       active_project_id: "p1", active_project: { id: "p1", title: "往事" } };
-  } } });
-  const context = pageContext(page);
+  } }, projectExports: { createMemoirProject: async () => { creates++; return { id: "unexpected" }; } } });
+  const context = pageContext(page, { voiceAuthorizationAgreed: true });
+  context.homeVisible = true;
   global.wx = { createSelectorQuery: () => ({ select: () => ({ boundingClientRect: () => ({ exec() {} }) }) }) };
   try {
     await context.loadHome();
@@ -387,9 +389,13 @@ test("a failed first home load exposes retry and recovers without leaving the pa
     assert.equal(context.data.storyError, "");
     assert.equal(context.data.storyLoaded, false);
     online = true;
+    await context.startPrimaryVoiceChat();
+    assert.equal(creates, 0);
+    assert.equal(context.data.voiceStartDisabled, true);
     await context.refreshStory();
     assert.equal(context.data.error, "");
     assert.equal(context.data.storyLoaded, true);
+    assert.equal(context.data.voiceStartDisabled, false);
     assert.equal(context.data.story.memoir.title, "往事");
   } finally {
     context.onHide();
@@ -606,8 +612,7 @@ test("home view patch keeps first-screen template state simple", () => {
       voiceSubtitleText: homeViewPatch(baseData).voiceSubtitleText,
       primaryVoiceButtonTitle: homeViewPatch(baseData).primaryVoiceButtonTitle,
       showNarrationChoiceCard: homeViewPatch(baseData).showNarrationChoiceCard,
-      voiceStartButtonClass: homeViewPatch({ ...baseData, creatingVoice: true }).voiceStartButtonClass,
-      voiceStartButtonHoverClass: homeViewPatch({ ...baseData, creatingVoice: true }).voiceStartButtonHoverClass,
+      voiceStartDisabled: homeViewPatch({ ...baseData, creatingVoice: true }).voiceStartDisabled,
       showVoiceAuthorizationPanel: homeViewPatch(baseData).showVoiceAuthorizationPanel,
     },
     {
@@ -615,8 +620,7 @@ test("home view patch keeps first-screen template state simple", () => {
       voiceSubtitleText: "AI 陪您慢慢聊",
       primaryVoiceButtonTitle: "开始讲述",
       showNarrationChoiceCard: false,
-      voiceStartButtonClass: "button-blocked",
-      voiceStartButtonHoverClass: "none",
+      voiceStartDisabled: true,
       showVoiceAuthorizationPanel: false,
     },
   );

@@ -19,6 +19,7 @@ import {
   getMemoirBookPlan,
   listMemoirImageAssets,
 } from "../../services/memoir-book-api";
+import { writeMemoirIdentitySnapshot } from "../../stores/memoir-cache";
 import { getMemoirBookSnapshot } from "../../services/memoir-snapshot-api";
 import {
   downloadMemoirShareVideoJob,
@@ -349,6 +350,8 @@ definePage<ImageAssetsData>()({
       const projectId = await this.ensureProjectId();
       if (this.data.isStoryMaterialView) {
         const snapshot = await getMemoirBookSnapshot();
+        if (requestToken !== this.loadToken || projectId !== this.data.projectId) return;
+        writeMemoirIdentitySnapshot(snapshot.identity);
         const activeProjectId = snapshot.identity.active_project?.id || "";
         if (!activeProjectId || activeProjectId !== projectId) {
           throw new Error("当前故事已经切换，请返回故事页重新进入");
@@ -378,9 +381,6 @@ definePage<ImageAssetsData>()({
             ? `${chapter?.title || "本章"}的素材`
             : "待整理素材";
         const items = buildAssetViews(assets, this.data.items);
-        if (requestToken !== this.loadToken || projectId !== this.data.projectId) {
-          return;
-        }
         setPageNavigationTitle(title);
         this.setData({
           ...assetCountData(items),

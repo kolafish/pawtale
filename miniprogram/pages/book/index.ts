@@ -39,6 +39,7 @@ import {
   type VoiceAssistantTTSProgressPatch,
 } from "../../services/voice-assistant-tts-progress";
 import { writeTranscriptNavigationTarget } from "../../services/transcript-navigation";
+import { writeMemoirIdentitySnapshot } from "../../stores/memoir-cache";
 import { hideMiniProgramShareMenu } from "../../services/share";
 import {
   applyBookTTSProgressPatch as applyBookTTSPlaybackProgressPatch,
@@ -65,6 +66,7 @@ import {
 } from "./book-view-model";
 import {
   readCachedMemoirBook,
+  readCachedMemoirIdentity,
   writeCachedMemoirBook,
 } from "../../stores/memoir-read-cache";
 export {
@@ -189,7 +191,8 @@ definePage<BookPageData>()({
 
   async loadBookHome() {
     const loadSequence = ++this.bookLoadSequence;
-    const cached = readCachedMemoirBook();
+    const initialIdentity = readCachedMemoirIdentity();
+    const cached = readCachedMemoirBook(initialIdentity);
     const localInvalidationRevision = cached.localInvalidationRevision || 0;
     const showedCachedData = Boolean(cached.payload);
     if (cached.payload) {
@@ -202,9 +205,13 @@ definePage<BookPageData>()({
       if (loadSequence !== this.bookLoadSequence) {
         return;
       }
-      const currentCache = readCachedMemoirBook();
+      const identity = snapshot.identity;
+      const currentCache = readCachedMemoirBook(identity);
       if (
-        currentCache.status !== "miss"
+        initialIdentity && initialIdentity.id === identity.id
+        && (initialIdentity.storage_owner_id || "") === (identity.storage_owner_id || "")
+        && initialIdentity.active_project_id === identity.active_project_id
+        && currentCache.status !== "miss"
         && (currentCache.localInvalidationRevision || 0) !== localInvalidationRevision
       ) {
         if (!showedCachedData && currentCache.payload) {
@@ -213,6 +220,7 @@ definePage<BookPageData>()({
         }
         return;
       }
+      writeMemoirIdentitySnapshot(identity);
       writeCachedMemoirBook(snapshot);
       this.applyBookSnapshot(snapshot);
       this.setData({ showingCachedBook: false });
@@ -622,10 +630,12 @@ definePage<BookPageData>()({
   },
 
   onHide() {
+    this.bookLoadSequence++;
     this.stopPlayback();
   },
 
   onUnload() {
+    this.bookLoadSequence++;
     this.stopPlayback();
   },
 

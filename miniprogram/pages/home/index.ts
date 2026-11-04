@@ -133,8 +133,8 @@ interface HomeData extends HomeStoryData {
   voiceAuthorizationSaving: boolean;
   greetingText: string;
   voiceSubtitleText: string;
-  voiceStartButtonClass: string;
-  voiceStartButtonHoverClass: string;
+  canCreateFirstProject: boolean;
+  voiceStartDisabled: boolean;
   primaryVoiceButtonTitle: string;
   memoirCard: { label: string; title: string; action: string; showProgress: boolean };
   showNarrationChoiceCard: boolean;
@@ -168,8 +168,7 @@ type HomeViewPatch = Pick<
   HomeData,
   | "greetingText"
   | "voiceSubtitleText"
-  | "voiceStartButtonClass"
-  | "voiceStartButtonHoverClass"
+  | "voiceStartDisabled"
   | "primaryVoiceButtonTitle"
   | "memoirCard"
   | "showNarrationChoiceCard"
@@ -207,8 +206,12 @@ export function homeResumeHint(item?: Pick<
   return text.length > RESUME_HINT_CHAR_LIMIT ? `${text.slice(0, RESUME_HINT_CHAR_LIMIT)}...` : text;
 }
 
+function voiceStartBlocked(state: HomeData): boolean {
+  return state.loading || state.creatingVoice || state.voiceAuthorizationSaving || Boolean(state.voiceEntry)
+    || (!state.needsLogin && !state.projectId && !state.canCreateFirstProject);
+}
+
 export function homeViewPatch(state: HomeData): HomeViewPatch {
-  const blocked = state.loading || state.creatingVoice || state.voiceAuthorizationSaving || Boolean(state.voiceEntry);
   const mode = NARRATION_MODES[state.selectedMode];
   const primaryVoiceButtonTitle = state.loading ? "正在加载"
     : state.voiceAuthorizationSaving ? "正在保存授权"
@@ -219,8 +222,7 @@ export function homeViewPatch(state: HomeData): HomeViewPatch {
     homePageClass: `home-page${state.largeTextEnabled ? " large-text" : ""}${state.voiceEntry ? " is-narrating" : ""}`,
     greetingText: greetingName && greetingName !== "作者" ? `您好，${greetingName}` : "您好",
     voiceSubtitleText: mode === NARRATION_MODES.guided_interview ? "AI 陪您慢慢聊" : mode.description,
-    voiceStartButtonClass: blocked ? "button-blocked" : "",
-    voiceStartButtonHoverClass: blocked ? "none" : "voice-start-button-hover",
+    voiceStartDisabled: voiceStartBlocked(state),
     primaryVoiceButtonTitle,
     memoirCard: {
       label: state.needsLogin ? "示例回忆录" : "我的回忆录",
@@ -255,6 +257,7 @@ function setHomeData(context: HomeContext, patch: Partial<HomeData>, callback?: 
 function applyHomeSnapshotData(
   context: HomeContext,
   snapshot: MemoirHomeSnapshot,
+  fromServer = false,
 ): void {
   const identity = snapshot.identity;
   const changedProject = identity.id !== context.data.userId || (identity.active_project?.id || "") !== context.data.projectId;
@@ -310,6 +313,8 @@ function applyHomeSnapshotData(
     launchVariant,
     showBookHint: !homeBookOpened(identity.id),
     hasProject,
+    canCreateFirstProject: fromServer && Boolean(identity.id) && !identity.active_project_id
+      && !identity.active_project && identity.projects?.length === 0,
     selectedMode: changedProject || !context.data.voiceEntry
       ? profile.defaultNarrationMode
       : context.data.selectedMode,
@@ -359,8 +364,8 @@ definePage<HomeData>()({
     voiceAuthorizationSaving: false,
     greetingText: "您好",
     voiceSubtitleText: "AI 陪您慢慢聊",
-    voiceStartButtonClass: "",
-    voiceStartButtonHoverClass: "voice-start-button-hover",
+    canCreateFirstProject: false,
+    voiceStartDisabled: true,
     primaryVoiceButtonTitle: "开始讲述",
     memoirCard: { label: "我的回忆录", title: "还没有回忆录", action: "看看示例", showProgress: false },
     showNarrationChoiceCard: false,
@@ -474,7 +479,7 @@ definePage<HomeData>()({
       }
     }
     if (!background && !showedCachedData) {
-      setHomeData(this, { loading: true, error: "" });
+      setHomeData(this, { loading: true, canCreateFirstProject: false, error: "" });
     }
     try {
       const snapshot = await getMemoirStorySnapshot();
@@ -490,7 +495,7 @@ definePage<HomeData>()({
       }
       writeMemoirIdentitySnapshot(snapshot.identity);
       writeCachedMemoirHome({ server_revision: snapshot.server_revision, identity: snapshot.identity, latest_transcript: snapshot.latest_transcript });
-      applyHomeSnapshotData(this, snapshot);
+      applyHomeSnapshotData(this, snapshot, true);
       const freshEvents = this.growthTracker.observe(snapshot.identity.id, this.data.projectId, snapshot.growth_events);
       const pendingGrowth = this.growthTracker.pending(snapshot.growth_events);
       const storyData = homeStorySnapshotData(snapshot, freshEvents);
@@ -533,6 +538,7 @@ definePage<HomeData>()({
           notices: [],
           noticeReadState: { readableSeen: false, attentionId: "" },
           needsLogin: true,
+          canCreateFirstProject: false,
           featuredBooks: [],
           selectedBookIndex: 0,
           voiceEntry: null,
@@ -564,7 +570,7 @@ definePage<HomeData>()({
         return;
       }
       if (showedCachedData || background || this.data.storyLoaded) {
-        setHomeData(this, { storyError: "进度暂未刷新，已保存的讲述和故事仍在，稍后会再试。" });
+        setHomeData(this, { canCreateFirstProject: false, storyError: "进度暂未刷新，已保存的讲述和故事仍在，稍后会再试。" });
         console.warn("refresh memoir home snapshot failed", error);
       } else {
         setHomeData(this, { error: error instanceof Error ? error.message : "首页加载失败" });
@@ -1005,12 +1011,8 @@ definePage<HomeData>()({
     return false;
   },
 
-  voiceStartBlocked() {
-    return this.data.loading || this.data.creatingVoice || this.data.voiceAuthorizationSaving || Boolean(this.data.voiceEntry);
-  },
-
   canStartVoiceChat() {
-    if (this.voiceStartBlocked()) {
+    if (voiceStartBlocked(this.data)) {
       return false;
     }
     if (this.data.needsLogin) {
@@ -1025,10 +1027,18 @@ definePage<HomeData>()({
   },
 
   async createFirstProject() {
-    const project = await createMemoirProject({ title: FIRST_PROJECT_TITLE });
-    trackAuditAction("project.create", { source: "home_first_story" }, { projectId: project.id });
-    await this.loadHome(true);
-    if (this.data.projectId !== project.id) throw new Error("回忆录已经建好，请再点一次开始讲述");
+    const userId = this.data.userId;
+    setHomeData(this, { canCreateFirstProject: false });
+    let createdId: string;
+    try {
+      const project = await createMemoirProject({ title: FIRST_PROJECT_TITLE });
+      createdId = project.id;
+      trackAuditAction("project.create", { source: "home_first_story" }, { projectId: createdId });
+    } finally {
+      // A lost response can still mean the project was created.
+      if (this.homeVisible && userId === this.data.userId) await this.loadHome(true);
+    }
+    if (this.data.projectId !== createdId) throw new Error("回忆录已经建好，请再点一次开始讲述");
   },
 
   async startVoiceChatWithMode(
@@ -1036,7 +1046,7 @@ definePage<HomeData>()({
     interviewType: MemoirInterviewType = "ai_interview",
     sessionGoal: MemoirSessionGoal = "open_narration",
   ) {
-    if (this.voiceStartBlocked()) {
+    if (voiceStartBlocked(this.data)) {
       return;
     }
     if (this.data.needsLogin) {
@@ -1051,7 +1061,10 @@ definePage<HomeData>()({
     try {
       await syncVoiceAuthorizationConsent();
       if (!this.homeVisible || userId !== this.data.userId || projectId !== this.data.projectId) return;
-      if (!projectId) await this.createFirstProject();
+      if (!projectId) {
+        if (!this.data.canCreateFirstProject) return;
+        await this.createFirstProject();
+      }
       if (!this.homeVisible || userId !== this.data.userId) return;
       await this.createAndOpenVoiceChat(mode, interviewType, sessionGoal);
     } catch (error) {

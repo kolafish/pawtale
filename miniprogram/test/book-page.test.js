@@ -134,6 +134,7 @@ function loadBookPage({
   voiceApiExports = {},
   ttsExports = {},
   cacheExports = {},
+  writeIdentity = () => {},
 } = {}) {
   const getMemoirIdentity = authExports.getMemoirIdentity || unmockedAsync("getMemoirIdentity");
   mockModule("../services/auth.ts", {
@@ -178,7 +179,9 @@ function loadBookPage({
     acknowledgeDismissibleMemoirAutomationEvents: async () => ({ updated_count: 0 }),
     ...voiceApiExports,
   });
+  mockModule("../stores/memoir-cache.ts", { writeMemoirIdentitySnapshot: writeIdentity });
   mockModule("../stores/memoir-read-cache.ts", {
+    readCachedMemoirIdentity: () => null,
     readCachedMemoirBook: () => ({ status: "miss" }),
     writeCachedMemoirBook: () => {},
     ...cacheExports,
@@ -680,6 +683,41 @@ test("book page labels a cached snapshot after refresh fails and clears it on re
 
   assert.equal(fetchCount, 2);
   assert.equal(context.data.showingCachedBook, false);
+});
+
+test("switching books accepts the new scope and ignores a late response for the old book", async () => {
+  function snapshot(id, title) {
+    return {
+      identity: { id: "user", storage_owner_id: "owner", active_project_id: id, active_project: { id, title } },
+      plan: null, drafts_by_chapter_id: {}, output: null, automation_events: { items: [] },
+    };
+  }
+  const a = snapshot("a", "第一本");
+  const b = snapshot("b", "第二本新书名");
+  let active = a.identity;
+  let resolveFirst;
+  const pending = new Promise(resolve => { resolveFirst = resolve; });
+  let requests = 0;
+  const writes = [];
+  const { page } = loadBookPage({
+    voiceApiExports: { getMemoirBookSnapshot: () => ++requests === 1 ? pending : Promise.resolve(b) },
+    writeIdentity: identity => { active = identity; writes.push(identity.active_project_id); },
+    cacheExports: {
+      readCachedMemoirIdentity: () => active,
+      readCachedMemoirBook: (identity = active) => identity.active_project_id === "a"
+        ? { status: "fresh", payload: a, localInvalidationRevision: 2 }
+        : { status: "stale", payload: snapshot("b", "旧书名"), localInvalidationRevision: 5 },
+    },
+  });
+  const context = pageContext(page);
+  const first = context.loadBookHome();
+  assert.equal(context.data.projectId, "a");
+  await context.loadBookHome();
+  resolveFirst(a);
+  await first;
+  assert.equal(context.data.projectId, "b");
+  assert.equal(context.data.projectTitle, "第二本新书名");
+  assert.deepEqual(writes, ["b"]);
 });
 
 test("book page refreshes mandatory confirmation counts without changing saved book content", () => {

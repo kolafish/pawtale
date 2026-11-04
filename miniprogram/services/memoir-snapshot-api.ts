@@ -3,7 +3,6 @@ import type {
   MemoirDraftProgress,
   MemoirStorySnapshot,
 } from "../domain/memoir-snapshots";
-import { writeMemoirIdentitySnapshot } from "../stores/memoir-cache";
 import { memoirRequest } from "./memoir-api-client";
 
 export async function getMemoirStorySnapshot(): Promise<MemoirStorySnapshot> {
@@ -19,8 +18,6 @@ export function retryMemoirDraftProgress(projectId: string): Promise<MemoirDraft
   return memoirRequest<MemoirDraftProgress>(`/api/mobile/memoir/projects/${projectId}/draft-progress/retry`, { method: "POST" });
 }
 
-export async function getMemoirBookSnapshot(): Promise<MemoirBookSnapshot> {
-  const snapshot = await memoirRequest<MemoirBookSnapshot>("/api/mobile/memoir/book-snapshot");
-  writeMemoirIdentitySnapshot(snapshot.identity);
-  return snapshot;
+export function getMemoirBookSnapshot(): Promise<MemoirBookSnapshot> {
+  return memoirRequest<MemoirBookSnapshot>("/api/mobile/memoir/book-snapshot");
 }

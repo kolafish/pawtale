@@ -60,6 +60,7 @@ function imageAssetView(asset, localPath = "") {
 }
 
 function loadImageAssetsPage(apiExports = {}) {
+  mockModule("../stores/memoir-cache.ts", { writeMemoirIdentitySnapshot() {} });
   mockModule("../services/auth.ts", {
     getMemoirIdentity: async () => ({ active_project_id: "project-1" }),
   });
