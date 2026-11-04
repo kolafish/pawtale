@@ -1,7 +1,45 @@
 @import "../../styles/transcript-record.wxss";
 
-.video-library-hero {
-  margin-bottom: 20rpx;
+.library-tabs .ui-version-option {
+  min-height: var(--ui-hit-size);
+}
+
+.library-card-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  min-height: var(--ui-hit-size);
+}
+
+.library-card-chevron {
+  color: var(--ui-text-muted);
+}
+
+.library-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 16rpx;
+}
+
+.library-card-actions {
+  justify-content: space-between;
+  margin-top: 16rpx;
+  flex-wrap: wrap;
+}
+
+.library-card-actions .ui-share-primary,
+.library-card-actions .ui-share-more {
+  flex: 0 0 auto;
+  margin: 0;
+  box-sizing: border-box;
+  width: auto;
+  min-height: var(--ui-hit-size);
+  white-space: nowrap;
+}
+
+.library-card-actions .ui-share-more {
+  font-weight: 500;
 }
 
 .video-library-list {

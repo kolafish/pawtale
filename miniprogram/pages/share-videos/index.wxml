@@ -3,13 +3,11 @@
     <text class="ui-page-context">我的回忆录</text>
   </view>
 
-  <view class="hero-panel video-library-hero">
-    <view class="ui-share-actions">
-      <button class="{{cardsOpen ? 'ui-share-more' : 'ui-share-primary'}}" data-tab="videos" bindtap="switchLibrary">视频</button>
-      <button class="{{cardsOpen ? 'ui-share-primary' : 'ui-share-more'}}" data-tab="cards" bindtap="switchLibrary">卡片</button>
-    </view>
-    <text wx:if="{{total && !cardsOpen}}" class="record-meta">共 {{total}} 段</text>
+  <view class="ui-version-switch library-tabs" aria-role="radiogroup" aria-label="分享类型">
+    <view class="ui-version-option ui-pressable {{!cardsOpen ? 'active' : ''}}" aria-role="radio" aria-checked="{{!cardsOpen}}" data-tab="videos" bindtap="switchLibrary">视频</view>
+    <view class="ui-version-option ui-pressable {{cardsOpen ? 'active' : ''}}" aria-role="radio" aria-checked="{{cardsOpen}}" data-tab="cards" bindtap="switchLibrary">卡片</view>
   </view>
+  <text wx:if="{{total && !cardsOpen}}" class="record-meta">共 {{total}} 段</text>
 
   <view wx:if="{{needsLogin}}" class="empty-panel">
     <text class="empty-title">登录后查看我的分享</text>
@@ -22,17 +20,21 @@
   </view>
 
   <block wx:elif="{{cardsOpen}}">
-    <text class="record-meta">这里保留已生成、可以再次转发的卡片。</text>
     <text wx:if="{{loading}}" class="record-meta">正在读取卡片…</text>
     <view wx:if="{{error}}" class="ui-error-banner">{{error}}<button bindtap="refreshLibrary">重新读取</button></view>
     <view wx:if="{{!cards.length && !loading && !error}}" class="empty-panel">还没有分享卡片。可在书稿里分享全书、章节或选文。</view>
     <view wx:for="{{cards}}" wx:key="id" class="section-card video-library-card">
-      <text class="video-library-title">{{item.title}}</text>
-      <text class="record-meta">{{item.scopeText}} · {{item.timeText}}</text>
-      <text wx:if="{{item.scope === 'excerpt'}}" class="record-meta">{{item.allow_book_link ? "全书分享开启时可继续读全书" : "只能阅读选文"}}</text>
-      <view class="ui-share-actions">
-        <button class="ui-share-primary" data-id="{{item.id}}" bindtap="openCard">{{item.scope === 'excerpt' ? '查看' : '查看并转发'}}</button>
+      <view class="library-card-link ui-pressable" data-id="{{item.id}}" bindtap="openCard" aria-role="button" aria-label="查看《{{item.title}}》">
+        <text class="video-library-title">{{item.title}}</text>
+        <text aria-hidden="true" class="library-card-chevron">›</text>
+      </view>
+      <view class="record-meta library-card-meta">
+        <text>{{item.scopeText}} · {{item.timeText}}</text>
+        <text wx:if="{{item.scope === 'excerpt'}}">{{item.allow_book_link ? "全书开放时可续读" : "仅此段"}}</text>
+      </view>
+      <view class="ui-share-actions library-card-actions">
         <button wx:if="{{item.scope === 'excerpt'}}" class="ui-share-primary" data-id="{{item.id}}" open-type="share">再次分享</button>
+        <button wx:else class="ui-share-primary" data-id="{{item.id}}" bindtap="openCard">查看并转发</button>
         <button class="ui-share-more" data-id="{{item.id}}" bindtap="stopCard" disabled="{{!!deletingId}}">停止分享</button>
       </view>
     </view>
