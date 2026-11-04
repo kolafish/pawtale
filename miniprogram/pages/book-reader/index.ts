@@ -42,6 +42,7 @@ import { enableMiniProgramShareMenu, hideMiniProgramShareMenu, readingShareMessa
 import { INITIAL_SHARE_LIKE_DATA, shareLikeMethods, type ShareLikeData } from "../../services/share-likes";
 import type { MemoirShareLikeTarget } from "../../domain/memoir-share-likes";
 import {
+  selectedBookCoverStyle,
   bookReadingData,
   readingParagraphs,
   trimText,
@@ -80,6 +81,12 @@ type BookReaderData = ReaderData & BookTTSState & ShareLikeData & typeof INITIAL
   shareScope: "book" | "chapter" | "story";
   shareImages: { id: string; chapterId: string; sectionId: string; paragraphBefore: number; paragraphCount: number; position: string; portrait: boolean; aspectRatio: number; galleryHeight: number; url: string; caption?: string; disclosure: string }[];
   imageGallerySections: Record<string, boolean>;
+  sharedBookEdition: boolean;
+  editionTocOpen: boolean;
+  resumeAvailable: boolean;
+  editionArt: string;
+  editionStyle: string;
+  coverCaption: string;
   shareCoverUrl: string;
   shareByline: string;
   sharePreface: string;
@@ -87,6 +94,7 @@ type BookReaderData = ReaderData & BookTTSState & ShareLikeData & typeof INITIAL
   shareRetryable: boolean;
   readerChapterIndex: number;
   readerChapterTotal: number;
+  nextChapterTitle: string;
   readerTitle: string;
   readerSubtitle: string;
   readerMetaText: string;
@@ -290,10 +298,11 @@ definePage<BookReaderData>()({
     versionId: "",
     readerMode: "book",
     readerShared: false,
+    sharedBookEdition: false, editionTocOpen: false, resumeAvailable: false, editionArt: "", editionStyle: "", coverCaption: "",
     sharePreview: false, shareScope: "book", shareImages: [], imageGallerySections: {}, shareCoverUrl: "", shareByline: "",
     sharePreface: "", shareAfterword: "", shareRetryable: false,
     readerChapterIndex: 0,
-    readerChapterTotal: 0,
+    readerChapterTotal: 0, nextChapterTitle: "",
     readerHighlightChapterIndex: -1,
     readerHighlightSectionId: "",
     readerHighlightParagraphIndex: -1,
@@ -431,6 +440,10 @@ definePage<BookReaderData>()({
     this.stopPlayback();
   },
 
+  toggleEditionToc() {
+    this.setData({ editionTocOpen: !this.data.editionTocOpen });
+  },
+
   toggleTocChapter(event: ReaderDatasetEvent) {
     const chapterIndexText = datasetString(event, "chapterIndex");
     if (!/^\d+$/.test(chapterIndexText)) {
@@ -461,7 +474,7 @@ definePage<BookReaderData>()({
     if (index < 0 || index >= this.data.readerChapterTotal) return;
     this.stopPlayback();
     this.readingScrollTop = 0;
-    this.setData(this.readerChapterPatch(index), () => scrollReader({
+    this.setData({ ...this.readerChapterPatch(index), editionTocOpen: false, resumeAvailable: false }, () => scrollReader({
       selector: sectionIndex === undefined ? "#reader-body" : `#reader-section-${sectionIndex}`,
     }));
   },
@@ -470,6 +483,7 @@ definePage<BookReaderData>()({
     const chapter = this.bookChapters[index];
     return {
       readerChapterIndex: index,
+      nextChapterTitle: this.bookChapters[index + 1]?.title || "",
       bookPreviewChapters: chapter ? [compactReaderChapter(chapter)] : [],
       bookContent: chapter ? "" : this.flatPages[index] || "",
     };
@@ -510,6 +524,7 @@ definePage<BookReaderData>()({
       return;
     }
     this.stopPlayback();
+    if (this.data.resumeAvailable) this.setData({ resumeAvailable: false });
     if (this.readingToken) {
       const chapterId = this.data.shareScope === "book" ? this.bookChapters[this.data.readerChapterIndex]?.chapterId : undefined;
       const readingToken = this.readingToken, versionId = this.readerAudioVersionId;
@@ -590,14 +605,15 @@ definePage<BookReaderData>()({
   },
 
   continueSharedReading() {
-    if (this.readingScrollTop > 0) scrollReader({ scrollTop: this.readingScrollTop });
-    else scrollReader({ selector: "#reader-body" });
+    if (this.data.resumeAvailable) this.restoreSharedReadingPosition(false);
   },
 
   onPageScroll(event: { scrollTop: number }) { this.readingScrollTop = event.scrollTop; },
 
   saveReadingProgress() {
-    if (!this.readingProgressKey || this.data.error) return;
+    if (!this.readingProgressKey || this.data.error || this.data.loading) return;
+    // Opening the cover and leaving it should preserve the previous bookmark.
+    if (this.data.resumeAvailable && !this.readingScrollTop && !this.data.readerChapterIndex) return;
     const prior = this.readingProgress;
     const value: SharedReadingProgress = {
       versionId: this.readerAudioVersionId, chapterId: this.bookChapters[this.data.readerChapterIndex]?.chapterId || "",
@@ -610,15 +626,17 @@ definePage<BookReaderData>()({
   },
 
   restoreReadingProgress(output: MemoirBookOutput) {
+    const openingCover = !this.sharedReadingObjectId || this.data.resumeAvailable;
     this.sharedReadingObjectId = output.id;
-    this.restoreSharedReadingPosition();
+    this.restoreSharedReadingPosition(openingCover);
   },
 
-  restoreSharedReadingPosition() {
+  restoreSharedReadingPosition(openingCover = true) {
     this.readingProgressKey = sharedReadingKey(this.sharedReadingObjectId, this.data.shareScope);
     const saved = readSharedReadingProgress(this.readingProgressKey);
     this.readingProgress = saved;
     this.readingScrollTop = 0;
+    this.setData({ resumeAvailable: false });
     if (!saved) {
       if (this.data.readerChapterIndex !== 0) this.showReaderChapter(0);
       scrollReader({ scrollTop: 0 });
@@ -627,11 +645,14 @@ definePage<BookReaderData>()({
     const sameVersion = saved.versionId === this.readerAudioVersionId;
     const index = saved.chapterId ? this.bookChapters.findIndex(chapter => chapter.chapterId === saved.chapterId)
       : (sameVersion ? Math.min(saved.chapterIndex, this.data.readerChapterTotal - 1) : 0);
-    if (index >= 0) this.showReaderChapter(index);
     const scrollTop = sameVersion && index >= 0 ? saved.scrollTop : 0;
-    this.readingScrollTop = scrollTop;
     if (!sameVersion) this.readingProgress = { ...saved, audioHash: "", audioIndex: 0, audioSeconds: 0 };
-    this.setData({}, () => scrollReader({ scrollTop }));
+    const resumeAvailable = this.data.sharedBookEdition && openingCover && (index > 0 || scrollTop > 0);
+    this.readingScrollTop = resumeAvailable ? 0 : scrollTop;
+    this.setData({
+      ...this.readerChapterPatch(resumeAvailable ? 0 : Math.max(0, index)),
+      resumeAvailable, editionTocOpen: false,
+    }, () => scrollReader({ scrollTop: resumeAvailable ? 0 : scrollTop }));
   },
 
   onBookAudioPosition(index: number, seconds: number) {
@@ -753,9 +774,7 @@ definePage<BookReaderData>()({
     this.flatPages = this.bookChapters.length ? [] : flatReaderPages(data.bookContent);
     this.setData({
       ...data,
-      bookContent: this.bookChapters.length ? "" : this.flatPages[0] || "",
-      bookPreviewChapters: this.bookChapters.slice(0, 1).map(compactReaderChapter),
-      readerChapterIndex: 0,
+      ...this.readerChapterPatch(0),
       readerChapterTotal: this.bookChapters.length || this.flatPages.length,
     });
     if (!this.readerText) this.setData({ error: "这本书还没有生成成书内容。" });
@@ -770,7 +789,16 @@ definePage<BookReaderData>()({
       if (generation !== this.sharedReadGeneration) return;
       this.applyBookReaderOutput(output);
       const scope = output.share_scope || "book";
-      this.setData({ shareScope: scope, readerMode: scope === "book" ? "book" : "chapter" });
+      const style = selectedBookCoverStyle(output);
+      if (scope === "book") setPageNavigationTitle("全书阅读");
+      this.setData({
+        shareScope: scope, sharedBookEdition: scope === "book", readerMode: scope === "book" ? "book" : "chapter",
+        ...(scope === "book" ? {
+          readerSubtitle: trimText(output.latest_version?.manuscript?.profile.subtitle || ""),
+          editionStyle: style,
+          editionArt: ["classic_plain", "dark_album", "warm_gray"].includes(style) ? "" : `/assets/book_covers/${style}.jpg`,
+        } : {}),
+      });
       const presentation = this.applyReadingPresentation(output.latest_version || null, this.data.sharePreview, generation);
       if (this.readingToken) this.restoreReadingProgress(output);
       if (this.readingToken) enableMiniProgramShareMenu();
@@ -796,7 +824,7 @@ definePage<BookReaderData>()({
     const coverUrl = cover ? await readingImageUrl(cover, privateImages ? this.data.projectId : "") : "";
     if (generation !== this.sharedReadGeneration) return;
     this.setData({
-      shareCoverUrl: coverUrl,
+      shareCoverUrl: coverUrl, coverCaption: cover?.disclosure ? "AI 意象插图" : (cover?.caption || ""),
     });
   },
 

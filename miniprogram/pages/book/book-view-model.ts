@@ -659,7 +659,7 @@ function bookManuscriptDesignData(manuscript: MemoirBookManuscript | null) {
   };
 }
 
-function selectedBookCoverStyle(
+export function selectedBookCoverStyle(
   output: MemoirBookOutput | null,
   selectedVersion: MemoirBookOutputVersion | null = null,
 ): MemoirBookCoverStyle {

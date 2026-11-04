@@ -81,7 +81,7 @@
     <button class="ui-share-more" bindtap="retryExcerpt">重试</button>
   </view>
 </view>
-<view wx:else class="ui-page-shell {{pageClass}} {{excerptMode === 'select' ? 'ui-fixed-action-page' : ''}}">
+<view wx:else class="ui-page-shell {{pageClass}} {{sharedBookEdition ? 'shared-edition' : ''}} {{excerptMode === 'select' ? 'ui-fixed-action-page' : ''}}">
   <text wx:if="{{sharePreview}}" class="share-preview-notice">好友将看到这些内容</text>
   <view wx:if="{{loading}}" class="reader-state ui-card">
     <text>{{excerptMode === 'shared' ? '正在打开选文…' : '正在打开成书...'}}</text>
@@ -95,7 +95,27 @@
   </view>
 
   <block wx:else>
-    <view class="reader-cover ui-card">
+    <block wx:if="{{sharedBookEdition}}">
+      <view wx:if="{{readerChapterIndex === 0}}" class="edition-cover {{shareCoverUrl ? 'photo-cover' : editionStyle}}">
+        <image wx:if="{{!shareCoverUrl && editionArt}}" class="edition-art" src="{{editionArt}}" mode="aspectFill" aria-hidden="true" />
+        <view class="edition-cover-copy">
+          <text class="edition-title">{{readerTitle}}</text>
+          <text wx:if="{{readerSubtitle}}" class="edition-subtitle">{{readerSubtitle}}</text>
+          <text wx:if="{{shareByline}}" class="edition-byline">{{shareByline}}</text>
+        </view>
+        <block wx:if="{{shareCoverUrl}}">
+          <image class="edition-photo" src="{{shareCoverUrl}}" mode="widthFix" />
+          <text wx:if="{{coverCaption}}" class="edition-caption">{{coverCaption}}</text>
+        </block>
+      </view>
+      <view class="edition-tools">
+        <view wx:if="{{resumeAvailable}}" class="edition-tool ui-pressable" aria-role="button" bindtap="continueSharedReading">继续阅读</view>
+        <view wx:if="{{bookPreviewTocItems.length}}" class="edition-tool ui-pressable" aria-role="button" aria-expanded="{{editionTocOpen}}" bindtap="toggleEditionToc">{{editionTocOpen ? '收起目录' : '目录'}}</view>
+        <view wx:if="{{!sharePreview}}" class="edition-tool ui-pressable" aria-role="button" bindtap="playReaderAudio">{{ttsBusyTarget ? '正在准备朗读…' : (playingTarget ? '停止朗读' : '听本章 · AI 朗读')}}</view>
+      </view>
+      <text wx:if="{{playbackError}}" class="reader-playback-error">{{playbackError}}</text>
+    </block>
+    <view wx:else class="reader-cover ui-card">
       <image wx:if="{{shareCoverUrl}}" class="share-cover-image" src="{{shareCoverUrl}}" mode="widthFix" />
       <image
         wx:if="{{readerMode === 'book' && !shareCoverUrl}}"
@@ -126,7 +146,6 @@
           <text wx:if="{{readerShared}}">{{ttsBusyTarget ? '正在准备 AI 朗读…' : (playingTarget ? '停止朗读' : (shareScope === 'story' ? '听故事 · AI 朗读' : '听本章 · AI 朗读'))}}</text>
           <text wx:else>{{ttsBusyTarget === readerMode ? (readerMode === "chapter" ? "正在准备整章朗读…" : "正在准备全书朗读…") : (playingTarget === readerMode ? "停止朗读" : (bookViewingHistoricalVersion ? "历史版本暂不朗读" : (readerMode === "chapter" ? "朗读整章" : "朗读全书")))}}</text>
         </view>
-        <button wx:if="{{readerShared && shareScope === 'book'}}" class="ui-share-more" bindtap="continueSharedReading">继续阅读</button>
         <text wx:if="{{playbackError}}" class="reader-playback-error">{{playbackError}}</text>
       </view>
     </view>
@@ -144,8 +163,8 @@
       />
     </view>
 
-    <view wx:if="{{shareScope !== 'story' && bookPreviewTocItems.length}}" class="reader-section ui-card">
-      <text class="section-label">目录</text>
+    <view wx:if="{{shareScope !== 'story' && bookPreviewTocItems.length && (!sharedBookEdition || editionTocOpen)}}" class="reader-section ui-card">
+      <text wx:if="{{!sharedBookEdition}}" class="section-label">目录</text>
       <view class="toc-list">
         <view wx:for="{{bookPreviewTocItems}}" wx:key="id" wx:for-item="chapter" wx:for-index="chapterIndex" class="toc-group">
           <view
@@ -263,7 +282,12 @@
       <view class="book-content"><template is="readerHighlightedText" data="{{text: bookContent, active: readerChapterIndex === readerHighlightChapterIndex && readerHighlightSectionId === '', before: readerHighlightBefore, current: readerHighlightCurrent, after: readerHighlightAfter}}" /></view>
     </view>
 
-    <view wx:if="{{readerMode === 'book' && readerChapterTotal > 1}}" class="reader-pagination">
+    <view wx:if="{{sharedBookEdition && bookPreviewTocItems.length}}">
+      <view wx:if="{{readerChapterIndex + 1 < readerChapterTotal}}" class="edition-next ui-pressable" aria-role="button" bindtap="nextReaderChapter">
+        <text class="edition-next-label">下一章</text><text class="edition-next-title">{{nextChapterTitle}}</text><text aria-hidden="true">→</text>
+      </view>
+    </view>
+    <view wx:elif="{{readerMode === 'book' && readerChapterTotal > 1}}" class="reader-pagination">
       <view class="reader-page-action ui-pressable" aria-role="button" aria-disabled="{{readerChapterIndex === 0}}" bindtap="previousReaderChapter">上一{{bookPreviewChapters.length ? '章' : '页'}}</view>
       <text class="reader-page-count">{{readerChapterIndex + 1}} / {{readerChapterTotal}}</text>
       <view class="reader-page-action ui-pressable" aria-role="button" aria-disabled="{{readerChapterIndex === readerChapterTotal - 1}}" bindtap="nextReaderChapter">下一{{bookPreviewChapters.length ? '章' : '页'}}</view>
@@ -282,15 +306,15 @@
         <view wx:if="{{excerptReadingLink && excerptReadingLink.scope === 'book'}}" class="excerpt-reading-link"><text class="excerpt-reading-label">继续阅读这本回忆录</text><text class="excerpt-reading-arrow" aria-hidden="true">→</text></view>
       </view>
     </block>
-    <template is="shareLikeBar" data="{{shareLikeVisible, shareLiked, shareCanLike, shareLikeBusy, shareLikeAvatars, shareLikeText, shareLikeProfileMissing, shareForward: readerShared && !sharePreview}}" />
+    <template wx:if="{{!sharedBookEdition || readerChapterIndex + 1 === readerChapterTotal}}" is="shareLikeBar" data="{{shareLikeVisible, shareLiked, shareCanLike, shareLikeBusy, shareLikeAvatars, shareLikeText, shareLikeProfileMissing, shareForward: readerShared && !sharePreview}}" />
   </block>
-  <view wx:if="{{readerShared && (!excerptMode || excerptMode === 'shared') && !sharePreview}}" hidden="{{loading || error}}">
-    <share-response-form id="shared-response" reading-token="{{responseToken}}" active="{{!loading && !error}}" bindunavailable="onResponseUnavailable" />
+  <view wx:if="{{readerShared && (!excerptMode || excerptMode === 'shared') && !sharePreview}}" hidden="{{loading || error || (sharedBookEdition && readerChapterIndex + 1 !== readerChapterTotal)}}">
+    <share-response-form id="shared-response" reading-token="{{responseToken}}" active="{{!loading && !error && (!sharedBookEdition || readerChapterIndex + 1 === readerChapterTotal)}}" bindunavailable="onResponseUnavailable" />
   </view>
 
   <block wx:if="{{!loading && !error}}">
-    <button wx:if="{{readerShared && !sharePreview}}" class="ui-share-more" bindtap="openShareHome">我也想讲故事</button>
-    <view class="reader-top-action-shell">
+    <button wx:if="{{readerShared && !sharePreview && (!sharedBookEdition || readerChapterIndex + 1 === readerChapterTotal)}}" class="ui-share-more" bindtap="openShareHome">我也想讲故事</button>
+    <view wx:if="{{!sharedBookEdition}}" class="reader-top-action-shell">
       <view
         class="reader-top-action ui-pressable"
         aria-role="button"
