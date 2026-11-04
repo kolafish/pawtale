@@ -59,6 +59,7 @@ async def assemble_book_output(
     project_id: str,
     eligible_chapter_ids: set[str] | None = None,
     automatic: bool = False,
+    preserve_copy: bool = False,
 ) -> MemoirBookAssemblyResponse:
     await lock_project_chapters(db, project_id=project_id)
     plan = await load_book_plan_drafts(db, project_id=project_id)
@@ -243,7 +244,20 @@ async def assemble_book_output(
     if previous_version:
         stored_metadata = book_output_versions.stored_manuscript_metadata(previous_version.manuscript_json)
         metadata.update({field: stored_metadata[field] for field in copy_state.manual_targets})
-    if previous_version and (
+    preserved_chapters: set[str] = set()
+    if previous_version:
+        for chapter, draft_version in chapter_versions:
+            before = previous_snapshots.get(chapter.id)
+            after = next_snapshots[chapter.id]
+            if not before or before.get("source_refs") != after.get("source_refs"):
+                continue
+            manual_edit = draft_version.created_by == MemoirCreatedBy.USER.value and before.get("draft_version_id") != draft_version.id
+            title_only = before.get("content") == after["content"] and before.get("chapter_title") != chapter.title
+            if preserve_copy or manual_edit or title_only:
+                preserved_chapters.add(chapter.id)
+    if previous_version and book_output_versions.refresh_book_level_copy(
+        previous_version.chapter_snapshot_json, chapter_snapshots, preserved=preserved_chapters,
+    ) and (
         book_output_versions.book_editorial_copy_signature(title, previous_version.chapter_snapshot_json)
         != book_output_versions.book_editorial_copy_signature(title, chapter_snapshots)
     ):
@@ -274,7 +288,7 @@ async def assemble_book_output(
             if not (old and previous_snapshot and next_snapshot):
                 continue
             fields = set(manual_copy_fields.get(chapter.chapter_id, []))
-            if (book_output_versions.chapter_editorial_copy_signature(previous_snapshot)
+            if (chapter.chapter_id in preserved_chapters or book_output_versions.chapter_editorial_copy_signature(previous_snapshot)
                     == book_output_versions.chapter_editorial_copy_signature(next_snapshot)):
                 fields.update({"intro", "pull_quotes"})
             # An authored intro has no source binding. Deleting an unrelated
@@ -296,6 +310,16 @@ async def assemble_book_output(
         manuscript_json=manuscript.model_dump(mode="json") if manuscript else {},
         created_by=MemoirCreatedBy.SYSTEM,
     )
+    if preserved_chapters and copy_state.status == "succeeded":
+        # A batch can include a saved typo in one chapter and narration in another.
+        # Carry forward only fields whose previous copy was already processed.
+        for chapter_id in preserved_chapters:
+            if copy_state.chapter_input_signatures.get(chapter_id) == book_output_versions.chapter_editorial_copy_signature(previous_snapshots[chapter_id]):
+                copy_state.chapter_input_signatures[chapter_id] = book_output_versions.chapter_editorial_copy_signature(next_snapshots[chapter_id])
+        if preserve_copy and copy_state.input_signature == book_output_versions.book_editorial_copy_signature(title, previous_version.chapter_snapshot_json):
+            copy_state.input_signature = book_output_versions.book_editorial_copy_signature(title, chapter_snapshots)
+            copy_state.processed_version = version.version
+        output.metadata_json = {**output.metadata_json, book_output_versions.AUTOMATIC_EDITORIAL_COPY_KEY: copy_state.model_dump(mode="json")}
     if chapter_snapshots and not automatic:
         from app.services.memoir.book_generation_jobs import schedule_book_editorial_copy_generation
         await schedule_book_editorial_copy_generation(db, project_id=project_id, user_id=project.user_id,

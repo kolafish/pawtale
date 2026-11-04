@@ -963,6 +963,7 @@ definePage<BookCompletionData>()({
   async reviewBook() {
     if (
       !this.data.canReviewBook
+      || this.data.bookReview?.status === "ready"
       || this.data.checkingBook
     ) {
       return;
@@ -978,7 +979,7 @@ definePage<BookCompletionData>()({
     try {
       await enqueueMemoirBookReviewJob(
         this.data.projectId,
-        Boolean(this.data.bookReview),
+        false,
       );
       await this.loadOverview(true);
     } catch (error) {

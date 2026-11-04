@@ -96,6 +96,7 @@ from app.services.memoir.book_output_versions import (
     book_editorial_copy_signature,
     chapter_editorial_copy_signature,
     retained_chapter_quotes,
+    refresh_book_level_copy,
 )
 from app.services.memoir.project_ai_preferences import (
     resolve_project_ai_model,
@@ -616,9 +617,15 @@ async def regenerate_book_output_editorial_copy(
         if state.input_signature == signature and (not retry or state.status == "succeeded"):
             await db.commit()
             return _output_response(output)
+        signatures = {item["chapter_id"]: chapter_editorial_copy_signature(item) for item in snapshot}
+        current_copy = {key for key, value in signatures.items() if state.chapter_input_signatures.get(key) == value}
+        baseline = next((version for version in output.versions if version.version == state.processed_version), None)
+        if (baseline and state.status == "succeeded"
+                and state.input_signature == book_editorial_copy_signature(output_title, baseline.chapter_snapshot_json)
+                and not refresh_book_level_copy(baseline.chapter_snapshot_json, snapshot, preserved=current_copy)):
+            targets -= {"preface", "afterword", "back_cover_quote"}
         state.input_signature = signature
         targets -= set(state.manual_targets)
-        signatures = {item["chapter_id"]: chapter_editorial_copy_signature(item) for item in snapshot}
         chapter_ids = {
             chapter_id for chapter_id, signature in signatures.items()
             if (state.chapter_input_signatures.get(chapter_id) != signature

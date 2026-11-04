@@ -293,7 +293,11 @@ async def test_saved_copy_and_supplement_finish_automatic_book_together(client, 
     calls = []
     async def generate(**kwargs):
         calls.append(kwargs)
-        return _copy(kwargs['snapshot'], len(calls))
+        result = _copy(kwargs['snapshot'], len(calls))
+        if kwargs["targets"] == ["pull_quotes"]:
+            return replace(result, chapter_intros=[replace(chapter, valid_empty_quote=True)
+                for chapter in result.chapter_intros])
+        return result
     monkeypatch.setattr(book_outputs, 'generate_manuscript_editorial_copy', generate)
     project_id, chapter_id, section_id, fake, parent = await _ready_book(client, test_db, monkeypatch)
     parent_id = parent.id
@@ -309,6 +313,7 @@ async def test_saved_copy_and_supplement_finish_automatic_book_together(client, 
             test_db, user_id=user_id, project_id=project_id,
             req=MemoirBookOutputEditorialCopyRegenerateRequest(targets=['chapter_intros']))
     original = saved.latest_version.manuscript.chapters[0]
+    previous_calls = len(calls)
     await _add_narration(client, test_db, project_id, section_id, fake)
     assert not await run_test_editing_job(test_db, parent_id)
     parent = await test_db.get(MemoirEditingJob, parent_id)
@@ -325,6 +330,7 @@ async def test_saved_copy_and_supplement_finish_automatic_book_together(client, 
     progress = await draft_progress.read_draft_progress(test_db, project_id=project_id)
     assert progress.status == 'ready'
     current = await book_outputs.get_book_output(test_db, user_id=user_id, project_id=project_id)
+    assert all(set(call["targets"]) <= {"chapter_intros", "pull_quotes"} for call in calls[previous_calls:])
     assert not current.is_stale
     assert current.latest_version.id != saved.latest_version.id
     manuscript = current.latest_version.manuscript
@@ -430,7 +436,7 @@ async def test_audit_changes_do_not_regenerate_editorial_copy(client, test_db, m
         created_by=MemoirCreatedBy.SYSTEM)
     await test_db.commit()
     await _automatic(test_db, project)
-    assert len(calls) == 4 and calls[-1]['chapter_ids'] == []
+    assert len(calls) == 3  # Reordering chapters reviews the reading order but preserves copy.
     assert 'chapter_intros' not in calls[-1]['targets']
 
 
@@ -1148,3 +1154,40 @@ async def test_automatic_empty_chapter_quote_survives_another_chapter_reassembly
     repeated = await assemble_book_output(test_db, project_id=project.id, automatic=True)
     latest = await load_latest_book_output_version(test_db, output_id=repeated.output_id)
     assert latest.manuscript_json["chapters"][0]["pull_quotes"] == []
+
+
+async def test_manual_chapter_save_updates_readable_book_without_requesting_models(client, test_db, monkeypatch):
+    from tests.test_memoir_continuous_book import _ready_book
+    from app.services.memoir import chapter_generation
+
+    project_id, chapter_id, section_id, fake, parent = await _ready_book(client, test_db, monkeypatch)
+    before = await test_db.get(MemoirBookOutputVersion, parent.result_json["output_version_id"])
+    draft = await chapter_generation.latest_chapter_draft_version(test_db, project_id=project_id, chapter_id=chapter_id)
+    calls = len(fake.prompts)
+    body = draft.section_snapshot_json[0]["content"] + "。"
+    response = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-plan/chapters/{chapter_id}/draft/revise",
+        json={"expected_version_id": draft.id, "sections": [{"section_id": section_id, "content": body}]})
+    assert response.status_code == 200, response.text
+    assert await run_test_editing_job(test_db, parent.id)
+    await test_db.refresh(parent)
+    latest = await test_db.get(MemoirBookOutputVersion, parent.result_json["output_version_id"])
+    assert body in latest.content and latest.id != before.id
+    assert latest.manuscript_json["front_matter"] == before.manuscript_json["front_matter"]
+    assert latest.manuscript_json["chapters"][0]["intro"] == before.manuscript_json["chapters"][0]["intro"]
+    assert len(fake.prompts) == calls and not parent.result_json["review_job_id"]
+    assert not await test_db.scalar(select(MemoirEditingJob.id).where(MemoirEditingJob.project_id == project_id,
+        MemoirEditingJob.status.in_(["running", "pending"])))
+
+
+def test_body_excerpt_typo_keeps_its_section_and_does_not_rewrite_authored_copy():
+    from app.services.memoir.book_output_versions import retained_chapter_quotes
+
+    former = "那天我们全家一起坐客车回到了家乡。"
+    revised = former.replace("客车", "汽车")
+    lead = "小时候我们常常在外面过年。"
+    stored = {"sections": [{"section_id": "s1", "content": former}],
+        "pull_quotes": [{"source": "editorial_generated", "text": former}, {"source": "manual", "text": "家人的题词"}]}
+    snapshot = {"sections": [{"section_id": "s1", "content": revised}], "content": lead + revised}
+    assert [quote.text for quote in retained_chapter_quotes(stored, snapshot)] == [revised, "家人的题词"]
+    snapshot["sections"][0]["section_id"] = "different"
+    assert [quote.text for quote in retained_chapter_quotes(stored, snapshot)] == ["家人的题词"]

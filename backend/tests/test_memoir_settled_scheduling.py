@@ -25,6 +25,9 @@ async def test_settled_trigger_advances_same_job_without_losing_progress(client,
     # A later source edit still asks for settling instead of using a stale ready signal.
     incoming = await automatic_book_draft.schedule_book_draft(test_db, project_id=project_id)
     assert incoming.id == first.id and incoming.run_after > now
+    due = incoming.run_after
+    manual = await automatic_book_draft.schedule_book_draft(test_db, project_id=project_id, source="manual_draft", settled=True)
+    assert manual.id == incoming.id and manual.payload_json["source"] == "materials" and manual.run_after == due
 
 
 @pytest.mark.parametrize('dependency_type', [MemoirEditingJobType.CORRECT_TRANSCRIPT,

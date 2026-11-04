@@ -163,12 +163,12 @@
         bindtap="openBookHome"
       ><text>返回书稿</text><text class="row-action-mark">›</text></view>
       <view
-        wx:if="{{canReviewBook}}"
+        wx:if="{{canReviewBook && (!bookReview || bookReview.status !== 'ready')}}"
         class="recheck-book-action ui-block-action ui-pressable {{checkingBook || bookReviewCancelling ? 'is-disabled' : ''}}"
         aria-role="button"
         aria-disabled="{{checkingBook || bookReviewCancelling}}"
         bindtap="reviewBook"
-      ><text>{{checkingBook ? "正在检查全书…" : (bookReview ? "重新检查全书" : "检查全书")}}</text><text class="row-action-mark">›</text></view>
+      ><text>{{checkingBook ? "正在检查全书…" : "检查全书"}}</text><text class="row-action-mark">›</text></view>
     </view>
 
     <view wx:if="{{bulkCheckVisible}}" class="completion-notice">
