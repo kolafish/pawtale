@@ -116,23 +116,23 @@
       <view
         wx:if="{{shareCandidate || shareVideoTotal || shareVideoActiveCount || shareVideoFailedCount}}"
         class="home-share-candidate ui-pressable"
-        aria-label="分享视频"
+        aria-label="我的分享"
         aria-role="button"
         bindtap="openShareCard"
         hover-class="ui-subtle-action-hover"
       >
         <view class="home-utility-icon home-utility-video" aria-hidden="true">▶</view>
         <view class="home-utility-copy">
-          <text class="home-utility-title">分享视频</text>
+          <text class="home-utility-title">我的分享</text>
         </view>
         <button wx:if="{{shareCandidate && shareCandidate.status === 'ready'}}" class="home-utility-action ui-button" catchtap="openShareCandidateEditor" disabled="{{shareCandidateDismissing}}">制作</button>
         <button wx:elif="{{shareCandidate && shareCandidate.status === 'accepted' && shareCandidate.video_job_id}}" class="home-utility-action ui-button" catchtap="openShareCandidateVideo" disabled="{{shareCandidateDismissing}}">查看</button>
         <text class="home-utility-arrow" aria-hidden="true">›</text>
       </view>
       <view wx:else class="home-utility-row ui-pressable" bindtap="openShareCard" hover-class="ui-subtle-action-hover"
-        aria-role="button" aria-label="分享视频">
+        aria-role="button" aria-label="我的分享">
         <view class="home-utility-icon home-utility-video" aria-hidden="true">▶</view>
-        <view class="home-utility-copy"><text class="home-utility-title">分享视频</text></view>
+        <view class="home-utility-copy"><text class="home-utility-title">我的分享</text></view>
         <text class="home-utility-arrow" aria-hidden="true">›</text>
       </view>
       <view class="home-utility-row ui-pressable" bindtap="openTranscripts" hover-class="ui-subtle-action-hover"

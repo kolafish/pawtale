@@ -70,7 +70,6 @@ import {
   navigateToTranscripts,
   navigateToLogin,
   navigateToLoginThenNarrate,
-  navigateToVideoClipPicker,
 } from "../../services/navigation";
 import { pageUrl } from "../../services/page-input";
 import {
@@ -708,23 +707,9 @@ definePage<HomeData>()({
     } });
   },
 
-  pickShareVideoClip() {
-    if (!this.data.projectId || this.data.voiceEntry || this.data.shareCandidateDismissing) return;
-    navigateToVideoClipPicker();
-  },
-
   openShareCard() {
-    if (!this.data.projectId) {
-      this.canStartVoiceChat();
-      return;
-    }
-    // Recommendations use their own catchtap buttons; the row always keeps the library/picker reachable.
-    if (this.data.shareCandidate?.status === "accepted" || this.data.shareVideoTotal
-      || this.data.shareVideoActiveCount || this.data.shareVideoFailedCount) {
-      this.openShareVideoLibrary();
-    } else {
-      this.pickShareVideoClip();
-    }
+    if (this.data.projectId) this.openShareVideoLibrary();
+    else this.canStartVoiceChat();
   },
 
   openShareVideoLibrary() {

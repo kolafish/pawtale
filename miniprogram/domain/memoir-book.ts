@@ -491,7 +491,10 @@ export interface MemoirBookManuscriptIllustration {
   disclosure: string;
 }
 
+export interface FeaturedFamilyNote { display_name: string; content: string }
+
 export interface MemoirBookManuscriptChapter {
+  family_notes?: FeaturedFamilyNote[];
   chapter_id: string;
   index: number;
   title: string;

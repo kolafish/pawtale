@@ -316,3 +316,16 @@ test("video progress exposes refresh failure and resumes only after an explicit 
   assert.equal(polling.hasPoll(), true);
   polling.context.onUnload();
 });
+
+test("the card library re-shares a saved excerpt without creating a new one", async () => {
+  const card = { id: "excerpt-1", scope: "excerpt", token: "x2.saved", title: "院子的树", created_at: "2026-11-01" };
+  mockModule("../services/memoir-book-api.ts", { listShareCards: async () => [card] });
+  const { page } = loadPageModule("../pages/share-videos/index.ts");
+  global.wx = { getStorageSync: () => "" };
+  const context = pageContext(page, { projectId: "p1", cardsOpen: true });
+  await context.loadCards(true);
+  const result = context.onShareAppMessage({ from: "button", target: { dataset: { id: card.id } } });
+  assert.equal(result.path, "/pages/book-reader/index?excerptToken=x2.saved");
+  assert.equal(result.title, card.title);
+  assert.deepEqual(context.onShareAppMessage({ from: "menu" }), require("../services/share.ts").homeShareAppMessage());
+});

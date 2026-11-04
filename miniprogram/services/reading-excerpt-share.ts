@@ -15,6 +15,7 @@ export const INITIAL_EXCERPT_DATA = {
   excerptStyle: "text" as "text" | "image", excerptImageSource: "ai" as "ai" | "photo",
   excerptBackgroundNote: "", excerptIllustrationStyle: "watercolor", excerptStyleOptions: [] as ReturnType<typeof illustrationStyleViews>,
   excerptPhotoIds: [] as string[], excerptAiAssetIds: [] as string[], excerptPhotoBusy: false,
+  excerptAllowBookLink: false,
   excerptReadingLink: null as MemoirExcerptShare["reading_link"],
   excerptContent: "", excerptBookTitle: "", excerptChapterTitle: "",
   excerptImageUrl: "", excerptImageReady: false, excerptBusy: false, excerptSelectionCount: 0,
@@ -180,6 +181,9 @@ export const readingExcerptMethods = methods({
   resumeExcerptImage() {
     this.excerptImageController?.resumePolling();
   },
+  changeExcerptBookLink(event: { detail: { value: boolean } }) {
+    if (!this.data.excerptBusy) this.setData({ excerptAllowBookLink: event.detail.value });
+  },
   async confirmExcerptCard() {
     if (this.data.excerptBusy || this.data.excerptTitleBusy || this.data.excerptPhotoBusy || this.data.excerptReloadRequired) return;
     const title = this.data.excerptTitle.trim();
@@ -193,7 +197,7 @@ export const readingExcerptMethods = methods({
     this.setData({ excerptBusy: true, error: "" });
     try {
       const share = await createMemoirExcerptShare(this.data.projectId, this.data.chapterId,
-        { version_id: this.excerptVersionId, content: this.data.excerptContent, title, summary, ...(assetId ? { image_asset_id: assetId } : {}) });
+        { version_id: this.excerptVersionId, content: this.data.excerptContent, allow_book_link: this.data.excerptAllowBookLink, title, summary, ...(assetId ? { image_asset_id: assetId } : {}) });
       if (generation !== this.excerptGeneration) return;
       this.excerptToken = share.token;
       this.setData({ excerptMode: "preview", excerptTitle: share.title, excerptSummary: share.summary, excerptContent: share.content,

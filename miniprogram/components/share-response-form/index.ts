@@ -1,11 +1,12 @@
-import { submitShareResponse, startShareResponseVoice } from "../../services/share-responses";
+import type { FeaturedFamilyNote } from "../../domain/memoir-book";
+import { featuredShareResponses, submitShareResponse, startShareResponseVoice } from "../../services/share-responses";
 import { ApiError } from "../../services/request";
 
-const runtimes = new WeakMap<object, { generation: number; voiceGeneration: number; submitting: boolean;
+const runtimes = new WeakMap<object, { generation: number; voiceGeneration: number; featuredRequest: number; submitting: boolean;
   targetReadingToken: string | null; targetVideoCode: string | null; requestId: string; requestContent: string }>();
 function runtime(owner: object) {
   let value = runtimes.get(owner);
-  if (!value) { value = { generation: 0, voiceGeneration: 0, submitting: false,
+  if (!value) { value = { generation: 0, voiceGeneration: 0, featuredRequest: 0, submitting: false,
     targetReadingToken: null, targetVideoCode: null, requestId: "", requestContent: "" }; runtimes.set(owner, value); }
   return value;
 }
@@ -13,14 +14,14 @@ function runtime(owner: object) {
 Component({
   options: { addGlobalClass: true },
   properties: { readingToken: { type: String, value: "" }, videoCode: { type: String, value: "" }, active: { type: Boolean, value: true } },
-  data: { open: false, content: "", busy: false, error: "", sent: false,
+  data: { featured: [] as FeaturedFamilyNote[], featuredError: "", open: false, content: "", busy: false, error: "", sent: false,
     voiceCaptureId: "", gatewayUrl: "", voiceStartRequest: 0 },
   observers: {
     active(active: unknown) {
       if (active) return;
       const current = runtime(this);
       current.voiceGeneration += 1;
-      this.setData({ busy: current.submitting, gatewayUrl: "", voiceStartRequest: 0 });
+      this.setData({ featured: [], featuredError: "", busy: current.submitting, gatewayUrl: "", voiceStartRequest: 0 });
     },
     "readingToken,videoCode"() {
       const current = runtime(this);
@@ -31,12 +32,27 @@ Component({
       current.submitting = false;
       current.requestId = "";
       current.requestContent = "";
-      this.setData({ open: false, content: "", busy: false, error: "", sent: false,
+      this.setData({ featured: [], featuredError: "", open: false, content: "", busy: false, error: "", sent: false,
         voiceCaptureId: "", gatewayUrl: "", voiceStartRequest: 0 });
     },
+    "readingToken,videoCode,active"() { void this.loadFeatured(); },
   },
   lifetimes: { detached() { runtime(this).generation += 1; } },
   methods: {
+    async loadFeatured() {
+      const { readingToken, videoCode, active } = this.properties;
+      const state = runtime(this);
+      const request = ++state.featuredRequest;
+      if (!active || (!readingToken && !videoCode)) return;
+      const generation = state.generation;
+      const current = () => generation === state.generation && request === state.featuredRequest && this.properties.active;
+      try {
+        const featured = await featuredShareResponses(readingToken ? { reading_token: readingToken } : { video_code: videoCode });
+        if (current()) this.setData({ featured, featuredError: "" });
+      } catch {
+        if (current()) this.setData({ featured: [], featuredError: "精选留言暂时未能读取" });
+      }
+    },
     openForm() { if (this.properties.active) this.setData({ open: true, sent: false }); },
     closeForm() { if (!this.data.busy) this.setData({ open: false, gatewayUrl: "", voiceStartRequest: 0 }); },
     changeText(event: { detail: { value?: string } }) { this.setData({ content: event.detail.value || "", error: "" }); },

@@ -36,7 +36,7 @@ from app.schemas.memoir_book import (
     MemoirBookShareCreateResponse,
     MemoirReadingShareCardRequest, MemoirReadingShareCardSelection,
     MemoirExcerptSelection, MemoirExcerptTitle, MemoirExcerptImageRequest,
-    MemoirExcerptShareRequest, MemoirExcerptShareResponse, MemoirExcerptShareCreated,
+    MemoirShareCardItem, MemoirExcerptShareRequest, MemoirExcerptShareResponse, MemoirExcerptShareCreated,
     MemoirBookShareReadRequest, MemoirSharedAudioPlanRequest, MemoirSharedAudioPlanResponse, MemoirFeaturedBookResponse,
     MemoirBookShareStatusResponse,
     MemoirBookPlanConfirmRequest,
@@ -128,6 +128,19 @@ async def revoke_mobile_memoir_book_share(
     chapter_id: str | None = None, section_id: str | None = None,
 ):
     await memoir_book_shares.revoke_share(db, user_id=current_user.id, project_id=project_id, chapter_id=chapter_id, section_id=section_id)
+    return Response(status_code=204)
+
+
+@router.get("/projects/{project_id}/share-cards", response_model=list[MemoirShareCardItem])
+async def list_share_cards(project_id: str, response: Response, offset: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=50),
+                           db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    response.headers["Cache-Control"] = "no-store"
+    return await memoir_book_shares.list_share_cards(db, project_id, current_user.id, offset, limit)
+
+
+@router.delete("/projects/{project_id}/excerpt-shares/{excerpt_id}", status_code=204)
+async def revoke_excerpt(project_id: str, excerpt_id: str, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    await memoir_book_shares.revoke_excerpt(db, project_id, current_user.id, excerpt_id)
     return Response(status_code=204)
 
 

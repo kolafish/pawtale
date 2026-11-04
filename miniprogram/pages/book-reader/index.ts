@@ -216,6 +216,7 @@ function chapterReaderData(
     ? sections.map((section) => `${section.title}\n\n${section.content}`).join("\n\n")
     : trimText(workspace.draft_content);
   const chapter: BookOutputChapterPreviewView = {
+    familyNotes: workspace.family_notes,
     id: workspace.chapter_id,
     chapterId: workspace.chapter_id,
     index: 1,
@@ -321,7 +322,7 @@ definePage<BookReaderData>()({
     const chapterId = queryParam(query, "chapterId");
     this.excerptToken = queryParam(query, "excerptToken");
     if (this.excerptToken) {
-      this.setData({ excerptMode: "shared" });
+      this.setData({ excerptMode: "shared", responseToken: this.excerptToken });
       setPageNavigationTitle("选文分享");
       await this.loadExcerptSnapshot();
       return;
@@ -400,7 +401,8 @@ definePage<BookReaderData>()({
   },
 
   onResponseUnavailable() {
-    void this.retrySharedReading();
+    if (this.data.excerptMode === "shared") void this.loadExcerptSnapshot();
+    else void this.retrySharedReading();
   },
 
   onShareUnavailable(error: Error) {

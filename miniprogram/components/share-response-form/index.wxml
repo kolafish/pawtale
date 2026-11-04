@@ -1,9 +1,14 @@
 <view class="share-response-form">
+  <view wx:if="{{featured.length}}" class="response-card">
+    <text class="response-title">家人精选留言</text>
+    <view wx:for="{{featured}}" class="response-hint"><text user-select>{{item.display_name}}：{{item.content}}</text></view>
+  </view>
+  <button wx:if="{{featuredError}}" class="ui-share-more" bindtap="loadFeatured">{{featuredError}} · 重试</button>
   <button wx:if="{{!open}}" class="ui-button ui-share-more" bindtap="openForm">我也记得这件事</button>
-  <text wx:if="{{sent}}" class="response-hint" aria-live="polite">已送达，仅您和作者可见</text>
+  <text wx:if="{{sent}}" class="response-hint" aria-live="polite">已送达，等待作者查看</text>
   <view wx:if="{{open}}" class="response-card">
     <text class="response-title">我也记得这件事</text>
-    <text class="response-hint">回应仅您和作者可见。提交时需要登录，作者确认后才会收为素材。</text>
+    <text class="response-hint">默认仅您和作者可见。作者精选后，您的署名和文字将公开展示在分享页、书中和导出文件中。原音保持私密。</text>
     <voice-text-editor value="{{content}}" voice-enabled="{{!voiceCaptureId}}" prepare-voice="{{true}}" voice-start-request="{{voiceStartRequest}}" gateway-url="{{gatewayUrl}}" maxlength="2000" placeholder="写下您记得的细节…" submit-text="送给作者" cancel-text="稍后再写" disabled="{{!active}}" busy="{{busy}}" bindchange="changeText" bindsubmit="submit" bindcancel="closeForm"
       bindrequestvoice="requestVoice" bindvoicesource="voiceSource" />
     <text wx:if="{{voiceCaptureId}}" class="response-hint">原音已保存。请核对文字，确认后发送给作者。</text>

@@ -48,7 +48,28 @@ function memoirBookSharePath(projectId: string, chapterId: string, sectionId = "
   return query ? `${path}?${query}` : path;
 }
 
-export function createMemoirExcerptShare(projectId: string, chapterId: string, data: MemoirExcerptSelection & { title?: string; summary?: string; image_asset_id?: string }): Promise<MemoirExcerptShare & { token: string }> {
+export interface ShareCardItem {
+  allow_book_link: boolean;
+  id: string;
+  scope: "book" | "chapter" | "story" | "excerpt";
+  title: string;
+  token: string;
+  created_at: string;
+}
+
+export function listShareCards(projectId: string, offset: number): Promise<ShareCardItem[]> {
+  return memoirRequest(memoirProjectPath(projectId, `/share-cards?offset=${offset}&limit=20`));
+}
+
+export async function stopShareCard(projectId: string, item: ShareCardItem): Promise<void> {
+  if (item.scope === "excerpt") {
+    await memoirRequest(memoirProjectPath(projectId, `/excerpt-shares/${encodeURIComponent(item.id)}`), { method: "DELETE" });
+  } else {
+    await revokeMemoirBookShare(projectId, item.scope === "chapter" ? item.id : "", item.scope === "story" ? item.id : "");
+  }
+}
+
+export function createMemoirExcerptShare(projectId: string, chapterId: string, data: MemoirExcerptSelection & { allow_book_link: boolean; title?: string; summary?: string; image_asset_id?: string }): Promise<MemoirExcerptShare & { token: string }> {
   return memoirRequest(memoirProjectPath(projectId, `/chapters/${encodeURIComponent(chapterId)}/excerpt-shares`), {
     method: "POST", data, invalidatesSnapshots: false,
   });

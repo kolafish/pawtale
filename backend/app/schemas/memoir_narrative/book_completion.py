@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Literal
 
+from app.schemas.memoir_share_responses import FeaturedFamilyNote
+
 from pydantic import BaseModel, Field, model_validator
 from app.schemas.memoir_book import MemoirBookManuscriptIllustration
 from app.schemas.memoir_book_review import (
@@ -211,6 +213,7 @@ class MemoirBookCompletionOverviewResponse(BaseModel):
 
 
 class MemoirChapterWorkspaceResponse(BaseModel):
+    family_notes: list[FeaturedFamilyNote] = Field(default_factory=list)
     illustrations: list[MemoirBookManuscriptIllustration] = Field(default_factory=list)
     server_revision: int = Field(ge=0)
     project_id: str

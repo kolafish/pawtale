@@ -3,6 +3,7 @@ import type {
   MemoirBookChapterDraft,
   MemoirBookChapterSourceRef,
   MemoirBookManuscript,
+  MemoirBookManuscriptChapter,
   MemoirBookManuscriptSection,
   MemoirBookManuscriptTemplate,
   MemoirBookCoverStyle,
@@ -102,6 +103,7 @@ export interface BookOutputSectionView {
 }
 
 export interface BookOutputChapterPreviewView {
+  familyNotes?: MemoirBookManuscriptChapter["family_notes"];
   id: string;
   chapterId: string;
   index: number;
@@ -460,6 +462,7 @@ export function bookOutputChapterPreviews(
           };
         });
       return {
+        familyNotes: chapter.family_notes,
         id: `${chapter.chapter_id}:${chapterIndex}`,
         chapterId: chapter.chapter_id,
         index: chapterIndex,

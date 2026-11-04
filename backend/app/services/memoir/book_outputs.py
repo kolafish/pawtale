@@ -41,6 +41,7 @@ from app.schemas.memoir_book import (
     MemoirBookTitleSuggestionRequest,
     MemoirBookTitleSuggestionResponse,
 )
+from app.services.memoir.featured_family_notes import attach_chapter_notes, export_text_with_notes
 from app.services.file_exports import ExportFile
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir import (
@@ -408,6 +409,8 @@ async def get_book_output(
     )
     if response is None:
         raise HTTPException(status_code=404, detail="全书稿不存在")
+    if response.latest_version:
+        await attach_chapter_notes(db, project_id, response.latest_version.manuscript)
     return response
 
 
@@ -429,7 +432,9 @@ async def get_book_output_version(
     )
     if version is None:
         raise HTTPException(status_code=404, detail="书稿版本不存在")
-    return _output_version_response(version, fallback_title=output.title)
+    response = _output_version_response(version, fallback_title=output.title)
+    await attach_chapter_notes(db, project_id, response.manuscript)
+    return response
 
 
 async def book_output_response_or_none(
@@ -902,6 +907,9 @@ async def prepare_book_output_export(
                 update=preview_custom_layout_patch
             )
         manuscript.schema_version = 5
+    await attach_chapter_notes(db, project_id, manuscript)
+    if manuscript and export_format == MemoirBookOutputExportFormat.TXT:
+        content = export_text_with_notes(content, manuscript)
     return PreparedBookExport(
         owner_id=project.user_id, project_id=project_id, version_id=version.id,
         version=version.version, title=title, content=content, manuscript=manuscript,

@@ -1,3 +1,5 @@
+import { excerptShareMessage, homeShareAppMessage } from "../../services/share";
+import { listShareCards, stopShareCard, type ShareCardItem } from "../../services/memoir-book-api";
 import type { MemoirShareVideoJob, MemoirShareVideoListItem } from "../../domain/memoir-transcript";
 import { MEMOIR_SHARE_VIDEO_STYLES, normalizeMemoirShareVideoStyle } from "../../domain/memoir-transcript";
 import { accessibilityPageClass } from "../../services/accessibility-settings";
@@ -38,6 +40,9 @@ interface ShareVideoTaskView extends ShareVideoItemView {
 }
 
 interface ShareVideosData {
+  cardsOpen: boolean;
+  cards: (ShareCardItem & { scopeText: string; timeText: string })[];
+  moreCards: boolean;
   pageClass: string;
   projectId: string;
   loading: boolean;
@@ -79,6 +84,7 @@ definePage<ShareVideosData>()({
   progressPoller: pageRuntime(() => new PollingTimer(5000)),
 
   data: {
+    cardsOpen: false, cards: [], moreCards: false,
     pageClass: "detail-page",
     projectId: "",
     loading: false,
@@ -98,7 +104,7 @@ definePage<ShareVideosData>()({
   onShow() {
     this.pageVisible = true;
     this.setData({ pageClass: accessibilityPageClass("detail-page") });
-    void this.loadVideos(true);
+    void this.refreshLibrary();
   },
 
   onHide() {
@@ -110,6 +116,72 @@ definePage<ShareVideosData>()({
   onUnload() {
     this.onHide();
   },
+
+  refreshLibrary() {
+    return this.data.cardsOpen ? this.loadCards(true) : this.loadVideos(true);
+  },
+
+  switchLibrary(event: PageDatasetEvent<{ tab?: string }>) {
+    const cardsOpen = datasetString(event, "tab") === "cards";
+    if (cardsOpen === this.data.cardsOpen) return;
+    this.progressPoller.cancel();
+    this.setData({ cardsOpen, error: "" });
+    void this.refreshLibrary();
+  },
+
+  async loadCards(reset: boolean) {
+    if (!reset && (this.data.loading || !this.data.moreCards)) return;
+    const token = ++this.requestToken;
+    this.setData({ loading: true, error: "" });
+    try {
+      const projectId = this.data.projectId || (await getMemoirIdentity()).active_project_id;
+      if (token !== this.requestToken) return;
+      const previous = reset ? [] : this.data.cards;
+      const cards = projectId ? await listShareCards(projectId, previous.length) : [];
+      if (token !== this.requestToken) return;
+      const labels = { book: "全书", chapter: "整章", story: "故事", excerpt: "选文" };
+      this.setData({ projectId, needsLogin: false, moreCards: cards.length === PAGE_SIZE,
+        cards: [...previous, ...cards.filter(item => !previous.some(old => old.id === item.id && old.scope === item.scope))
+          .map(item => ({ ...item, scopeText: labels[item.scope], timeText: formatBeijingDateTimeShort(item.created_at) }))] });
+    } catch (error) {
+      if (token === this.requestToken) this.setData({ cards: reset ? [] : this.data.cards,
+        needsLogin: isAuthError(error), error: error instanceof Error ? error.message : "读取卡片失败" });
+    } finally {
+      if (token === this.requestToken) this.setData({ loading: false });
+    }
+  },
+
+  openCard(event: VideoEvent) {
+    const card = this.data.cards.find(item => item.id === datasetString(event, "id"));
+    if (card) wx.navigateTo({ url: pageUrl("/pages/book-reader/index",
+      card.scope === "excerpt" ? { excerptToken: card.token } : { shareToken: card.token }) });
+  },
+
+  onShareAppMessage(event?: WechatMiniprogram.ShareAppMessageOption) {
+    const id = event?.from === "button" ? event.target?.dataset?.id : "";
+    const card = this.data.cardsOpen && this.data.cards.find(item => item.scope === "excerpt" && item.id === id);
+    return card ? excerptShareMessage(card.token, card.title) : homeShareAppMessage();
+  },
+
+  async stopCard(event: VideoEvent) {
+    const card = this.data.cards.find(item => item.id === datasetString(event, "id"));
+    if (!card || this.data.deletingId) return;
+    const projectId = this.data.projectId;
+    const confirmed = await new Promise<boolean>(resolve => wx.showModal({
+      title: "停止分享", content: `《${card.title}》的这张卡片将无法打开，已发出的图片仍会保留。`,
+      confirmText: "停止分享", success: result => resolve(Boolean(result.confirm)), fail: () => resolve(false),
+    }));
+    if (!confirmed || !this.pageVisible || !this.data.cardsOpen || this.data.projectId !== projectId) return;
+    this.setData({ deletingId: card.id });
+    try {
+      await stopShareCard(projectId, card);
+      if (this.pageVisible && this.data.cardsOpen) await this.loadCards(true);
+    } catch (error) {
+      this.setData({ error: error instanceof Error ? error.message : "停止分享失败" });
+    } finally { this.setData({ deletingId: "" }); }
+  },
+
+  loadMoreCards() { void this.loadCards(false); },
 
   async loadVideos(reset = true) {
     if (this.data.loading && !reset) return;
@@ -214,6 +286,7 @@ definePage<ShareVideosData>()({
   },
 
   onReachBottom() {
+    if (this.data.cardsOpen) { this.loadMoreCards(); return; }
     if (this.data.hasMore) void this.loadVideos(false);
   },
 

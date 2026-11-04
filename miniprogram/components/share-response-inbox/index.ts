@@ -1,4 +1,5 @@
-import { adoptShareResponse, listShareResponses, readShareResponse, downloadShareResponseAudio, type ShareResponseItem } from "../../services/share-responses";
+import { getMemoirBookPlan } from "../../services/memoir-book-api";
+import { featureShareResponse, adoptShareResponse, listShareResponses, readShareResponse, downloadShareResponseAudio, type ShareResponseItem } from "../../services/share-responses";
 
 import { AudioPlaybackController } from "../../services/audio-playback";
 const runtimes = new WeakMap<object, { generation: number; playback: AudioPlaybackController }>();
@@ -11,7 +12,7 @@ function runtime(owner: object) {
 Component({
   options: { addGlobalClass: true },
   properties: { projectId: { type: String, value: "" }, userId: { type: String, value: "" } },
-  data: { items: [] as ShareResponseItem[], unread: 0, next: "", open: false, selected: null as ShareResponseItem | null, busy: false, error: "", audioPlaying: false },
+  data: { chapterChoices: [] as { id: string; title: string }[], items: [] as ShareResponseItem[], unread: 0, next: "", open: false, selected: null as ShareResponseItem | null, busy: false, error: "", audioPlaying: false },
   observers: { "projectId,userId"() {
     runtime(this).generation += 1; runtime(this).playback.stop();
     this.setData({ audioPlaying: false, items: [], selected: null, open: false, unread: 0, next: "", busy: false, error: "" });
@@ -38,14 +39,15 @@ Component({
     async select(event: { currentTarget: { dataset: { id?: string } } }) {
       const selected = this.data.items.find((item: ShareResponseItem) => item.id === event.currentTarget.dataset.id);
       if (!selected || this.data.busy) return;
-      runtime(this).playback.stop(); this.setData({ selected, error: "", audioPlaying: false });
+      runtime(this).playback.stop(); this.setData({ selected, chapterChoices: [], error: "", audioPlaying: false });
       const generation = runtime(this).generation;
       try {
         const row = await readShareResponse(selected.id);
         if (generation !== runtime(this).generation) return;
         const current = this.data.items.find((item: ShareResponseItem) => item.id === row.id);
         const newlyRead = Boolean(current && !current.read_at && row.read_at);
-        this.setData({ items: this.data.items.map((item: ShareResponseItem) => item.id === row.id ? row : item), unread: Math.max(0, this.data.unread - (newlyRead ? 1 : 0)) });
+        this.setData({ ...(this.data.selected?.id === row.id ? { selected: { ...this.data.selected, read_at: row.read_at } } : {}),
+          items: this.data.items.map((item: ShareResponseItem) => item.id === row.id ? { ...item, read_at: row.read_at } : item), unread: Math.max(0, this.data.unread - (newlyRead ? 1 : 0)) });
       } catch (error) { if (generation === runtime(this).generation) this.setData({ error: error instanceof Error ? error.message : "暂时未能标记已读" }); }
     },
     back() { runtime(this).playback.stop(); this.setData({ selected: null, error: "", audioPlaying: false }); },
@@ -66,6 +68,47 @@ Component({
       } catch (error) {
         if (isCurrent()) this.setData({ error: error instanceof Error ? error.message : "原音暂时不能播放" });
       } finally { if (isCurrent()) this.setData({ audioPlaying: false }); }
+    },
+    async toggleFeatured() {
+      const row = this.data.selected;
+      if (row?.can_feature && !this.data.busy) await this.setFeatured(null, !row.featured_at);
+    },
+    async chooseFeatureChapter() {
+      const selected = this.data.selected;
+      if (!selected?.can_feature || this.data.busy) return;
+      if (!selected.featured_at || selected.featured_chapter_id) return;
+      const generation = runtime(this).generation;
+      this.setData({ busy: true, error: "" });
+      try {
+        const plan = await getMemoirBookPlan(this.properties.projectId);
+        if (generation !== runtime(this).generation || this.data.selected?.id !== selected.id) return;
+        const chapterChoices = plan.chapters.map(({ id, title }) => ({ id, title }));
+        this.setData({ chapterChoices, error: chapterChoices.length ? "" : "书稿生成章节后即可精选。" });
+      } catch (error) {
+        if (generation === runtime(this).generation) this.setData({ error: error instanceof Error ? error.message : "读取章节失败" });
+      } finally {
+        if (generation === runtime(this).generation) this.setData({ busy: false });
+      }
+    },
+    selectFeatureChapter(event: { detail: { value: number | string } }) {
+      const chapter = this.data.chapterChoices[Number(event.detail.value)];
+      if (chapter) void this.setFeatured(chapter.id);
+    },
+    async setFeatured(chapterId: string | null, featured = true) {
+      const selected = this.data.selected;
+      if (!selected || this.data.busy) return;
+      const generation = runtime(this).generation;
+      this.setData({ busy: true, error: "" });
+      try {
+        const row = await featureShareResponse(selected.id, chapterId, featured);
+        if (generation !== runtime(this).generation) return;
+        this.setData({ ...(this.data.selected?.id === row.id ? { selected: row, chapterChoices: [] } : {}),
+          items: this.data.items.map((item: ShareResponseItem) => item.id === row.id ? row : item) });
+      } catch (error) {
+        if (generation === runtime(this).generation) this.setData({ error: error instanceof Error ? error.message : "精选状态更新失败" });
+      } finally {
+        if (generation === runtime(this).generation) this.setData({ busy: false });
+      }
     },
     async adopt() {
       const selected = this.data.selected;
