@@ -65,7 +65,12 @@ async def test_story_card_only_excerpts_its_confirmed_scoped_version(client, tes
         url = f"/api/mobile/memoir/book-shares/{token}/card.jpg"
         assert (await guest.get(url)).status_code == 200
         assert captured[-1]["excerpt"] == ""
-        params = {"version_id": version.id, "excerpt_start": 0, "excerpt_length": 48}
+        params = {"version_id": version.id, "excerpt_start": 0, "excerpt_length": len("院子里的正文")}
+        assert (await guest.get(url, params=params)).status_code == 200
+        assert captured[-1]["excerpt"] == ""
+        target = {"chapter_id": chapter.id, "section_id": section.id}
+        choice = {"token": token, **params}
+        assert (await client.patch(path, params=target, json=choice)).status_code == 200
         assert (await guest.get(url, params=params)).status_code == 200
         assert captured[-1]["title"] == "院子里的回忆"
         assert captured[-1]["is_book"] is False
@@ -76,6 +81,9 @@ async def test_story_card_only_excerpts_its_confirmed_scoped_version(client, tes
         assert (await guest.get(url, params={**params, "excerpt_start": 10})).status_code == 200
         assert captured[-1]["excerpt"] == ""
         assert (await guest.get(url, params={**params, "excerpt_length": 49})).status_code == 422
+        assert (await client.patch(path, params=target, json={**choice, "excerpt_length": 0})).status_code == 200
+        assert (await guest.get(url, params=params)).status_code == 200
+        assert captured[-1]["excerpt"] == ""
         section.include_in_book = False
         await test_db.commit()
         assert (await guest.get(url, params=params)).status_code == 409

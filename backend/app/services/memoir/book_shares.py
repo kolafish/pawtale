@@ -577,7 +577,12 @@ async def shared_card(db: AsyncSession, token: str, *, version_id: str = "", exc
     # must never replace confirmed words with newly added, unconfirmed content.
     excerpt = ""
     if not is_book and version_id == reading.id and excerpt_length:
-        excerpt = reading.content[excerpt_start:excerpt_start + excerpt_length].strip()
+        model, _ = _share_table(share_scope(resource))
+        share = await db.get(model, resource.id, populate_existing=True)
+        if (_active(share) and share.card_version_id == version_id
+                and share.card_excerpt_start == excerpt_start and share.card_excerpt_length == excerpt_length
+                and hmac.compare_digest(token, _stable_token(resource.id, share.token_hash, scope=share_scope(resource)))):
+            excerpt = reading.content[excerpt_start:excerpt_start + excerpt_length].strip()
     chapters = reading.manuscript.chapters if reading.manuscript else []
     return await asyncio.to_thread(render_reading_share_card,
         title=result.title, book_title=book_title, is_book=is_book,
