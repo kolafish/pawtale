@@ -34,7 +34,11 @@
     </view>
   </view>
 
-  <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
+  <view wx:if="{{error}}" class="error ui-error-banner">
+    <text>{{error}}</text>
+    <button wx:if="{{!storyLoaded && !storyError && !voiceEntry}}" class="home-story-action ui-button" bindtap="refreshStory"
+      loading="{{loading}}" disabled="{{loading}}">重新读取</button>
+  </view>
 
   <voice-session id="voice-session" wx:if="{{voiceEntry}}" entry="{{voiceEntry}}" embedded="{{true}}"
     bindexit="exitVoiceSession" />
@@ -44,14 +48,14 @@
       <image class="home-card-background" src="/assets/home/narration-background.jpg" mode="aspectFill" aria-hidden="true" />
       <view class="voice-card-copy">
         <text class="voice-card-title">聊两句</text>
-        <text class="voice-card-subtitle">AI 陪您慢慢聊</text>
+        <text class="voice-card-subtitle">{{voiceSubtitleText}}</text>
         <view
           id="primary-voice-action"
           class="voice-start-button ui-pressable {{voiceStartButtonClass}}"
           bindtap="startPrimaryVoiceChat"
           hover-class="{{voiceStartButtonHoverClass}}"
           aria-role="button"
-          aria-label="开始讲述"
+          aria-label="{{primaryVoiceButtonTitle}}"
           aria-disabled="{{loading || creatingVoice || voiceAuthorizationSaving}}"
         >
           <image class="voice-start-icon" src="/assets/memoir-microphone.png" mode="aspectFit" aria-hidden="true" />
@@ -88,7 +92,7 @@
     <view wx:elif="{{loading}}" class="memoir-loading-card" aria-live="polite">正在整理您的回忆录…</view>
 
     <view wx:if="{{storyError}}" class="story-refresh-error ui-error-banner">{{storyError}}</view>
-    <button wx:if="{{storyError || (!storyLoaded && error)}}" class="home-story-action ui-button" bindtap="refreshStory"
+    <button wx:if="{{storyError}}" class="home-story-action ui-button" bindtap="refreshStory"
       loading="{{loading}}" disabled="{{loading}}">重新读取</button>
 
     <story-result wx:if="{{growthResult && !voiceEntry}}" result="{{growthResult}}" large-text="{{largeTextEnabled}}"
