@@ -17,7 +17,7 @@ from app.models.memoir import (
     MemoirBookChapterDraft, MemoirBookChapterDraftVersion,
     MemoirBookPlan, MemoirBookPlanChapter, MemoirCompletionIssue, MemoirSection,
     MemoirSectionMaterial, MemoirBookOutput, MemoirBookOutputVersion, MemoirChapterShare, MemoirBookReview,
-    MemoirVoiceSession, MemoirVoiceUtterance,
+    MemoirVoiceSession, MemoirVoiceUtterance, MemoirChapterDigest, MemoirSectionDigest,
 )
 from app.schemas.memoir_editorial import BookStructureFinding, StructureFinding
 from app.schemas.memoir_sections import MemoirSectionMergeRequest, MemoirSectionSplitRequest
@@ -95,29 +95,39 @@ class StructureContext:
     material_sources: dict[str, str] = field(default_factory=dict)
 
 
-async def load_structure_summaries(
-    db: AsyncSession, *, project_id: str, chapters: list[MemoirBookPlanChapter], sections: list[MemoirSection],
-) -> tuple[dict[str, str], dict[str, str], list[BookStructureFinding]]:
-    """Read only signature-matching digests; absent/stale digests are not evidence."""
-    section_summaries = {}
+async def _section_digests(db: AsyncSession, project_id: str, sections: list[MemoirSection]) -> dict[str, MemoirSectionDigest]:
+    digests = {}
     for section in sections:
-        if section.status != "active" or not section.include_in_book or not any(m.include_in_book for m in section.materials):
-            continue
         digest = await get_current_section_digest(db, project_id=project_id, section_id=section.id)
         if digest is not None:
-            section_summaries[section.id] = digest.digest_json.get("summary", "")
-    chapter_summaries = {}
-    findings = []
+            digests[section.id] = digest
+    return digests
+
+
+async def _chapter_digests(db: AsyncSession, chapters: list[MemoirBookPlanChapter],
+                           section_digests: dict[str, MemoirSectionDigest]) -> dict[str, MemoirChapterDigest]:
+    digests = {}
     for chapter in chapters:
-        digest = await get_current_chapter_digest(db, project_id=project_id, chapter_id=chapter.id)
+        digest = await get_current_chapter_digest(db, project_id=chapter.project_id, chapter_id=chapter.id,
+                                                 section_digests_by_id=section_digests)
         if digest is not None and digest.status == "ready":
-            chapter_summaries[chapter.id] = digest.digest_json.get("summary", "")
-            findings.extend(BookStructureFinding(chapter_ids=[chapter.id], **StructureFinding.model_validate(raw).model_dump())
-                for raw in digest.digest_json.get("structure_findings", []))
-    return chapter_summaries, section_summaries, findings
+            digests[chapter.id] = digest
+    return digests
 
 
-async def structure_context(db: AsyncSession, plan: MemoirBookPlan, chapters: list[MemoirBookPlanChapter], sections: list[MemoirSection], *, lock_questions: bool = False) -> StructureContext:
+async def load_structure_summaries(
+    db: AsyncSession, *, project_id: str, chapters: list[MemoirBookPlanChapter], sections: list[MemoirSection],
+) -> tuple[dict[str, str], dict[str, str]]:
+    included = [s for s in sections if s.status == "active" and s.include_in_book and any(m.include_in_book for m in s.materials)]
+    section_digests = await _section_digests(db, project_id, included)
+    chapter_digests = await _chapter_digests(db, chapters, section_digests)
+    return ({cid: digest.digest_json.get("summary", "") for cid, digest in chapter_digests.items()},
+            {sid: digest.digest_json.get("summary", "") for sid, digest in section_digests.items()})
+
+
+async def structure_context(db: AsyncSession, plan: MemoirBookPlan, chapters: list[MemoirBookPlanChapter],
+                            sections: list[MemoirSection], *, lock_questions: bool = False,
+                            section_digests: dict[str, MemoirSectionDigest] | None = None) -> StructureContext:
     chapter_refs = ModelReferenceMap("C", (c.id for c in chapters))
     section_refs = ModelReferenceMap("S", (s.id for s in sections))
     material_refs = ModelReferenceMap("M", (m.id for s in sections for m in sorted(s.materials, key=lambda m: (m.sort_order, m.id))))
@@ -200,11 +210,10 @@ async def structure_context(db: AsyncSession, plan: MemoirBookPlan, chapters: li
         "manual_chapter_order": manual_order,
         **({"question_lines": question_lines} if question_lines else {}),
     })
-    body_digests = {}
-    for section in sections:
-        digest = await get_current_section_digest(db, project_id=plan.project_id, section_id=section.id)
-        if digest is not None:
-            body_digests[section.id] = {key: value for key, value in digest.digest_json.items() if key != "generation"}
+    if section_digests is None:
+        section_digests = await _section_digests(db, plan.project_id, sections)
+    body_digests = {sid: {key: value for key, value in digest.digest_json.items() if key != "generation"}
+                    for sid, digest in section_digests.items()}
     return StructureContext(
         outline=outline, chapter_refs=chapter_refs, section_refs=section_refs,
         locked_chapters=frozenset(protected),
@@ -627,12 +636,15 @@ async def review_story_structure(
         if chapter_id in readable_chapter_ids and chapter_id not in context.locked_chapters and (scope is None or chapter_id in scope):
             await generate_or_reuse_chapter_digest(db, project_id=project_id, chapter_id=chapter_id, ai_model=ai_model)
     plan, chapters, sections = await _load_tree(db, project_id=project_id)
-    fresh = await structure_context(db, plan, chapters, sections)
+    section_digests = await _section_digests(db, project_id, sections)
+    fresh = await structure_context(db, plan, chapters, sections, section_digests=section_digests)
     if context.content_signature != fresh.content_signature:
         raise HTTPException(status_code=409, detail="目录或素材已变化，请重新整理")
     # Digest generation may discover blocking issues; honor those new locks.
     context = fresh
-    _, _, chapter_findings = await load_structure_summaries(db, project_id=project_id, chapters=chapters, sections=sections)
+    chapter_digests = await _chapter_digests(db, chapters, section_digests)
+    chapter_findings = [BookStructureFinding(chapter_ids=[cid], **StructureFinding.model_validate(raw).model_dump())
+                        for cid, digest in chapter_digests.items() for raw in digest.digest_json.get("structure_findings", [])]
     if progress_callback is not None:
         await progress_callback({"stage": "saving", "provider_request_pending": True})
     await db.commit()

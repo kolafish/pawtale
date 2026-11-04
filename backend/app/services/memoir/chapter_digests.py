@@ -316,12 +316,15 @@ async def load_chapter_digest_context(
     *,
     project_id: str,
     chapter_id: str,
+    section_digests_by_id: Mapping[str, MemoirSectionDigest] | None = None,
 ) -> ChapterDigestContext:
     chapter = await _load_chapter(
         db,
         project_id=project_id,
         chapter_id=chapter_id,
     )
+    if section_digests_by_id is not None:
+        return chapter_digest_context(chapter, section_digests_by_id=section_digests_by_id)
     digests = {}
     for section in chapter.sections:
         if (
@@ -348,6 +351,7 @@ async def get_current_chapter_digest(
     project_id: str,
     chapter_id: str,
     context: ChapterDigestContext | None = None,
+    section_digests_by_id: Mapping[str, MemoirSectionDigest] | None = None,
 ) -> MemoirChapterDigest | None:
     """Return the digest for the current section state without invoking AI."""
     if context is None:
@@ -356,6 +360,7 @@ async def get_current_chapter_digest(
                 db,
                 project_id=project_id,
                 chapter_id=chapter_id,
+                section_digests_by_id=section_digests_by_id,
             )
         except HTTPException as exc:
             if exc.status_code in {409, 422}:
