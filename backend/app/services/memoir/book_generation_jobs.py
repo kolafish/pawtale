@@ -60,6 +60,7 @@ def _request_payload(req: object) -> dict:
 
 def _editorial_copy_label(req: MemoirBookOutputEditorialCopyRegenerateRequest) -> str:
     labels = {
+        "subtitle": "副标题",
         "preface": "前言",
         "afterword": "后记",
         "back_cover_quote": "封底摘录",
@@ -348,10 +349,13 @@ async def list_book_editorial_copy_generation_jobs(
     *,
     user_id: str,
     project_id: str,
+    include_subtitle: bool = False,
 ) -> MemoirBookOutputEditorialCopyGenerationJobListResponse:
     await load_memoir_project(db, project_id, user_id)
     items: list[MemoirBookOutputEditorialCopyGenerationJobResponse] = []
-    for target in BOOK_LEVEL_EDITORIAL_COPY_TARGETS:
+    # Older clients only recognize the original three status keys.
+    targets = (*BOOK_LEVEL_EDITORIAL_COPY_TARGETS, "subtitle") if include_subtitle else BOOK_LEVEL_EDITORIAL_COPY_TARGETS
+    for target in targets:
         job = await editing_jobs.load_project_editing_job(
             db,
             project_id=project_id,

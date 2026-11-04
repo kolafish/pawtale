@@ -716,13 +716,14 @@ async def regenerate_mobile_memoir_book_output_editorial_copy(
 )
 async def list_mobile_memoir_book_output_editorial_copy_generation_jobs(
     project_id: str,
+    include_subtitle: bool = False,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     return await memoir_book_generation_jobs.list_book_editorial_copy_generation_jobs(
         db,
         user_id=current_user.id,
-        project_id=project_id,
+        project_id=project_id, include_subtitle=include_subtitle,
     )
 
 

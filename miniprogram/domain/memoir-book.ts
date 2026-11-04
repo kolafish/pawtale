@@ -341,6 +341,7 @@ export interface MemoirBookOutputUpdateRequest {
 }
 
 export type MemoirBookEditorialCopyTarget =
+  | "subtitle"
   | "preface"
   | "afterword"
   | "back_cover_quote"
@@ -354,7 +355,7 @@ export interface MemoirBookOutputEditorialCopyRegenerateRequest {
   feedback?: string | null;
 }
 
-export type MemoirBookEditorialCopyJobTarget = "preface" | "afterword" | "back_cover_quote";
+export type MemoirBookEditorialCopyJobTarget = "subtitle" | "preface" | "afterword" | "back_cover_quote";
 export type MemoirBookEditorialCopyJobStatus = "pending" | "running" | "succeeded" | "failed" | "skipped";
 
 export interface MemoirBookEditorialCopyJob {

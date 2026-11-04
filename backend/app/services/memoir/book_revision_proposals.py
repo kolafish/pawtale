@@ -610,7 +610,7 @@ async def apply_proposal(
     await db.refresh(output, attribute_names=["metadata_json", "versions"])
     old_chapters = book_output_versions.manuscript_chapters(baseline)
     book_output_versions.claim_editorial_copy_fields(output,
-        targets=[key for key in ("preface", "afterword", "back_cover_quote")
+        targets=[key for key in ("subtitle", "preface", "afterword", "back_cover_quote")
             if before_information.get(key) != after_information.get(key)],
         chapter_fields={chapter["chapter_id"]: [field for field in ("intro", "pull_quotes")
             if old_chapters.get(chapter["chapter_id"], {}).get(field) != chapter.get(field)]

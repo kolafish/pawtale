@@ -78,7 +78,7 @@ export function bookEditorialCopyBlockedMessage(
 }
 
 export function isBookLevelEditorialCopyTarget(target: string): target is MemoirBookEditorialCopyJobTarget {
-  return target === "preface" || target === "afterword" || target === "back_cover_quote";
+  return target === "subtitle" || target === "preface" || target === "afterword" || target === "back_cover_quote";
 }
 
 export function bookDesignSaveStatusText(

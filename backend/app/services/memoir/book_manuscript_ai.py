@@ -185,6 +185,8 @@ def _distributed_candidates(values: list[str], limit: int = 6) -> list[str]:
 def _copy_output_model(targets: list[str] | None, polish_level: MemoirTranscriptPolishLevel) -> type[BaseModel]:
     fields = {key: (str, Field(default="", max_length=limit)) for key, limit in COPY_TEXT_LIMITS.items() if key != "intro"}
     selected = set(targets or [*fields, "chapter_intros", "pull_quotes"])
+    if targets and "cover_subtitle" in selected:
+        fields["cover_subtitle"] = (str, Field(min_length=1, max_length=COPY_TEXT_LIMITS["cover_subtitle"]))
     if "chapter_intros" in selected or "pull_quotes" in selected:
         intro_fields = {"chapter_id": (str, ...)}
         if "chapter_intros" in selected:

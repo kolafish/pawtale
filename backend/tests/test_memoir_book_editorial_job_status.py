@@ -23,7 +23,7 @@ async def test_book_editorial_copy_jobs_report_each_book_level_target_status(cli
     assert (await client.get(url)).json() == {"items": []}
 
     job_ids = {}
-    for target in ("preface", "afterword", "back_cover_quote"):
+    for target in ("preface", "afterword", "back_cover_quote", "subtitle"):
         response = await client.post(url, json={"targets": [target]})
         assert response.status_code == 200
         job_ids[target] = response.json()["editing_job_id"]
@@ -41,6 +41,10 @@ async def test_book_editorial_copy_jobs_report_each_book_level_target_status(cli
         ("preface", job_ids["preface"], "pending"),
         ("afterword", job_ids["afterword"], "running"),
         ("back_cover_quote", job_ids["back_cover_quote"], "succeeded"),
+    ]
+    opted_in = (await client.get(url, params={"include_subtitle": True})).json()["items"]
+    assert [(j["target"], j["job_id"], j["status"]) for j in opted_in if j["target"] == "subtitle"] == [
+        ("subtitle", job_ids["subtitle"], "pending"),
     ]
     assert all(item["updated_at"] and item["error_message"] == "" for item in items)
 

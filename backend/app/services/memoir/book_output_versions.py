@@ -294,7 +294,7 @@ def automatic_editorial_copy_state(
     if state.ownership_version >= 1:
         return state
     if not state.processed_version and versions and versions[0].created_by in {"user", "ai"}:
-        state.manual_targets = ["preface", "afterword", "back_cover_quote"]
+        state.manual_targets = ["subtitle", "preface", "afterword", "back_cover_quote"]
         state.manual_chapter_fields = {
             chapter_id: ["intro", "pull_quotes"] for chapter_id in manuscript_chapters(versions[0])
         }
@@ -305,7 +305,7 @@ def automatic_editorial_copy_state(
             continue
         old = stored_manuscript_metadata(before.manuscript_json)
         new = stored_manuscript_metadata(after.manuscript_json)
-        for target in ("preface", "afterword", "back_cover_quote"):
+        for target in ("subtitle", "preface", "afterword", "back_cover_quote"):
             if old.get(target) != new.get(target) and target not in state.manual_targets:
                 state.manual_targets.append(target)
         old_chapters, new_chapters = manuscript_chapters(before), manuscript_chapters(after)
