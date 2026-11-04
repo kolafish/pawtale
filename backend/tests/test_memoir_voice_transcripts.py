@@ -435,6 +435,7 @@ async def test_mobile_memoir_voice_transcript_share_video_context_aligns_edited_
         share_video_alignment,
         "get_settings",
         lambda: SimpleNamespace(
+            volc_ark_image_model="doubao-seedream-5-0-lite-260128",
             memoir_share_video_ai_background_enabled=True,
             volc_ark_api_key="test-key",
         ),
@@ -530,6 +531,7 @@ async def test_share_video_context_hides_unavailable_ai_and_creation_rejects_it(
     client, test_db, monkeypatch, enabled, api_key
 ):
     settings = SimpleNamespace(
+        volc_ark_image_model="doubao-seedream-5-0-lite-260128",
         memoir_share_video_ai_background_enabled=enabled,
         volc_ark_api_key=api_key,
     )

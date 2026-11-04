@@ -31,6 +31,7 @@ def test_legacy_style_and_current_render_signatures():
 
 def _settings(*, ai_enabled=False):
     return SimpleNamespace(
+        volc_ark_image_model="doubao-seedream-5-0-lite-260128",
         memoir_share_video_ai_background_enabled=ai_enabled,
         volc_ark_api_key="test-key" if ai_enabled else "",
         memoir_share_video_lease_seconds=60,
@@ -55,7 +56,7 @@ async def test_project_style_default_override_and_task_snapshot(client, test_db,
     context = (await client.get(f"{base}/context")).json()
     assert context["default_video_style"] == "illustrated"
     assert [option["value"] for option in context["video_styles"]] == ["uploaded", "illustrated"]
-    assert context["video_styles"][0]["description"].startswith("免费")
+    assert context["image_unit_price_rmb"] == "0.33"
     assert "约 0.33 元/张，一条最多 5 张" in context["video_styles"][1]["description"]
     selection = {"start_char": 0, "end_char": len(text)}
     created_job = await client.post(f"{base}/jobs", json=selection)

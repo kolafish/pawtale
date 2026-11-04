@@ -443,6 +443,10 @@ class MemoirShareVideoBackgroundStyleResponse(BaseModel):
     description: str
 
 
+class MemoirExcerptIllustrationStyleResponse(MemoirShareVideoBackgroundStyleResponse):
+    image_unit_price_rmb: str | None
+
+
 class MemoirShareVideoBackgroundModeResponse(BaseModel):
     value: str
     label: str
@@ -462,6 +466,7 @@ class MemoirShareVideoStyleResponse(BaseModel):
 
 
 class MemoirTranscriptShareVideoContextResponse(BaseModel):
+    image_unit_price_rmb: str | None = None
     utterance_id: str
     audio_file_id: str
     latest_job_id: str | None = None

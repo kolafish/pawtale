@@ -31,7 +31,7 @@ from app.schemas.memoir_voice import (
 )
 from app.services.memoir import voice_transcripts
 from app.services.memoir.project_ai_preferences import project_share_video_style
-from app.services.memoir.share_video_styles import share_video_style_options
+from app.services.memoir.share_video_styles import image_unit_price_rmb, share_video_style_options
 from app.services.memoir.share_video_backgrounds import (
     DEFAULT_SHARE_VIDEO_BACKGROUND_MODE,
     DEFAULT_SHARE_VIDEO_BACKGROUND_STYLE,
@@ -433,6 +433,7 @@ def _response(
         settings.memoir_share_video_ai_background_enabled
         and settings.volc_ark_api_key.strip()
     )
+    image_price = image_unit_price_rmb(settings.volc_ark_image_model)
     return MemoirTranscriptShareVideoContextResponse(
         utterance_id=utterance.id,
         audio_file_id=utterance.audio_file_id or "",
@@ -448,7 +449,8 @@ def _response(
         photo_max_count=SHARE_VIDEO_PHOTO_MAX_COUNT,
         ai_background_enabled=ai_background_enabled,
         default_video_style=project_share_video_style(utterance.voice_session.project),
-        video_styles=share_video_style_options(),
+        video_styles=share_video_style_options(image_price),
+        image_unit_price_rmb=image_price,
         default_background_source=(
             SHARE_VIDEO_BACKGROUND_SOURCE_AI
             if ai_background_enabled

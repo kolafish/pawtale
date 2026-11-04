@@ -6,6 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, File, UploadFile
 from fastapi.responses import FileResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
+from app.services.memoir.share_video_styles import image_unit_price_rmb
 from app.auth import get_current_user, get_optional_user_id, is_admin_user
 from app.database import get_db
 from app.models.users import User
@@ -48,7 +50,7 @@ from app.schemas.memoir_book import (
     MemoirBookTitleSuggestionResponse,
     MemoirAutomationEventResponse,
 )
-from app.schemas.memoir_voice import MemoirShareVideoBackgroundStyleResponse
+from app.schemas.memoir_voice import MemoirExcerptIllustrationStyleResponse
 from app.schemas.memoir_images import (
     MemoirBookImagePlacementCreateRequest,
     MemoirBookImagePlacementUpdateRequest,
@@ -153,10 +155,12 @@ async def create_mobile_memoir_excerpt_share(
         project_id=project_id, chapter_id=chapter_id, selection=req)
 
 
-@router.get("/image-generation/styles", response_model=list[MemoirShareVideoBackgroundStyleResponse])
+@router.get("/image-generation/styles", response_model=list[MemoirExcerptIllustrationStyleResponse])
 async def get_mobile_image_styles(current_user: User = Depends(get_current_user)):
     from app.services.memoir.share_video_backgrounds import share_video_background_style_options
-    return share_video_background_style_options()
+    price = image_unit_price_rmb(get_settings().memoir_excerpt_image_model)
+    return [MemoirExcerptIllustrationStyleResponse(**style, image_unit_price_rmb=price)
+            for style in share_video_background_style_options()]
 
 
 @router.post("/projects/{project_id}/chapters/{chapter_id}/excerpt-shares/title", response_model=MemoirExcerptTitle)

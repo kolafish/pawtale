@@ -87,7 +87,7 @@ export function createMemoirExcerptImageJob(projectId: string, chapterId: string
   });
 }
 
-export function getMemoirIllustrationStyles(): Promise<MemoirShareVideoBackgroundStyle[]> {
+export function getMemoirIllustrationStyles(): Promise<(MemoirShareVideoBackgroundStyle & { image_unit_price_rmb: string | null })[]> {
   return memoirRequest("/api/mobile/memoir/image-generation/styles");
 }
 

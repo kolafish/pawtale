@@ -31,7 +31,7 @@
           disabled="{{materialImageCreating || materialImagePolling || excerptBusy}}" bindchange="changeExcerptBackgroundNote" />
         <illustration-style-picker options="{{excerptStyleOptions}}" value="{{excerptIllustrationStyle}}" disabled="{{materialImageCreating || materialImagePolling}}" bindchange="changeExcerptIllustrationStyle" />
         <share-video-photos wx:if="{{excerptAiAssetIds.length}}" project-id="{{projectId}}" photo-ids="{{excerptAiAssetIds}}" max-count="1" disabled="{{true}}" binderror="onExcerptPhotoError" />
-        <button class="ui-share-more excerpt-generate" bindtap="generateExcerptImage" loading="{{materialImageCreating || materialImagePolling}}" disabled="{{materialImageCreating || materialImagePolling || !excerptStyleOptions.length || excerptAiAssetIds.length}}">{{excerptAiAssetIds.length ? '插图已生成' : '生成一张插图'}}</button>
+        <button class="ui-share-more excerpt-generate" bindtap="generateExcerptImage" loading="{{materialImageCreating || materialImagePolling}}" disabled="{{materialImageCreating || materialImagePolling || !excerptStyleOptions.length || excerptAiAssetIds.length}}">{{excerptAiAssetIds.length ? '插图已生成' : (materialImageCreating || materialImagePolling ? '生成中' : '生成插图')}}<text wx:if="{{!excerptAiAssetIds.length && !materialImageCreating && !materialImagePolling && excerptImageUnitPrice}}"> · {{excerptImageUnitPrice}} 元/张</text></button>
         <text class="excerpt-help">{{materialImageError || materialImageStatusText || 'AI 意象插图，不是真实历史照片；图片会保存到插图管理。'}}</text>
       </block>
       <block wx:else>
