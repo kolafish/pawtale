@@ -535,3 +535,75 @@ async def test_featured_books_keep_order_and_only_list_configured_active_shares(
         assert all(book["book_chapter_count"] == 1 for book in listed)
         await client.delete(f"/api/mobile/memoir/projects/{projects[0]}/book-output/share")
         assert [book["id"] for book in (await guest.get("/api/mobile/memoir/book-shares/featured")).json()] == [projects[1]]
+
+
+@pytest.mark.parametrize("sectioned", [True, False], ids=["merged-section", "chapter-without-sections"])
+async def test_edited_book_images_follow_saved_material_provenance(client, test_db, tmp_path, monkeypatch, sectioned):
+    from PIL import Image
+    from app.models.memoir import MemoirImageAsset, MemoirBookImagePlacement
+    from app.schemas.memoir_book import MemoirBookManuscriptSourceRef
+    from app.services.memoir import image_assets
+    from app.services.memoir.book_output_manuscript import manuscript_from_snapshot, manuscript_response
+
+    project_id = await ensure_mobile_memoir_project(client)
+    output, version = await _shareable_output(test_db, project_id, "在县团委工作，下乡住十天二十天。")
+    chapter_id = version.chapter_snapshot_json[0]["chapter_id"]
+    source = await create_test_voice_transcript(client, test_db, project_id=project_id)
+    materials = await add_test_section_materials(test_db, project_id=project_id, chapter_id=chapter_id,
+                                                 source_refs=[memoir_source_ref(source)])
+    user_id = (await client.get("/api/auth/me")).json()["id"]
+    asset = MemoirImageAsset(project_id=project_id, user_id=user_id, source_type="utterance_illustration",
+        source_signature="edited-image", storage_path="edited.png", mime_type="image/png", status="ready")
+    test_db.add(asset)
+    await test_db.flush()
+    placement = MemoirBookImagePlacement(project_id=project_id, image_asset_id=asset.id, chapter_id=chapter_id,
+        placement_type="chapter_inline", source_utterance_ids_json=[source["utterance_id"]])
+    test_db.add(placement)
+    await test_db.flush()
+    images, _, _ = await image_assets.manuscript_image_snapshots(test_db, project_id=project_id)
+    manuscript = manuscript_from_snapshot(title=output.title, content=version.content, snapshot=version.chapter_snapshot_json,
+                                          chapter_illustrations_by_chapter=images)
+    chapter = manuscript.chapters[0]
+    chapter.source_refs = [MemoirBookManuscriptSourceRef(utterance_id=source["utterance_id"])]
+    chapter.sections = [chapter.sections[0].model_copy(update={
+        "section_id": "merged-section", "source_ref_ids": [source["utterance_id"]],
+    })] if sectioned else []
+    version.manuscript_json = manuscript.model_dump(mode="json")
+    await test_db.commit()
+    monkeypatch.setattr(image_assets, "DATA_DIR", tmp_path)
+    Image.new("RGB", (400, 300), "white").save(tmp_path / "edited.png")
+    path = f"/api/mobile/memoir/projects/{project_id}/book-output/share"
+    token = (await client.put(path)).json()["token"]
+    # Author reading and export consume the same edition resolver.
+    resolved = manuscript_response(title=output.title, content=version.content, snapshot=version.chapter_snapshot_json,
+                                   stored=version.manuscript_json)
+    expected_section = "merged-section" if sectioned else None
+    assert resolved.chapters[0].illustrations[0].section_id == expected_section
+    assert resolved.chapters[0].content == chapter.content
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as guest:
+        public = await guest.post("/api/mobile/memoir/book-shares/read", json={"token": token})
+        assert public.status_code == 200, public.text
+        illustration = public.json()["latest_version"]["manuscript"]["chapters"][0]["illustrations"][0]
+        assert illustration["section_id"] == expected_section
+        assert illustration["source_utterance_ids"] == []
+        assert (await guest.get(illustration["image_url"])).status_code == 200
+        # A source not present in the saved edition cannot authorize an image.
+        chapter.source_refs = []
+        for section in chapter.sections:
+            section.source_ref_ids = []
+        version.manuscript_json = manuscript.model_dump(mode="json")
+        await test_db.commit()
+        assert (await guest.get(illustration["image_url"])).status_code == 404
+        chapter.source_refs = [MemoirBookManuscriptSourceRef(utterance_id=source["utterance_id"])]
+        for section in chapter.sections:
+            section.source_ref_ids = [source["utterance_id"]]
+        version.manuscript_json = manuscript.model_dump(mode="json")
+        await test_db.commit()
+        assert (await guest.get(illustration["image_url"])).status_code == 200
+        placement.enabled = False
+        await test_db.commit()
+        assert (await guest.get(illustration["image_url"])).status_code == 404
+        placement.enabled = True
+        materials[0].include_in_book = False
+        await test_db.commit()
+        assert (await guest.get(illustration["image_url"])).status_code == 404

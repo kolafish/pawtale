@@ -38,7 +38,7 @@ from app.services.memoir.access import load_memoir_project
 from app.services.memoir.book_output_versions import book_output_version_title, load_latest_book_output_version
 from app.services.memoir.book_outputs import _output_version_response
 from app.services.memoir.book_output_snapshots import chapter_snapshot, normalized_section_snapshots
-from app.services.memoir.book_output_manuscript import manuscript_from_snapshot, safe_str, stored_manuscript_metadata
+from app.services.memoir.book_output_manuscript import manuscript_from_snapshot, resolve_chapter_illustration, stored_manuscript_metadata
 from app.services.memoir.image_assets import manuscript_image_snapshots, image_asset_file_path
 from app.services.memoir.book_source_links import chapter_source_change_states_by_chapter
 from app.services.memoir.share_likes import ShareLikeTarget, book_target, chapter_target, section_target, like_summary
@@ -369,33 +369,6 @@ async def reading_like_target(db: AsyncSession, token: str) -> ShareLikeTarget:
     return _like_target(resource)
 
 
-def _book_reading_outline(output: MemoirBookOutput, version: MemoirBookOutputVersion) -> list[tuple[str, set[str]]] | None:
-    """Resolve just the chapter and section IDs of the readable manuscript."""
-    snapshot = [
-        (safe_str(row["chapter_id"]), {section["section_id"] for section in normalized_section_snapshots(row.get("sections"))})
-        for row in version.chapter_snapshot_json or []
-        if isinstance(row, dict) and safe_str(row.get("chapter_id")) and safe_str(row.get("content"))
-        and (safe_str(row.get("chapter_title")) or safe_str(row.get("title")))
-    ]
-    stored = version.manuscript_json
-    if not stored:
-        return snapshot or None
-
-    # When both saved representations agree, either reader resolution path
-    # yields this outline. For divergent legacy data defer to the normal reader.
-    try:
-        saved = [(chapter["chapter_id"], {s["section_id"] for s in chapter.get("sections", [])})
-                 for chapter in stored["chapters"]]
-    except (KeyError, TypeError, AttributeError):
-        saved = None
-    if snapshot and saved == snapshot:
-        return snapshot
-    manuscript = _output_version_response(version, fallback_title=output.title).manuscript
-    if manuscript is None:
-        return None
-    return [(c.chapter_id, {section.section_id for section in c.sections}) for c in manuscript.chapters]
-
-
 async def featured_books(db: AsyncSession) -> list[MemoirFeaturedBookResponse]:
     """The homepage lists existing public shares, in the configured order."""
     result = []
@@ -414,9 +387,10 @@ async def featured_books(db: AsyncSession) -> list[MemoirFeaturedBookResponse]:
             continue  # Withdrawn or rebuilding shares leave the catalogue until readable again.
         if not version.content.strip():
             continue
+        manuscript = _output_version_response(version, fallback_title=resource.title).manuscript
         result.append(MemoirFeaturedBookResponse(
             id=project_id, token=token, title=reading_share_title(resource, version),
-            book_chapter_count=len(_book_reading_outline(resource, version) or []),
+            book_chapter_count=len(manuscript.chapters) if manuscript else 0,
             book_char_count=len(version.content.strip()),
         ))
     return result
@@ -660,7 +634,7 @@ async def shared_card(db: AsyncSession, token: str, *, version_id: str = "", exc
 
 
 async def _resource_reading_response(
-    db: AsyncSession, resource: ShareResource, version: ShareVersion, *, token: str = "", presentation: bool = True,
+    db: AsyncSession, resource: ShareResource, version: ShareVersion, *, token: str = "", presentation: bool = True, image_asset_id: str | None = None,
 ) -> MemoirBookOutputResponse:
     scope = share_scope(resource)
     if isinstance(version, MemoirBookChapterDraftVersion):
@@ -690,10 +664,11 @@ async def _resource_reading_response(
         )
         result = public_reading_response(output, reading_version)
     else:
+        reading_version = version
         result = public_reading_response(resource, version, include_book_details=True)
-    if scope in ("book", "chapter") and result.latest_version:
+    if image_asset_id is None and scope in ("book", "chapter") and result.latest_version:
         await attach_chapter_notes(db, resource.project_id, result.latest_version.manuscript)
-    return await _share_presentation(db, result, token=token, scope=scope) if presentation else result
+    return await _share_presentation(db, result, reading_version, token=token, scope=scope, image_asset_id=image_asset_id) if presentation else result
 
 
 def public_reading_response(
@@ -768,17 +743,18 @@ async def preview_share(db: AsyncSession, *, user_id: str, project_id: str, chap
     return await _resource_reading_response(db, resource, version)
 
 
-def _visible_image(image: dict[str, object], section_ids: set[str], scope: ShareScope) -> bool:
-    section_id = image.get("section_id")
-    return section_id in section_ids if section_id else scope != "story"
-
-
-async def _share_presentation(db: AsyncSession, result: MemoirBookOutputResponse, *, token: str, scope: ShareScope) -> MemoirBookOutputResponse:
+async def _share_presentation(
+    db: AsyncSession, result: MemoirBookOutputResponse, version: MemoirBookOutputVersion,
+    *, token: str, scope: ShareScope, image_asset_id: str | None = None,
+) -> MemoirBookOutputResponse:
     result.share_scope = scope
     manuscript = result.latest_version.manuscript if result.latest_version else None
     if manuscript is None:
         return result
-    chapter_images, _, cover = await manuscript_image_snapshots(db, project_id=result.project_id)
+    # Resolve against private provenance before the public projection strips it.
+    source = _output_version_response(version, fallback_title=result.title).manuscript
+    source_chapters = {chapter.chapter_id: chapter for chapter in source.chapters} if source else {}
+    chapter_images, _, cover = await manuscript_image_snapshots(db, project_id=result.project_id, asset_id=image_asset_id)
 
     def public_image(raw: dict[str, object]) -> MemoirBookManuscriptIllustration:
         item = MemoirBookManuscriptIllustration.model_validate(raw)
@@ -790,12 +766,17 @@ async def _share_presentation(db: AsyncSession, result: MemoirBookOutputResponse
         })
 
     for item in manuscript.chapters:
-        section_ids = {section.section_id for section in item.sections}
-        item.illustrations = [public_image(raw) for raw in chapter_images.get(item.chapter_id, [])
-                             if _visible_image(raw, section_ids, scope)]
+        chapter = source_chapters.get(item.chapter_id)
+        item.illustrations = [
+            public_image(image.model_dump())
+            for raw in chapter_images.get(item.chapter_id, [])
+            if chapter is not None
+            and (image := resolve_chapter_illustration(chapter, MemoirBookManuscriptIllustration.model_validate(raw))) is not None
+            and (image.section_id is not None or scope != "story")
+        ]
     if cover and scope == "book":
         manuscript.render_settings.cover_image = public_image(cover)
-    if scope != "book":
+    if scope != "book" and image_asset_id is None:
         saved_manuscript = await db.scalar(
             select(MemoirBookOutputVersion.manuscript_json)
             .join(MemoirBookOutput, MemoirBookOutput.id == MemoirBookOutputVersion.output_id)
@@ -811,22 +792,12 @@ async def _share_presentation(db: AsyncSession, result: MemoirBookOutputResponse
 
 async def shared_image_file(db: AsyncSession, token: str, asset_id: str):
     resource, version = await readable_share(db, token)
-    scope = share_scope(resource)
-    if isinstance(resource, MemoirBookOutput):
-        outline = _book_reading_outline(resource, version)
-    elif isinstance(resource, MemoirSection):
-        outline = [(resource.chapter_id, {resource.id})]
-    else:
-        sections = normalized_section_snapshots(version.section_snapshot_json)
-        outline = [(resource.id, {section["section_id"] for section in sections})]
-        if not resource.title.strip() or not version.content.strip():
-            outline = None
-    chapter_images, _, cover = await manuscript_image_snapshots(db, project_id=resource.project_id, asset_id=asset_id)
-    is_cover = scope == "book" and outline is not None and cover is not None and cover["image_asset_id"] == asset_id
-    if not is_cover and not any(
-        raw["image_asset_id"] == asset_id and _visible_image(raw, section_ids, scope)
-        for cid, section_ids in outline or [] for raw in chapter_images.get(cid, [])
-    ):
+    response = await _resource_reading_response(db, resource, version, token=token, image_asset_id=asset_id)
+    manuscript = response.latest_version.manuscript if response.latest_version else None
+    images = [image for chapter in manuscript.chapters for image in chapter.illustrations] if manuscript else []
+    if manuscript and manuscript.render_settings.cover_image:
+        images.append(manuscript.render_settings.cover_image)
+    if not any(image.image_asset_id == asset_id for image in images):
         raise HTTPException(status_code=404, detail="这张图片不在分享内容中")
     asset = await db.get(MemoirImageAsset, asset_id)
     if asset is None or asset.project_id != resource.project_id or asset.status != "ready":

@@ -80,7 +80,7 @@ type BookReaderData = ReaderData & BookTTSState & ShareLikeData & typeof INITIAL
   readerShared: boolean;
   sharePreview: boolean;
   shareScope: "book" | "chapter" | "story";
-  shareImages: { id: string; chapterId: string; sectionId: string; paragraphBefore: number; paragraphCount: number; position: string; portrait: boolean; aspectRatio: number; galleryHeight: number; url: string; caption?: string; disclosure: string }[];
+  shareImages: { id: string; chapterId: string; sectionId: string; placement: string; paragraphBefore: number; paragraphCount: number; position: string; portrait: boolean; aspectRatio: number; galleryHeight: number; url: string; caption?: string; disclosure: string }[];
   imageGallerySections: Record<string, boolean>;
   sharedBookEdition: boolean;
   editionTocOpen: boolean;
@@ -858,12 +858,13 @@ definePage<BookReaderData>()({
 
   async loadReadingImages(chapters: { chapter_id: string; illustrations: Pick<MemoirBookManuscriptIllustration, "image_asset_id" | "image_url" | "placement" | "section_id" | "inline_position" | "disclosure" | "caption">[] }[], privateImages: boolean, generation: number) {
     const images = await Promise.all(chapters.flatMap(chapter => chapter.illustrations.map(async item => {
-      const sectionId = item.placement === "chapter_opening" ? "" : item.section_id || "";
-      const section = this.bookChapters.find(c => c.chapterId === chapter.chapter_id)?.sections.find(s => s.id === sectionId);
+      const readerChapter = this.bookChapters.find(c => c.chapterId === chapter.chapter_id);
+      const sectionId = item.placement === "chapter_opening" || !readerChapter?.sections.length ? "" : item.section_id || "";
+      const section = readerChapter?.sections.find(s => s.id === sectionId);
       const count = section?.paragraphs.length || 0;
       const position = item.inline_position || "after";
       const url = await readingImageUrl(item, privateImages ? this.data.projectId : "");
-      return { id: item.image_asset_id, chapterId: chapter.chapter_id, sectionId,
+      return { id: item.image_asset_id, chapterId: chapter.chapter_id, sectionId, placement: item.placement,
         paragraphBefore: position === "before" ? 0 : position === "middle" ? Math.ceil(count / 2) : count,
         paragraphCount: count, position, portrait: true, aspectRatio: 16 / 9, galleryHeight: 0,
         url, caption: item.disclosure ? "AI 意象插图" : (item.caption || "").replace(/\s+/g, " ").trim(), disclosure: item.disclosure };
