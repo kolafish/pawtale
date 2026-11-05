@@ -310,7 +310,8 @@ async def test_automatic_book_keeps_manual_chapter_copy_across_later_updates(cli
 
 
 @pytest.mark.parametrize("protection", ["user", "accepted_revision"])
-async def test_saved_sections_update_protected_book_and_existing_share(client, test_db, protection):
+@pytest.mark.parametrize("pending_section_edit", [False, True])
+async def test_saved_sections_update_protected_book_and_existing_share(client, test_db, protection, pending_section_edit):
     from app.domain.memoir.types import MemoirBookChapterDraftStatus
     from app.services.memoir import book_shares
     from app.services.memoir.book_output_manuscript import manuscript_from_snapshot
@@ -350,20 +351,35 @@ async def test_saved_sections_update_protected_book_and_existing_share(client, t
     await test_db.commit()
     user_id = (await client.get("/api/auth/me")).json()["id"]
     share = await book_shares.create_share(test_db, user_id=user_id, project_id=project_id)
+    baseline_id = first.id
+    if pending_section_edit:
+        # Accepted AI edits use another save path and can still be absent from a protected book.
+        values = {key: copy.deepcopy(getattr(first, key)) for key in (
+            "draft_id", "project_id", "chapter_id", "input_signature", "prompt_snapshot",
+            "used_material_ids_json", "material_snapshot_json", "section_snapshot_json",
+        )}
+        values["section_snapshot_json"][1]["content"] = "已接受但尚未同步的第二节新正文。"
+        first = MemoirBookChapterDraftVersion(**values, version=first.version + 1,
+            content="\n\n".join(s["content"] for s in values["section_snapshot_json"]), created_by="ai")
+        test_db.add(first)
+        await test_db.commit()
     new_text = "我在 Web 后台刚刚修改的正文。"
     response = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-plan/chapters/{chapters[0].id}/draft/revise",
         json={"expected_version_id": first.id, "sections": [
             {"section_id": s["section_id"], "content": new_text if i == 0 else s["content"]}
             for i, s in enumerate(first.section_snapshot_json)]})
     assert response.status_code == 200, response.text
-    for reading in (await book_outputs.get_book_output(test_db, user_id=user_id, project_id=project_id),
-                    await book_shares.read_share(test_db, share.token)):
-        assert not reading.is_stale
+    private_reading = await book_outputs.get_book_output(test_db, user_id=user_id, project_id=project_id)
+    assert private_reading.is_stale == pending_section_edit
+    assert private_reading.stale_chapter_titles == ([chapters[0].title] if pending_section_edit else [])
+    for reading in (private_reading, await book_shares.read_share(test_db, share.token)):
         assert new_text in reading.latest_version.content
         assert "已校订的小节，不能被旧章节稿覆盖。" in reading.latest_version.content
         assert "另一章已校订的正文。" in reading.latest_version.content
         assert reading.latest_version.manuscript.chapters[0].sections[0].content == new_text
     latest = await book_output_versions.load_latest_book_output_version(test_db, output_id=output.id)
+    assert latest.chapter_snapshot_json[0]["draft_version_id"] == (
+        baseline_id if pending_section_edit else response.json()["latest_version"]["id"])
     assert latest.manuscript_json["front_matter"] == manuscript["front_matter"]
     assert latest.manuscript_json["chapters"][1] == manuscript["chapters"][1]
     assert latest.manuscript_json["chapters"][0]["sections"][1] == manuscript["chapters"][0]["sections"][1]
@@ -382,3 +398,13 @@ async def test_saved_sections_update_protected_book_and_existing_share(client, t
     # A subsequent automatic assembly must not roll back the edit or the retained prose.
     assembled_again = await assemble_book_output(test_db, project_id=project_id, automatic=True)
     assert assembled_again.output_version_id == latest.id
+
+    if pending_section_edit:
+        # Saving B afterwards must recognize that A is already synchronized and clear staleness.
+        request["sections"][1]["content"] = "第二节再次明确保存的最新正文。"
+        saved = await client.post(endpoint, json=request)
+        assert saved.status_code == 200, saved.text
+        reading = await book_outputs.get_book_output(test_db, user_id=user_id, project_id=project_id)
+        assert not reading.is_stale
+        assert new_text in reading.latest_version.content
+        assert request["sections"][1]["content"] in reading.latest_version.content

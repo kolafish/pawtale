@@ -185,7 +185,12 @@ async def sync_saved_sections_to_protected_book(
         rendered[key].update(content=text, char_count=len(text))
     snapshot["content"] = "\n\n".join(item["content"] for item in snapshot["sections"])
     snapshot["content_char_count"] = len(snapshot["content"])
-    snapshot.update(draft_id=version.draft_id, draft_version_id=version.id, draft_version=version.version)
+    baseline_sections = {item["section_id"]: item for item in normalized_section_snapshots(baseline.section_snapshot_json)}
+    # A different save path may have revised an untouched section. Keep the old
+    # baseline until each such change is either absent or already in this book.
+    if all(item == baseline_sections.get(key) or item == saved[key]
+           for key, item in revised.items() if key not in edited_section_ids):
+        snapshot.update(draft_id=version.draft_id, draft_version_id=version.id, draft_version=version.version)
     chapter["content"] = snapshot["content"]
     for item in manuscript.get("table_of_contents", []):
         if item.get("chapter_id") == version.chapter_id:
