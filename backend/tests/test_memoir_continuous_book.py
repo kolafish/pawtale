@@ -309,6 +309,57 @@ async def test_automatic_book_keeps_manual_chapter_copy_across_later_updates(cli
     assert version.manuscript_json["chapters"][0]["pull_quotes"][0]["text"] == "那年，我参加了第1次学校比赛。"
 
 
+@pytest.mark.parametrize("book_changed", [False, True])
+async def test_single_section_edit_syncs_legacy_chapter_without_adding_headings(client, test_db, book_changed):
+    from app.domain.memoir.types import MemoirBookChapterDraftStatus
+    from app.services.memoir import book_shares
+    from app.services.memoir.book_output_manuscript import manuscript_from_snapshot
+    from app.services.memoir.book_output_snapshots import book_content_from_chapter_snapshots
+    from tests.test_memoir_book_completion import _book, _create_current_draft
+
+    project_id, chapters, _ = await _book(client, test_db, chapter_count=1)
+    _, draft = await _create_current_draft(test_db, project_id=project_id, chapter_id=chapters[0].id,
+        status=MemoirBookChapterDraftStatus.DRAFT)
+    assert len(draft.section_snapshot_json) == 1
+    draft.content = draft.section_snapshot_json[0]["content"]
+    await test_db.commit()
+    assembled = await assemble_book_output(test_db, project_id=project_id, automatic=True)
+    output = await test_db.get(MemoirBookOutput, assembled.output_id)
+    initial = await test_db.get(MemoirBookOutputVersion, assembled.output_version_id)
+    snapshots = copy.deepcopy(initial.chapter_snapshot_json)
+    snapshots[0]["sections"] = []
+    if book_changed:
+        snapshots[0]["content"] = "全书已另行修改，不能用旧章节稿覆盖。"
+    content = book_content_from_chapter_snapshots(title=output.title, snapshots=snapshots)
+    manuscript = manuscript_from_snapshot(title=output.title, content=content, snapshot=snapshots,
+        metadata={"preface": "保留我写的前言。"}).model_dump(mode="json")
+    protected = await book_output_versions.append_book_output_version(test_db, output=output,
+        content=content, chapter_snapshot_json=snapshots, manuscript_json=manuscript, created_by=MemoirCreatedBy.USER)
+    await test_db.commit()
+    user_id = (await client.get("/api/auth/me")).json()["id"]
+    share = await book_shares.create_share(test_db, user_id=user_id, project_id=project_id)
+    endpoint = f"/api/mobile/memoir/projects/{project_id}/book-plan/chapters/{chapters[0].id}/draft/revise"
+    response = await client.post(endpoint, json={"expected_version_id": draft.id,
+        "sections": [{"section_id": draft.section_snapshot_json[0]["section_id"], "content": "原整章正文可以继续编辑了。"}]})
+    assert response.status_code == 200, response.text
+    latest = await book_output_versions.load_latest_book_output_version(test_db, output_id=output.id)
+    if book_changed:
+        assert latest.id == protected.id
+        assert latest.content == content
+        return
+    assert latest.chapter_snapshot_json[0]["draft_version_id"] == response.json()["latest_version"]["id"]
+    assert latest.chapter_snapshot_json[0]["sections"] == []
+    assert latest.manuscript_json["chapters"][0]["sections"] == []
+    assert latest.manuscript_json["table_of_contents"][0]["sections"] == []
+    assert latest.manuscript_json["front_matter"] == manuscript["front_matter"]
+    assert latest.manuscript_json["back_matter"] == manuscript["back_matter"]
+    for reading in (await book_outputs.get_book_output(test_db, user_id=user_id, project_id=project_id),
+                    await book_shares.read_share(test_db, share.token)):
+        assert "原整章正文可以继续编辑了。" in reading.latest_version.content
+        assert reading.latest_version.content == content.replace(draft.content, "原整章正文可以继续编辑了。")
+    assert (await assemble_book_output(test_db, project_id=project_id, automatic=True)).output_version_id == latest.id
+
+
 @pytest.mark.parametrize("protection", ["user", "accepted_revision"])
 @pytest.mark.parametrize("pending_section_edit", [False, True])
 async def test_saved_sections_update_protected_book_and_existing_share(client, test_db, protection, pending_section_edit):
