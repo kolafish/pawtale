@@ -362,7 +362,8 @@ async def test_single_section_edit_syncs_legacy_chapter_without_adding_headings(
 
 @pytest.mark.parametrize("protection", ["user", "accepted_revision"])
 @pytest.mark.parametrize("pending_section_edit", [False, True])
-async def test_saved_sections_update_protected_book_and_existing_share(client, test_db, protection, pending_section_edit):
+@pytest.mark.parametrize("merged_sections", [False, True])
+async def test_saved_sections_update_protected_book_and_existing_share(client, test_db, protection, pending_section_edit, merged_sections):
     from app.domain.memoir.types import MemoirBookChapterDraftStatus
     from app.services.memoir import book_shares
     from app.services.memoir.book_output_manuscript import manuscript_from_snapshot
@@ -379,6 +380,9 @@ async def test_saved_sections_update_protected_book_and_existing_share(client, t
         status=MemoirBookChapterDraftStatus.DRAFT) for chapter in chapters]
     # The helper supplies one paragraph per section; retain a consistent chapter body.
     first = drafts[0][1]
+    if merged_sections:
+        first.section_snapshot_json = [dict(s) for s in first.section_snapshot_json]
+        first.section_snapshot_json[1]["content"] = "已校订的小节，不能被旧章节稿覆盖。"
     first.content = "\n\n".join(s["content"] for s in first.section_snapshot_json)
     await test_db.commit()
     assembled = await assemble_book_output(test_db, project_id=project_id, automatic=True)
@@ -387,6 +391,12 @@ async def test_saved_sections_update_protected_book_and_existing_share(client, t
     snapshots = copy.deepcopy(initial.chapter_snapshot_json)
     snapshots[0]["sections"][1]["content"] = "已校订的小节，不能被旧章节稿覆盖。"
     snapshots[0]["content"] = "\n\n".join(s["content"] for s in snapshots[0]["sections"])
+    if merged_sections:
+        merged = copy.deepcopy(snapshots[0]["sections"][0])
+        merged.update(title="全书合并后的小节标题", content=snapshots[0]["content"],
+            content_char_count=len(snapshots[0]["content"]),
+            used_material_ids=[mid for s in snapshots[0]["sections"] for mid in s["used_material_ids"]])
+        snapshots[0]["sections"] = [merged]
     snapshots[1]["sections"][0]["content"] = "另一章已校订的正文。"
     snapshots[1]["content"] = snapshots[1]["sections"][0]["content"]
     content = book_content_from_chapter_snapshots(title=output.title, snapshots=snapshots)
@@ -427,13 +437,18 @@ async def test_saved_sections_update_protected_book_and_existing_share(client, t
         assert new_text in reading.latest_version.content
         assert "已校订的小节，不能被旧章节稿覆盖。" in reading.latest_version.content
         assert "另一章已校订的正文。" in reading.latest_version.content
-        assert reading.latest_version.manuscript.chapters[0].sections[0].content == new_text
+        assert reading.latest_version.manuscript.chapters[0].sections[0].content == (
+            new_text + "\n\n已校订的小节，不能被旧章节稿覆盖。" if merged_sections else new_text)
     latest = await book_output_versions.load_latest_book_output_version(test_db, output_id=output.id)
     assert latest.chapter_snapshot_json[0]["draft_version_id"] == (
         baseline_id if pending_section_edit else response.json()["latest_version"]["id"])
     assert latest.manuscript_json["front_matter"] == manuscript["front_matter"]
     assert latest.manuscript_json["chapters"][1] == manuscript["chapters"][1]
-    assert latest.manuscript_json["chapters"][0]["sections"][1] == manuscript["chapters"][0]["sections"][1]
+    if merged_sections:
+        assert len(latest.manuscript_json["chapters"][0]["sections"]) == 1
+        assert latest.manuscript_json["chapters"][0]["sections"][0]["title"] == "全书合并后的小节标题"
+    else:
+        assert latest.manuscript_json["chapters"][0]["sections"][1] == manuscript["chapters"][0]["sections"][1]
     assert latest.manuscript_json["chapters"][0]["illustrations"] == manuscript["chapters"][0]["illustrations"]
     assert latest.manuscript_json["render_settings"] == manuscript["render_settings"]
     assert latest.manuscript_json["back_matter"] == manuscript["back_matter"]
@@ -451,6 +466,16 @@ async def test_saved_sections_update_protected_book_and_existing_share(client, t
     assert assembled_again.output_version_id == latest.id
 
     if pending_section_edit:
+        if merged_sections:
+            # The same member may be saved twice while its neighbour is still pending.
+            new_text += "再次修改。"
+            request["sections"][0]["content"] = new_text
+            saved = await client.post(endpoint, json=request)
+            assert saved.status_code == 200, saved.text
+            request["expected_version_id"] = saved.json()["latest_version"]["id"]
+            reading = await book_outputs.get_book_output(test_db, user_id=user_id, project_id=project_id)
+            assert reading.is_stale and new_text in reading.latest_version.content
+            assert "已接受但尚未同步的第二节新正文。" not in reading.latest_version.content
         # Saving B afterwards must recognize that A is already synchronized and clear staleness.
         request["sections"][1]["content"] = "第二节再次明确保存的最新正文。"
         saved = await client.post(endpoint, json=request)
@@ -459,3 +484,21 @@ async def test_saved_sections_update_protected_book_and_existing_share(client, t
         assert not reading.is_stale
         assert new_text in reading.latest_version.content
         assert request["sections"][1]["content"] in reading.latest_version.content
+
+
+@pytest.mark.parametrize("fault", ["unrecorded_body", "ambiguous_body", "foreign_source", "reordered"])
+def test_merged_section_mapping_rejects_unproven_correspondence(fault):
+    baseline = {"a": {"content": "甲", "used_material_ids": ["m1"]},
+                "b": {"content": "乙\n\n丙", "used_material_ids": ["m2"]}}
+    revised = copy.deepcopy(baseline)
+    saved = {"a": {"content": "甲\n\n乙\n\n丙", "used_material_ids": ["m1", "m2"]}}
+    if fault == "unrecorded_body":
+        saved["a"]["content"] = "全书单独润色过，无法对应原来的段落。"
+    elif fault == "ambiguous_body":
+        revised["a"]["content"] = "甲\n\n乙"
+        revised["b"]["content"] = "丙"
+    elif fault == "foreign_source":
+        saved["a"]["used_material_ids"] = ["m1", "foreign"]
+    else:
+        revised = dict(reversed(list(revised.items())))
+    assert book_output_versions._merged_section_mapping(saved, baseline, baseline, revised) is None
