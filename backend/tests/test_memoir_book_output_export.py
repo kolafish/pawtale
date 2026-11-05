@@ -1222,3 +1222,28 @@ def test_pdf_image_crop_to_fill_matches_box_and_shades_bottom(tmp_path):
     pixels = source.getRGBData()
     top, bottom = pixels[0], pixels[-3]
     assert top > 200 and bottom < 80
+
+
+@pytest.mark.parametrize("shape", ["merged", "split", "flat"])
+def test_edited_book_export_relocates_images_by_material_source(tmp_path, monkeypatch, shape):
+    from app.services.memoir.book_output_manuscript import manuscript_from_snapshot, manuscript_response
+
+    image_path = tmp_path / "relinked.png"
+    Image.new("RGB", (400, 300), "white").save(image_path)
+    manuscript = manuscript_from_snapshot(title="往事", content="校订后的正文。",
+        snapshot=[{"chapter_id": "chapter", "chapter_title": "往事", "content": "校订后的正文。"}]).model_dump(mode="json")
+    chapter = manuscript["chapters"][0]
+    chapter["source_refs"] = [{"utterance_id": "source"}]
+    section = {"section_id": "new", "index": 1, "title": "合并后的故事", "content": "校订后的正文。", "source_ref_ids": ["source"]}
+    chapter["sections"] = [] if shape == "flat" else [section]
+    if shape == "split":
+        chapter["sections"].insert(0, {**section, "section_id": "old", "source_ref_ids": ["other-source"]})
+    chapter["illustrations"] = [{"image_asset_id": "image", "storage_path": "relinked.png", "placement": "chapter_inline",
+                                "section_id": "old", "source_utterance_ids": ["source"], "inline_position": "after"}]
+    resolved = manuscript_response(title="往事", content="校订后的正文。", snapshot=[], stored=manuscript)
+    assert resolved.chapters[0].illustrations[0].section_id == (None if shape == "flat" else "new")
+    assert chapter["illustrations"][0]["section_id"] == "old", "reading must not mutate the stored edition"
+    monkeypatch.setattr(book_output_export, "DATA_DIR", tmp_path)
+    pages = _build_manuscript_pdf_pages(title="往事", content="", manuscript=resolved.model_dump(mode="json"),
+                                      layout=PDF_LAYOUTS[MemoirBookOutputExportLayout.STANDARD])
+    assert sum(image.path == image_path for page in pages for image in page.images) == 1

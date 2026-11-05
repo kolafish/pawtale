@@ -1460,3 +1460,25 @@ test("a long photo note reserves reading space instead of overlapping the next s
   context.layoutReadingImages([{ ...image, caption: "这是照片里的家人和他们当时生活的地方。".repeat(15) }]);
   assert.equal(context.data.imageGallerySections.s, true);
 });
+
+for (const shared of [false, true]) test(`${shared ? "shared book" : "owner chapter"} retains inline images for a chapter without sections`, async () => {
+  global.wx = { getStorageSync: () => "", hideShareMenu() {}, showShareMenu() {} };
+  mockModule("../services/authenticated-media.ts", { downloadAuthenticatedFile: async url => `local:${url}` });
+  const content = "住院的日子里，买瓶眼药水，都要喊周工帮忙。";
+  const illustrations = [{ image_asset_id: "eye-drops", placement: "chapter_inline", section_id: shared ? null : "old-section",
+    image_url: "/api/mobile/memoir/book-shares/family/images/eye-drops", inline_position: "after", caption: "", disclosure: "AI 插图" }];
+  const output = sampleFinishedBook(content);
+  output.share_scope = "book";
+  output.latest_version.manuscript.chapters = [{ ...output.latest_version.manuscript.chapters[0], chapter_id: "chapter-1",
+    content, sections: [], illustrations }];
+  const { page } = loadBookReaderPage({ readMemoirBookShare: async () => output,
+    getMemoirChapterWorkspace: async () => ({ chapter_id: "chapter-1", chapter_title: "病中回望", draft_content: content,
+      draft_sections: [], illustrations }) });
+  const context = pageContext(page);
+  await context.onLoad(shared ? { shareToken: "family" } : { projectId: "p", chapterId: "chapter-1" });
+  assert.equal(context.bookChapters[0].content, content);
+  assert.equal(context.data.shareImages.length, 1);
+  assert.equal(context.data.shareImages[0].sectionId, "");
+  assert.equal(context.data.shareImages[0].placement, "chapter_inline");
+  assert.ok(context.data.shareImages[0].url);
+});

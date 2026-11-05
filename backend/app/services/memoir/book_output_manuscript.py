@@ -14,6 +14,7 @@ from app.schemas.memoir_book import (
     MemoirBookManuscript,
     MemoirBookManuscriptBackMatter,
     MemoirBookManuscriptChapter,
+    MemoirBookManuscriptIllustration,
     MemoirBookManuscriptProfile,
     MemoirBookManuscriptQuote,
     MemoirBookManuscriptRenderSettings,
@@ -453,7 +454,7 @@ def manuscript_from_snapshot(
             [chapter.model_dump(mode="json") for chapter in chapters]
         )
     source_count = sum(item.source_count for item in toc)
-    return MemoirBookManuscript(
+    return _resolve_manuscript_images(MemoirBookManuscript(
         profile=MemoirBookManuscriptProfile(
             template=template,
             title=book_title,
@@ -513,7 +514,34 @@ def manuscript_from_snapshot(
             custom_layout=custom_layout or MemoirBookCustomLayout(),
             cover_image=cover_image,
         ),
-    )
+    ))
+
+
+def resolve_chapter_illustration(
+    chapter: MemoirBookManuscriptChapter,
+    image: MemoirBookManuscriptIllustration,
+) -> MemoirBookManuscriptIllustration | None:
+    """Locate an image in this saved edition, using exact material provenance."""
+    sources = set(image.source_utterance_ids) or ({image.source_utterance_id} if image.source_utterance_id else set())
+    matches = [section for section in chapter.sections if sources and sources <= set(section.source_ref_ids)]
+    if len(matches) == 1:
+        return image.model_copy(update={"section_id": matches[0].section_id})
+    if not image.section_id:
+        return image
+    original = next((section for section in chapter.sections if section.section_id == image.section_id), None)
+    if original is not None and (not sources or not original.source_ref_ids):
+        return image  # Older editions can have section IDs without source provenance.
+    if not chapter.sections and sources and sources <= {ref.utterance_id for ref in chapter.source_refs}:
+        return image.model_copy(update={"section_id": None})
+    return None
+
+
+def _resolve_manuscript_images(manuscript: MemoirBookManuscript) -> MemoirBookManuscript:
+    for chapter in manuscript.chapters:
+        # Keep unresolved images available to the author; public shares separately
+        # require a location in their authorized edition before exposing an image.
+        chapter.illustrations = [resolve_chapter_illustration(chapter, image) or image for image in chapter.illustrations]
+    return manuscript
 
 
 def manuscript_response(
@@ -525,12 +553,12 @@ def manuscript_response(
 ) -> MemoirBookManuscript | None:
     if isinstance(stored, dict) and stored:
         try:
-            return MemoirBookManuscript.model_validate(stored)
+            return _resolve_manuscript_images(MemoirBookManuscript.model_validate(stored))
         except ValueError:
             try:
-                return MemoirBookManuscript.model_validate(
+                return _resolve_manuscript_images(MemoirBookManuscript.model_validate(
                     sanitize_manuscript_payload(title=title, manuscript=stored)
-                )
+                ))
             except ValueError:
                 pass
     return manuscript_from_snapshot(title=title, content=content, snapshot=snapshot)

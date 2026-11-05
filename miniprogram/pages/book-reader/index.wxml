@@ -230,7 +230,7 @@
         </block>
         <block wx:else>
 <view wx:for="{{shareImages}}" wx:key="id" wx:for-item="illustration" class="share-reading-image">
-          <block wx:if="{{illustration.chapterId === chapter.chapterId && !illustration.sectionId}}">
+          <block wx:if="{{illustration.chapterId === chapter.chapterId && illustration.placement === 'chapter_opening'}}">
             <image src="{{illustration.url}}" mode="widthFix" />
             <text wx:if="{{illustration.caption}}">{{illustration.caption}}</text>
           </block>
@@ -269,6 +269,12 @@
           </view>
         </view>
         <view wx:else class="chapter-content"><template is="readerHighlightedText" data="{{text: chapter.content, active: readerChapterIndex === readerHighlightChapterIndex && readerHighlightSectionId === '', before: readerHighlightBefore, current: readerHighlightCurrent, after: readerHighlightAfter}}" /></view>
+        <block wx:for="{{shareImages}}" wx:key="id" wx:for-item="illustration">
+          <view wx:if="{{illustration.chapterId === chapter.chapterId && !illustration.sectionId && illustration.placement === 'chapter_inline'}}" class="share-reading-image">
+            <image src="{{illustration.url}}" mode="widthFix" />
+            <text wx:if="{{illustration.caption}}">{{illustration.caption}}</text>
+          </view>
+        </block>
         <view wx:if="{{chapter.familyNotes.length}}" class="reader-section">
           <text class="section-label">家人留言</text>
           <view wx:for="{{chapter.familyNotes}}" class="chapter-content"><text user-select>{{item.display_name}}：{{item.content}}</text></view>
