@@ -1074,6 +1074,78 @@ async def test_admin_revises_other_users_chapter_with_version_and_project_guards
         assert utterance.transcript_raw == original_transcripts[material["utterance_id"]]
 
 
+@pytest.mark.parametrize("legacy", [False, True])
+@pytest.mark.parametrize("change", ["question", "text", "removed", "renamed"])
+async def test_manual_save_preserves_pending_sections_and_old_source_baseline(client, test_db, legacy, change):
+    from app.models.memoir import MemoirChatMessage, MemoirTranscriptVersion
+    project_id, chapter, section, materials = await _chapter(client, test_db)
+    source = await test_db.get(MemoirVoiceUtterance, materials[0]["utterance_id"])
+    answer = await test_db.get(MemoirChatMessage, source.chat_message_id)
+    question = MemoirChatMessage(project_id=project_id, voice_session_id=answer.voice_session_id,
+        role="assistant", content_text="后来发生了什么？", content_status="final", turn_index=answer.turn_index - 1)
+    test_db.add(question)
+    await test_db.flush()
+    answer.parent_message_id = question.id
+    await test_db.commit()
+    fake = FakeChapterAI(section_material_id=source.id, chapter_section_id=section["id"],
+        chapter_material_id=source.id, draft_material_ids=[m["utterance_id"] for m in materials])
+    _, version = await chapter_generation.generate_and_save_chapter_draft(test_db,
+        project_id=project_id, chapter_id=chapter.id, ai_client=fake)
+    if legacy:
+        version.prompt_snapshot = "llm_layered_sectioned_chapter_draft_v3:section_ai_revision"
+        version.input_signature = "legacy-source-baseline"
+        version.material_snapshot_json = [{k: v for k, v in item.items() if k != "interviewer_line"}
+            for item in version.material_snapshot_json]
+        version.section_snapshot_json = [{**item, "input_signature": "legacy-section-baseline", "user_edited": True}
+            for item in version.section_snapshot_json]
+    await test_db.commit()
+    original_sources = version.material_snapshot_json
+    original_signature = version.input_signature
+    pending = MemoirSection(project_id=project_id, chapter_id=chapter.id,
+        title="尚未写入正文的另一段经历", section_type="event", sort_order=1)
+    test_db.add(pending)
+    await test_db.flush()
+    added = await create_test_voice_transcript(client, test_db, "后来我到另一座城市工作。", project_id=project_id)
+    await sections.assign_material_to_section(test_db, project_id=project_id, section_id=pending.id,
+        utterance_id=added["utterance_id"], assigned_by=MemoirSectionMaterialAssignedBy.USER, assignment_reason="user")
+    await test_db.commit()
+    endpoint = f"/api/mobile/memoir/projects/{project_id}/book-plan/chapters/{chapter.id}/draft/revise"
+    payload = {"expected_version_id": version.id,
+        "sections": [{"section_id": section["id"], "content": "我只修改这段已写好的正文。"}]}
+    result = await client.post(endpoint, json=payload)
+    assert result.status_code == 200, result.text
+    latest = await chapter_generation.latest_chapter_draft_version(test_db, project_id=project_id, chapter_id=chapter.id)
+    context = await chapter_generation.load_chapter_generation_context(test_db, project_id=project_id, chapter_id=chapter.id)
+    assert latest.content == payload["sections"][0]["content"]
+    assert latest.input_signature == original_signature
+    assert latest.material_snapshot_json == original_sources
+    assert not chapter_generation.chapter_draft_is_current(context, latest)
+    assert pending.id in {s.section_id for s in chapter_generation.chapter_draft_generation_plan(context, latest).target_context.sections}
+    assert latest.section_snapshot_json[0]["user_edited"] is True
+    assert (await client.post(endpoint, json=payload)).status_code == 409
+    # Repeated saves must not advance the evidence cutoff for an unrecorded question.
+    if change == "question":
+        question.content_text = "现在问的是另一件事吗？"
+        question.updated_at = version.created_at + timedelta(microseconds=1)
+    elif change == "text":
+        transcript = await test_db.get(MemoirTranscriptVersion, materials[0]["transcript_version_id"])
+        transcript.content = "事实已更正，之前的讲述有误。"
+    elif change == "removed":
+        membership = await test_db.scalar(select(MemoirSectionMaterial).where(
+            MemoirSectionMaterial.utterance_id == source.id))
+        membership.include_in_book = False
+    else:
+        live_section = await test_db.get(MemoirSection, section["id"])
+        live_section.title = "已改名的小节"
+    await test_db.commit()
+    payload["expected_version_id"] = latest.id
+    payload["sections"][0]["content"] += "再次修改。"
+    rejected = await client.post(endpoint, json=payload)
+    assert rejected.status_code == 409, rejected.text
+    assert (await chapter_generation.latest_chapter_draft_version(test_db,
+        project_id=project_id, chapter_id=chapter.id)).id == latest.id
+
+
 async def test_chapter_draft_update_generates_only_section_with_new_material(
     client,
     test_db,
