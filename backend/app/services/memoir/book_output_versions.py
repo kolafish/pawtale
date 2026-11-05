@@ -9,11 +9,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.memoir.types import MemoirCreatedBy, MemoirTranscriptPolishLevel
-from app.models.memoir import MemoirBookOutput, MemoirBookOutputVersion
+from app.models.memoir import MemoirBookChapterDraftVersion, MemoirBookOutput, MemoirBookOutputVersion
 from app.schemas.memoir_book import MemoirBookLevelEditorialCopyTarget, MemoirBookManuscriptQuote
 from app.services.memoir.book_manuscript_cleanup import original_quote_candidates, body_excerpt_candidates
 from app.services.memoir.book_output_manuscript import stored_manuscript_metadata, fallback_chapter_quotes
-from app.services.memoir.book_output_snapshots import book_content_from_chapter_snapshots
+from app.services.memoir.book_output_snapshots import book_content_from_chapter_snapshots, normalized_section_snapshots
 from app.services.memoir.semantic_state import semantic_json_signature
 
 
@@ -137,6 +137,71 @@ async def book_body_is_protected(
         if previous is None or not _same_book_body(current, previous):
             return current.created_by == MemoirCreatedBy.USER.value
         current = previous
+
+
+async def sync_saved_sections_to_protected_book(
+    db: AsyncSession, *, version: MemoirBookChapterDraftVersion, edited_section_ids: set[str],
+) -> MemoirBookOutputVersion | None:
+    """Apply an explicit section save without reassembling unrelated protected prose."""
+    if not edited_section_ids:
+        return None
+    output = await db.scalar(select(MemoirBookOutput).where(
+        MemoirBookOutput.project_id == version.project_id,
+    ).with_for_update().execution_options(populate_existing=True))
+    if output is None:
+        return None
+    latest = await load_latest_book_output_version(db, output_id=output.id)
+    if latest is None or not await book_body_is_protected(db, output=output, version=latest):
+        return None
+    snapshots = deepcopy(latest.chapter_snapshot_json)
+    snapshot = next((item for item in snapshots if item.get("chapter_id") == version.chapter_id), None)
+    manuscript = deepcopy(latest.manuscript_json)
+    chapter = next((item for item in manuscript.get("chapters", []) if item.get("chapter_id") == version.chapter_id), None)
+    if snapshot is None or chapter is None:
+        return None  # Never reintroduce an omitted chapter through a text save.
+    baseline = await db.get(MemoirBookChapterDraftVersion, snapshot.get("draft_version_id")) if snapshot.get("draft_version_id") else None
+    if baseline is None or baseline.material_snapshot_json != version.material_snapshot_json:
+        return None
+    title = book_output_version_title(latest, fallback=output.title)
+    if latest.content != book_content_from_chapter_snapshots(title=title, snapshots=snapshots):
+        return None  # A legacy free-form book has no unambiguous section mapping.
+    saved = {item["section_id"]: item for item in snapshot.get("sections", [])}
+    rendered = {item["section_id"]: item for item in chapter.get("sections", [])}
+    revised = {item["section_id"]: item for item in normalized_section_snapshots(version.section_snapshot_json)}
+    if not edited_section_ids <= saved.keys() & rendered.keys() & revised.keys():
+        return None
+    if saved.keys() != revised.keys() or any(
+        saved[key].get("used_material_ids") != revised[key].get("used_material_ids") for key in saved
+    ):
+        return None  # Source/structure changes continue through the existing assembly rules.
+    changed = {key for key in edited_section_ids if saved[key]["content"] != revised[key]["content"]}
+    if not changed:
+        return None
+    for key in changed:
+        text = revised[key]["content"]
+        saved[key].update(content=text, content_char_count=len(text))
+        for field in ("body_digest", "body_digest_hash"):
+            saved[key].pop(field, None)
+        rendered[key].update(content=text, char_count=len(text))
+    snapshot["content"] = "\n\n".join(item["content"] for item in snapshot["sections"])
+    snapshot["content_char_count"] = len(snapshot["content"])
+    snapshot.update(draft_id=version.draft_id, draft_version_id=version.id, draft_version=version.version)
+    chapter["content"] = snapshot["content"]
+    for item in manuscript.get("table_of_contents", []):
+        if item.get("chapter_id") == version.chapter_id:
+            item["char_count"] = snapshot["content_char_count"]
+            for section in item.get("sections", []):
+                if section["section_id"] in changed:
+                    section["char_count"] = saved[section["section_id"]]["content_char_count"]
+    from app.clock import utcnow_naive
+    from app.services.memoir.book_output_state import invalidate_book_output
+
+    invalidate_book_output(output)
+    output.updated_at = utcnow_naive()
+    return await append_book_output_version(
+        db, output=output, content=book_content_from_chapter_snapshots(title=title, snapshots=snapshots),
+        chapter_snapshot_json=snapshots, manuscript_json=manuscript, created_by=MemoirCreatedBy.USER,
+    )
 
 
 def book_output_version_title(

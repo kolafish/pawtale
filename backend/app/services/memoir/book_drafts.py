@@ -340,6 +340,8 @@ async def revise_chapter_draft(
     if output is not None:
         invalidate_book_output(output)
         db.add(output)
+    from app.services.memoir.book_output_versions import sync_saved_sections_to_protected_book
+    await sync_saved_sections_to_protected_book(db, version=current_version, edited_section_ids=edited_section_ids)
     from app.services.memoir.automatic_book_draft import schedule_book_draft
     await schedule_book_draft(db, project_id=project_id, source="manual_draft", settled=True)
     await db.commit()
