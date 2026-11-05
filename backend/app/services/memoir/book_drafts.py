@@ -18,6 +18,8 @@ from app.models.memoir import (
     MemoirBookOutput,
     MemoirBookPlan,
     MemoirBookPlanChapter,
+    MemoirChatMessage,
+    MemoirVoiceUtterance,
 )
 from app.schemas.memoir_book import (
     MemoirAudioPlanRequest,
@@ -36,6 +38,7 @@ from app.services.memoir.book_output_snapshots import (
     sectioned_chapter_content,
 )
 from app.services.memoir import chapter_generation
+from app.services.memoir.material_roles import interviewer_messages
 
 
 def _version_response(
@@ -212,6 +215,52 @@ async def confirm_chapter_draft(
     return _draft_response(refreshed)
 
 
+async def _saved_sources_unchanged(
+    db: AsyncSession, *, context: chapter_generation.ChapterGenerationContext,
+    latest: MemoirBookChapterDraftVersion, versions: list[MemoirBookChapterDraftVersion],
+) -> bool:
+    """Permit editing existing prose without accepting pending additions or style upgrades."""
+    if not latest.section_snapshot_json or not chapter_generation.chapter_draft_sources_still_included(context, latest):
+        return False
+    sections = {item.section_id: item for item in context.sections}
+    for saved in latest.section_snapshot_json:
+        section = sections[saved["section_id"]]
+        if saved.get("title") != section.title or saved.get("section_type") != section.section_type:
+            return False
+    used = set(latest.used_material_ids_json)
+    if used != {key for item in latest.section_snapshot_json for key in item["used_material_ids"]}:
+        return False
+    saved_sources = {item["material_id"]: item for item in latest.material_snapshot_json}
+    current_sources = {item["material_id"]: item for item in chapter_generation._snapshot(context, used_material_ids=used)}
+    if set(saved_sources) != used or set(current_sources) != used or not used:
+        return False
+    missing_questions = set()
+    for key, saved in saved_sources.items():
+        current = dict(current_sources[key])
+        if "interviewer_line" not in saved and current.get("interviewer_line"):
+            missing_questions.add(key)
+            current.pop("interviewer_line")
+        if saved != current:
+            return False
+    if not missing_questions:
+        return True
+    # v3 did not record paired questions. Only accept that omission when the
+    # question and its answer binding predate the original source baseline.
+    if not str(latest.prompt_snapshot or "").startswith("llm_layered_sectioned_chapter_draft_v3"):
+        return False
+    baseline_at = min(version.created_at for version in versions
+        if version.input_signature == latest.input_signature
+        and version.material_snapshot_json == latest.material_snapshot_json)
+    answers = list(await db.scalars(select(MemoirChatMessage).join(
+        MemoirVoiceUtterance, MemoirVoiceUtterance.chat_message_id == MemoirChatMessage.id,
+    ).where(MemoirVoiceUtterance.id.in_(missing_questions))))
+    questions = await interviewer_messages(db, [answer.id for answer in answers])
+    return len(answers) == len(missing_questions) and all(
+        answer.id in questions and max(answer.updated_at, questions[answer.id].updated_at) <= baseline_at
+        for answer in answers
+    )
+
+
 async def revise_chapter_draft(
     db: AsyncSession,
     *,
@@ -256,7 +305,9 @@ async def revise_chapter_draft(
         if any(isinstance(item, dict) and item.get("section_id") == revision.section_id
             and item.get("content") != revision.content for item in latest.section_snapshot_json)}
     reviewed_questions = question_changes & edited_section_ids
-    if not current and not (reviewed_questions and req.expected_input_signature == context.input_signature):
+    if (not current
+        and not (reviewed_questions and req.expected_input_signature == context.input_signature)
+        and not await _saved_sources_unchanged(db, context=context, latest=latest, versions=list(draft.versions))):
         raise HTTPException(status_code=409, detail="本章素材已变化，请先重新整理正文")
     latest_sections = list(latest.section_snapshot_json)
     if not latest_sections:
@@ -321,7 +372,7 @@ async def revise_chapter_draft(
         prompt_snapshot=latest.prompt_snapshot,
         feedback="用户按小节修改正文",
         input_signature=(context.input_signature
-            if question_changes <= reviewed_questions else latest.input_signature),
+            if current or (question_changes and question_changes <= reviewed_questions) else latest.input_signature),
         used_material_ids_json=list(latest.used_material_ids_json),
         material_snapshot_json=[
             current_materials[saved["material_id"]]
