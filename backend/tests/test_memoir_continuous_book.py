@@ -307,3 +307,78 @@ async def test_automatic_book_keeps_manual_chapter_copy_across_later_updates(cli
     version = await test_db.get(MemoirBookOutputVersion, updated.output_version_id)
     assert version.manuscript_json["chapters"][0]["intro"] == "我亲自写的章首语。"
     assert version.manuscript_json["chapters"][0]["pull_quotes"][0]["text"] == "那年，我参加了第1次学校比赛。"
+
+
+@pytest.mark.parametrize("protection", ["user", "accepted_revision"])
+async def test_saved_sections_update_protected_book_and_existing_share(client, test_db, protection):
+    from app.domain.memoir.types import MemoirBookChapterDraftStatus
+    from app.services.memoir import book_shares
+    from app.services.memoir.book_output_manuscript import manuscript_from_snapshot
+    from app.services.memoir.book_output_snapshots import book_content_from_chapter_snapshots
+    from tests.test_memoir_book_completion import _book, _create_current_draft
+
+    project_id, chapters, _ = await _book(client, test_db, chapter_count=2)
+    extra = MemoirSection(project_id=project_id, chapter_id=chapters[0].id,
+        title="另一个故事", section_type="life_fragment", sort_order=1)
+    test_db.add(extra)
+    await test_db.flush()
+    await _add_narration(client, test_db, project_id, extra.id)
+    drafts = [await _create_current_draft(test_db, project_id=project_id, chapter_id=chapter.id,
+        status=MemoirBookChapterDraftStatus.DRAFT) for chapter in chapters]
+    # The helper supplies one paragraph per section; retain a consistent chapter body.
+    first = drafts[0][1]
+    first.content = "\n\n".join(s["content"] for s in first.section_snapshot_json)
+    await test_db.commit()
+    assembled = await assemble_book_output(test_db, project_id=project_id, automatic=True)
+    output = await test_db.get(MemoirBookOutput, assembled.output_id)
+    initial = await test_db.get(MemoirBookOutputVersion, assembled.output_version_id)
+    snapshots = copy.deepcopy(initial.chapter_snapshot_json)
+    snapshots[0]["sections"][1]["content"] = "已校订的小节，不能被旧章节稿覆盖。"
+    snapshots[0]["content"] = "\n\n".join(s["content"] for s in snapshots[0]["sections"])
+    snapshots[1]["sections"][0]["content"] = "另一章已校订的正文。"
+    snapshots[1]["content"] = snapshots[1]["sections"][0]["content"]
+    content = book_content_from_chapter_snapshots(title=output.title, snapshots=snapshots)
+    manuscript = manuscript_from_snapshot(title=output.title, content=content, snapshot=snapshots,
+        metadata={"preface": "我亲自写的序言。"}).model_dump(mode="json")
+    manuscript["chapters"][0]["illustrations"] = [{"image_asset_id": "retained-image",
+        "storage_path": "memoir/retained.png", "placement": "chapter_opening"}]
+    protected = await book_output_versions.append_book_output_version(test_db, output=output,
+        content=content, chapter_snapshot_json=snapshots, manuscript_json=manuscript,
+        created_by=MemoirCreatedBy.USER if protection == "user" else MemoirCreatedBy.AI)
+    if protection == "accepted_revision":
+        output.metadata_json = {**output.metadata_json, "book_editorial_revision_application": {"output_version_id": protected.id}}
+    await test_db.commit()
+    user_id = (await client.get("/api/auth/me")).json()["id"]
+    share = await book_shares.create_share(test_db, user_id=user_id, project_id=project_id)
+    new_text = "我在 Web 后台刚刚修改的正文。"
+    response = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-plan/chapters/{chapters[0].id}/draft/revise",
+        json={"expected_version_id": first.id, "sections": [
+            {"section_id": s["section_id"], "content": new_text if i == 0 else s["content"]}
+            for i, s in enumerate(first.section_snapshot_json)]})
+    assert response.status_code == 200, response.text
+    for reading in (await book_outputs.get_book_output(test_db, user_id=user_id, project_id=project_id),
+                    await book_shares.read_share(test_db, share.token)):
+        assert not reading.is_stale
+        assert new_text in reading.latest_version.content
+        assert "已校订的小节，不能被旧章节稿覆盖。" in reading.latest_version.content
+        assert "另一章已校订的正文。" in reading.latest_version.content
+        assert reading.latest_version.manuscript.chapters[0].sections[0].content == new_text
+    latest = await book_output_versions.load_latest_book_output_version(test_db, output_id=output.id)
+    assert latest.manuscript_json["front_matter"] == manuscript["front_matter"]
+    assert latest.manuscript_json["chapters"][1] == manuscript["chapters"][1]
+    assert latest.manuscript_json["chapters"][0]["sections"][1] == manuscript["chapters"][0]["sections"][1]
+    assert latest.manuscript_json["chapters"][0]["illustrations"] == manuscript["chapters"][0]["illustrations"]
+    assert latest.manuscript_json["render_settings"] == manuscript["render_settings"]
+    assert latest.manuscript_json["back_matter"] == manuscript["back_matter"]
+    assert protected.content == content
+    request = {"expected_version_id": first.id, "sections": [
+        {"section_id": s["section_id"], "content": s["content"]}
+        for s in response.json()["latest_version"]["sections"]]}
+    endpoint = f"/api/mobile/memoir/projects/{project_id}/book-plan/chapters/{chapters[0].id}/draft/revise"
+    assert (await client.post(endpoint, json=request)).status_code == 409
+    request["expected_version_id"] = response.json()["latest_version"]["id"]
+    assert (await client.post(endpoint, json=request)).status_code == 200
+    assert (await book_output_versions.load_latest_book_output_version(test_db, output_id=output.id)).id == latest.id
+    # A subsequent automatic assembly must not roll back the edit or the retained prose.
+    assembled_again = await assemble_book_output(test_db, project_id=project_id, automatic=True)
+    assert assembled_again.output_version_id == latest.id
