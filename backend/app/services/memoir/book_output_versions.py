@@ -168,6 +168,15 @@ async def sync_saved_sections_to_protected_book(
     saved = {item["section_id"]: item for item in snapshot.get("sections", [])}
     rendered = {item["section_id"]: item for item in chapter.get("sections", [])}
     revised = {item["section_id"]: item for item in normalized_section_snapshots(version.section_snapshot_json)}
+    baseline_sections = {item["section_id"]: item for item in normalized_section_snapshots(baseline.section_snapshot_json)}
+    if not saved and not rendered and len(revised) == 1 and revised.keys() == baseline_sections.keys():
+        key = next(iter(revised))
+        if (baseline.content == baseline_sections[key]["content"] == snapshot.get("content") == chapter.get("content")
+            and version.content == revised[key]["content"]):
+            # A legacy whole chapter can be edited through its single section.
+            # Use temporary mappings; keep the book's section-free layout.
+            saved = deepcopy(baseline_sections)
+            rendered = {key: {"content": chapter["content"]}}
     if not edited_section_ids <= saved.keys() & rendered.keys() & revised.keys():
         return None
     if saved.keys() != revised.keys() or any(
@@ -183,9 +192,8 @@ async def sync_saved_sections_to_protected_book(
         for field in ("body_digest", "body_digest_hash"):
             saved[key].pop(field, None)
         rendered[key].update(content=text, char_count=len(text))
-    snapshot["content"] = "\n\n".join(item["content"] for item in snapshot["sections"])
+    snapshot["content"] = "\n\n".join(item["content"] for item in saved.values())
     snapshot["content_char_count"] = len(snapshot["content"])
-    baseline_sections = {item["section_id"]: item for item in normalized_section_snapshots(baseline.section_snapshot_json)}
     # A different save path may have revised an untouched section. Keep the old
     # baseline until each such change is either absent or already in this book.
     if all(item == baseline_sections.get(key) or item == saved[key]
