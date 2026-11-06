@@ -114,6 +114,22 @@ type ReaderDatasetEvent = PageDatasetEvent<{
   sectionId?: string;
 }>;
 
+interface ReaderTouchPoint {
+  identifier: number;
+  clientX: number;
+  clientY: number;
+}
+interface ReaderTouchEvent {
+  timeStamp: number;
+  touches: ReaderTouchPoint[];
+  changedTouches: ReaderTouchPoint[];
+}
+interface ReaderSwipeStart extends ReaderTouchPoint {
+  timeStamp: number;
+  chapterIndex: number;
+  versionId: string;
+}
+
 const PAGE_CLASS = "book-reader-page ui-page-shell ui-accessible-page";
 const FLAT_READER_PAGE_CHARS = 6000;
 
@@ -272,6 +288,7 @@ definePage<BookReaderData>()({
   sharedReadingShown: false,
   sharedReadGeneration: 0,
   readingScrollTop: 0,
+  readerSwipeStart: null as ReaderSwipeStart | null,
   readingProgress: null as SharedReadingProgress | null,
 
 
@@ -418,12 +435,14 @@ definePage<BookReaderData>()({
   },
 
   onHide() {
+    this.cancelReaderSwipe();
     if (this.data.excerptMode) this.invalidateExcerptRequests();
     this.saveReadingProgress();
     this.stopPlayback();
   },
 
   onUnload() {
+    this.cancelReaderSwipe();
     this.excerptImageController?.dispose();
     if (this.data.excerptMode) this.invalidateExcerptRequests();
     this.saveReadingProgress();
@@ -461,6 +480,7 @@ definePage<BookReaderData>()({
   },
 
   showReaderChapter(index: number, sectionIndex?: number) {
+    this.cancelReaderSwipe();
     if (index < 0 || index >= this.data.readerChapterTotal) return;
     this.stopPlayback();
     this.readingScrollTop = 0;
@@ -478,6 +498,53 @@ definePage<BookReaderData>()({
       bookPreviewChapters: chapter ? [compactReaderChapter(chapter)] : [],
       bookContent: chapter ? "" : this.flatPages[index] || "",
     };
+  },
+
+  canSwipeReaderChapter() {
+    return this.data.readerMode === "book" && !this.data.excerptMode
+      && !this.data.loading && !this.data.error && this.data.readerChapterTotal > 1;
+  },
+
+  onReaderTouchStart(event: ReaderTouchEvent) {
+    this.cancelReaderSwipe();
+    const touch = event.touches[0];
+    // Leave the system's left-edge back gesture alone. Gesture state stays off setData.
+    if (!this.canSwipeReaderChapter() || event.touches.length !== 1 || touch.clientX <= 24) return;
+    this.readerSwipeStart = { ...touch, timeStamp: event.timeStamp,
+      chapterIndex: this.data.readerChapterIndex, versionId: this.readerAudioVersionId };
+  },
+
+  onReaderTouchMove(event: ReaderTouchEvent) {
+    const start = this.readerSwipeStart;
+    if (!start) return;
+    const touch = event.touches[0];
+    if (event.touches.length !== 1 || touch.identifier !== start.identifier) {
+      this.cancelReaderSwipe();
+      return;
+    }
+    const dx = Math.abs(touch.clientX - start.clientX);
+    const dy = Math.abs(touch.clientY - start.clientY);
+    // Once a gesture becomes vertical, returning sideways must not turn a chapter.
+    if (dy >= 12 && dy >= dx) this.cancelReaderSwipe();
+  },
+
+  onReaderTouchEnd(event: ReaderTouchEvent) {
+    const start = this.readerSwipeStart;
+    this.cancelReaderSwipe();
+    const touch = event.changedTouches[0];
+    if (!start || !this.canSwipeReaderChapter() || event.touches.length
+      || event.changedTouches.length !== 1 || touch.identifier !== start.identifier
+      || event.timeStamp - start.timeStamp > 1000
+      || start.chapterIndex !== this.data.readerChapterIndex || start.versionId !== this.readerAudioVersionId) return;
+    const dx = touch.clientX - start.clientX;
+    const dy = touch.clientY - start.clientY;
+    if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 2) return;
+    if (dx < 0) this.nextReaderChapter();
+    else this.previousReaderChapter();
+  },
+
+  cancelReaderSwipe() {
+    this.readerSwipeStart = null;
   },
 
   previousReaderChapter() {

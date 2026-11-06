@@ -209,7 +209,7 @@
     </view>
 
     <view wx:if="{{sharePreface && readerChapterIndex === 0}}" class="reader-section ui-card"><text class="section-label">前言</text><text class="book-content" selectable>{{sharePreface}}</text></view>
-    <view wx:if="{{bookPreviewChapters.length}}" id="reader-body" class="chapter-list">
+    <view wx:if="{{bookPreviewChapters.length}}" id="reader-body" class="chapter-list" bindtouchstart="onReaderTouchStart" bindtouchmove="onReaderTouchMove" bindtouchend="onReaderTouchEnd" bindtouchcancel="cancelReaderSwipe" bindlongpress="cancelReaderSwipe">
       <view
         wx:for="{{bookPreviewChapters}}"
         wx:key="id"
@@ -233,7 +233,7 @@
         <block wx:else>
 <view wx:for="{{shareImages}}" wx:key="id" wx:for-item="illustration" class="share-reading-image">
           <block wx:if="{{illustration.chapterId === chapter.chapterId && illustration.placement === 'chapter_opening'}}">
-            <image src="{{illustration.url}}" mode="widthFix" />
+            <image catchtouchstart="cancelReaderSwipe" src="{{illustration.url}}" mode="widthFix" />
             <text wx:if="{{illustration.caption}}">{{illustration.caption}}</text>
           </block>
         </view>
@@ -251,7 +251,7 @@
               <block wx:for="{{section.paragraphs}}" wx:key="*this" wx:for-item="paragraph" wx:for-index="paragraphIndex">
                 <block wx:for="{{shareImages}}" wx:key="id" wx:for-item="illustration">
                   <view wx:if="{{illustration.chapterId === chapter.chapterId && illustration.sectionId === section.id && !imageGallerySections[section.id] && illustration.paragraphBefore === paragraphIndex}}" class="share-reading-image {{illustration.portrait ? 'portrait' : ''}}">
-                    <image src="{{illustration.url}}" mode="widthFix" data-id="{{illustration.id}}" data-url="{{illustration.url}}" bindload="onReadingImageLoad" />
+                    <image catchtouchstart="cancelReaderSwipe" src="{{illustration.url}}" mode="widthFix" data-id="{{illustration.id}}" data-url="{{illustration.url}}" bindload="onReadingImageLoad" />
                     <text wx:if="{{illustration.caption}}">{{illustration.caption}}</text>
                   </view>
                 </block>
@@ -259,10 +259,10 @@
                   <template is="readerHighlightedText" data="{{text: paragraph, active: readerChapterIndex === readerHighlightChapterIndex && section.id === readerHighlightSectionId && paragraphIndex === readerHighlightParagraphIndex, before: readerHighlightBefore, current: readerHighlightCurrent, after: readerHighlightAfter}}" />
                 </view>
               </block>
-              <view class="{{imageGallerySections[section.id] ? 'reading-image-gallery' : ''}}">
+              <view catchtouchstart="cancelReaderSwipe" class="{{imageGallerySections[section.id] ? 'reading-image-gallery' : ''}}">
                 <block wx:for="{{shareImages}}" wx:key="id" wx:for-item="illustration">
                   <view wx:if="{{illustration.chapterId === chapter.chapterId && illustration.sectionId === section.id && (imageGallerySections[section.id] || illustration.paragraphBefore === section.paragraphs.length)}}" class="share-reading-image">
-                    <image src="{{illustration.url}}" mode="{{imageGallerySections[section.id] ? 'aspectFit' : 'widthFix'}}" style="{{imageGallerySections[section.id] ? 'height: ' + illustration.galleryHeight + 'rpx; width: ' + (illustration.galleryHeight / illustration.aspectRatio) + 'rpx;' : ''}}" data-id="{{illustration.id}}" data-url="{{illustration.url}}" bindload="onReadingImageLoad" />
+                    <image catchtouchstart="cancelReaderSwipe" src="{{illustration.url}}" mode="{{imageGallerySections[section.id] ? 'aspectFit' : 'widthFix'}}" style="{{imageGallerySections[section.id] ? 'height: ' + illustration.galleryHeight + 'rpx; width: ' + (illustration.galleryHeight / illustration.aspectRatio) + 'rpx;' : ''}}" data-id="{{illustration.id}}" data-url="{{illustration.url}}" bindload="onReadingImageLoad" />
                     <text wx:if="{{illustration.caption}}">{{illustration.caption}}</text>
                   </view>
                 </block>
@@ -273,7 +273,7 @@
         <view wx:else class="chapter-content"><template is="readerHighlightedText" data="{{text: chapter.content, active: readerChapterIndex === readerHighlightChapterIndex && readerHighlightSectionId === '', before: readerHighlightBefore, current: readerHighlightCurrent, after: readerHighlightAfter}}" /></view>
         <block wx:for="{{shareImages}}" wx:key="id" wx:for-item="illustration">
           <view wx:if="{{illustration.chapterId === chapter.chapterId && !illustration.sectionId && illustration.placement === 'chapter_inline'}}" class="share-reading-image">
-            <image src="{{illustration.url}}" mode="widthFix" />
+            <image catchtouchstart="cancelReaderSwipe" src="{{illustration.url}}" mode="widthFix" />
             <text wx:if="{{illustration.caption}}">{{illustration.caption}}</text>
           </view>
         </block>
@@ -285,7 +285,7 @@
       </view>
     </view>
 
-    <view wx:else id="reader-body" class="reader-section ui-card">
+    <view wx:else id="reader-body" class="reader-section ui-card" bindtouchstart="onReaderTouchStart" bindtouchmove="onReaderTouchMove" bindtouchend="onReaderTouchEnd" bindtouchcancel="cancelReaderSwipe" bindlongpress="cancelReaderSwipe">
       <text class="section-label">正文</text>
       <view class="book-content"><template is="readerHighlightedText" data="{{text: bookContent, active: readerChapterIndex === readerHighlightChapterIndex && readerHighlightSectionId === '', before: readerHighlightBefore, current: readerHighlightCurrent, after: readerHighlightAfter}}" /></view>
     </view>
