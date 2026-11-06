@@ -263,7 +263,14 @@ async def synchronize_book_output_title(
 
 
 def _ordered_source_refs(refs: list[dict]) -> list[dict]:
-    return sorted(refs, key=source_ref_utterance_id)
+    # Legacy snapshots omit the display fields added by chapter_snapshot.
+    # Apply their known defaults without rewriting history or ignoring changes
+    # to source identity, transcript version, text, or explicit display values.
+    return sorted(({
+        **ref,
+        "summary": ref.get("summary") or "",
+        "representative_quote": ref.get("representative_quote") or ref.get("quote", ""),
+    } for ref in refs), key=source_ref_utterance_id)
 
 
 def _output_stale_chapter_titles(

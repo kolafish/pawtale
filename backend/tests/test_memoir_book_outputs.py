@@ -1704,6 +1704,11 @@ async def test_book_only_edit_remains_exportable_until_its_sources_change(client
     version = await _seed_confirmed_book_output(test_db, project_id=pid)
     saved = json.loads(json.dumps(version.chapter_snapshot_json))
     saved[0].update(content="家庭校订后的段落。", sections=[], source_refs=list(reversed(saved[0]["source_refs"])))
+    # Older book snapshots predate these derived display fields. Their omission
+    # must not make an unchanged, manually edited manuscript stale.
+    for ref in saved[0]["source_refs"]:
+        ref.pop("summary", None)
+        ref.pop("representative_quote", None)
     version.chapter_snapshot_json = saved
     version.content = saved[0]["content"]
     version.created_by = "user"
@@ -1725,6 +1730,27 @@ async def test_book_only_edit_remains_exportable_until_its_sources_change(client
     ref.include_in_book = False
     await test_db.commit()
     assert (await client.get(path)).json()["stale_chapter_titles"] == [chapters[0].title]
+
+
+@pytest.mark.parametrize("field", ["quote", "transcript_version_id", "summary", "representative_quote"])
+async def test_legacy_book_source_comparison_still_detects_changed_values(client, test_db, field):
+    pid = await ensure_mobile_memoir_project(client)
+    plan, chapters = await _create_confirmed_book_plan(test_db, project_id=pid)
+    await _add_output_source_link(test_db, project_id=pid, plan_id=plan.id,
+        chapter_id=chapters[0].id, utterance_id="source-a", quote="已收录的口述")
+    version = await _seed_confirmed_book_output(test_db, project_id=pid)
+    saved = json.loads(json.dumps(version.chapter_snapshot_json))
+    ref = saved[0]["source_refs"][0]
+    ref.pop("summary", None)
+    ref.pop("representative_quote", None)
+    ref[field] = "先前保存的不同内容或版本"
+    version.chapter_snapshot_json = saved
+    await test_db.commit()
+
+    response = await client.get(f"/api/mobile/memoir/projects/{pid}/book-output")
+    assert response.status_code == 200
+    assert response.json()["is_stale"] is True
+    assert response.json()["stale_chapter_titles"] == [chapters[0].title]
 
 
 async def test_mobile_memoir_book_output_detects_reordered_chapters(client, test_db):
