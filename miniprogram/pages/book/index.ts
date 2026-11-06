@@ -102,6 +102,7 @@ type DatasetEvent = PageDatasetEvent<BookDataset>;
 
 type BookPageData = BookHomeData & ReadingShareData & {
   pageClass: string;
+  userId: string;
   loadError: string;
   showingCachedBook: boolean;
   bookActivityNotice: string;
@@ -126,6 +127,7 @@ definePage<BookPageData>()({
 
   data: {
     pageClass: "book-page",
+    userId: "",
     showingCachedBook: false,
     ...INITIAL_READING_SHARE_DATA,
     bookActivityNotice: "",
@@ -237,9 +239,12 @@ definePage<BookPageData>()({
         this.bookShareToken = "";
         this.setData(guestBookData());
         this.setData({
+          userId: "",
           showingCachedBook: false,
           bookActivityNotice: "",
           bookPendingMaterialCount: 0,
+          bookShareLikeCount: 0,
+          bookShareLikers: [],
           bookShareActive: false,
           bookShareBusy: false,
           bookShareImageUrl: "",
@@ -268,9 +273,11 @@ definePage<BookPageData>()({
     const identity = snapshot.identity;
     const projectId = identity.active_project_id;
     const projectTitle = identity.active_project?.title || "尚未创建回忆录";
-    if (projectId !== this.data.projectId) {
+    if (projectId !== this.data.projectId || identity.id !== this.data.userId) {
       this.bookShareToken = "";
       this.setData({
+        bookShareLikeCount: 0,
+        bookShareLikers: [],
         bookShareActive: false,
         bookShareBusy: false,
         bookShareImageUrl: "",
@@ -287,6 +294,7 @@ definePage<BookPageData>()({
       needsLogin: false,
       projectId,
       projectTitle,
+      userId: identity.id,
       blockingIssueCount: snapshot.blocking_issue_count || 0,
     });
     this.applyPlan(snapshot.plan || null, snapshot.drafts_by_chapter_id || {});

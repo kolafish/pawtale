@@ -16,14 +16,18 @@ const {
 
 const CODE = "0123456789abcdef0123";
 
-test("book and chapter share panels receive the full liker list", () => {
-  for (const page of ["book", "chapter-workspace"]) {
-    const template = fs.readFileSync(path.join(__dirname, `../pages/${page}/index.wxml`), "utf8");
-    const binding = template.match(/<template[^>]*\bis="readingShareActions"\s+data="([^"]+)"/);
-    assert.ok(binding, `${page} must render the reading share panel`);
-    assert.match(binding[1], /\bbookShareLikeCount\b/, `${page} must pass the like count`);
-    assert.match(binding[1], /\bbookShareLikers\b/, `${page} must pass the full liker list`);
+test("book's collapsed inbox and chapter share panel receive the liker list", () => {
+  const book = fs.readFileSync(path.join(__dirname, "../pages/book/index.wxml"), "utf8");
+  const inbox = book.match(/<share-response-inbox\b[^>]+>/)?.[0];
+  assert.ok(inbox, "book reuses the family response inbox");
+  for (const [prop, field] of [["project-id", "projectId"], ["user-id", "userId"], ["like-count", "bookShareLikeCount"], ["likers", "bookShareLikers"]]) {
+    assert.ok(inbox.includes(`${prop}="{{${field}}}"`), `book binds ${prop}`);
   }
+  const chapter = fs.readFileSync(path.join(__dirname, "../pages/chapter-workspace/index.wxml"), "utf8");
+  const binding = chapter.match(/<template[^>]*\bis="readingShareActions"\s+data="([^"]+)"/);
+  assert.ok(binding);
+  assert.match(binding[1], /\bbookShareLikeCount\b/);
+  assert.match(binding[1], /\bbookShareLikers\b/);
 });
 
 function loadPlayer({ likeApi = {}, loginWithWeChat = unmockedAsync("loginWithWeChat"), reading = false } = {}) {

@@ -1,6 +1,7 @@
 {
   "navigationBarTitleText": "书稿",
   "usingComponents": {
+    "share-response-inbox": "/components/share-response-inbox/index",
     "book-tts-player": "/components/book-tts-player/index"
   }
 }

@@ -27,7 +27,7 @@
 .progress-main {
   position: relative;
   min-height: 148rpx;
-  padding: 24rpx 226rpx 16rpx 30rpx;
+  padding: 24rpx 150rpx 16rpx 30rpx;
   background: linear-gradient(105deg, rgba(255, 253, 250, 0.98) 0%, rgba(255, 253, 250, 0.91) 58%, rgba(245, 230, 224, 0.38) 100%);
 }
 .progress-title-row {
@@ -42,8 +42,8 @@
   position: absolute;
   right: -16rpx;
   bottom: 4rpx;
-  width: 360rpx;
-  height: 144rpx;
+  width: 210rpx;
+  height: 116rpx;
   opacity: 0.94;
 }
 .status-title {
@@ -584,13 +584,11 @@
   padding: 24rpx 24rpx 112rpx;
 }
 .book-page.large-text .progress-main {
-  min-height: 178rpx;
-  padding-right: 226rpx;
+  min-height: 0;
+  padding-right: 30rpx;
 }
 .book-page.large-text .book-header-illustration {
-  right: -24rpx;
-  width: 336rpx;
-  opacity: 0.78;
+  display: none;
 }
 .book-page.large-text .status-title {
   font-size: 46rpx;
@@ -658,11 +656,12 @@
   padding: 0 30rpx 20rpx;
 }
 .book-activity-notice {
-  min-height: 44px;
+  min-height: var(--ui-hit-size);
   display: flex;
   align-items: center;
   gap: 12rpx;
   padding: 14rpx 30rpx;
+  background: var(--ui-warning-surface);
   border-top: 1rpx solid var(--ui-divider);
   color: var(--ui-warning-text);
   font-size: var(--ui-font-meta);
@@ -772,4 +771,12 @@
   min-height: 44px;
   background: transparent;
   box-shadow: none;
+}
+
+.book-page .has-reader .ui-share-more { margin-left: 0; }
+.book-page .has-reader .hero-reading-action { flex: 0 0 auto; max-width: 100%; }
+.book-page .has-reader .hero-reading-action text:first-child { white-space: nowrap; }
+@media (max-width: 360px) {
+  .book-page .progress-main { min-height: 0; padding-right: 30rpx; }
+  .book-page .book-header-illustration { display: none; }
 }

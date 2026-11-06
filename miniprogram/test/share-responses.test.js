@@ -333,3 +333,34 @@ test("the author can feature an excerpt response in its own chapter and unfeatur
   await ctx.toggleFeatured();
   assert.deepEqual(changes, [["r", true], ["r", false]]);
 });
+
+
+test('book likes and responses remain collapsed after loading, and folding stops the original audio', async () => {
+  const row = { id: 'reply', display_name: '家人', target_title: '童年的家', content: '我也记得', read_at: null };
+  mockModule('../services/share-responses.ts', {
+    listShareResponses: async () => ({ items: [row], unread_count: 1, next_before_id: null }),
+    readShareResponse: async () => ({ ...row, read_at: '2026-11-06T08:00:00Z' }),
+  });
+  let stopped = 0;
+  mockModule('../services/audio-playback.ts', { AudioPlaybackController: class { stop() { stopped += 1; } } });
+  const { component } = loadComponentModule('../components/share-response-inbox/index.ts');
+  const ctx = componentContext(component, { projectId: 'p', userId: 'owner', showLikes: true, likeCount: 6, likers: [{ key: '0', name: '家人', url: '' }] });
+  await ctx.load();
+  assert.equal(ctx.data.open, false);
+  assert.equal(ctx.data.unread, 1);
+  ctx.toggle();
+  assert.equal(ctx.data.open, true);
+  await ctx.select({ currentTarget: { dataset: { id: 'reply' } } });
+  assert.equal(ctx.data.selected.content, '我也记得');
+  assert.equal(ctx.data.unread, 0);
+  ctx.data.audioPlaying = true;
+  const beforeFold = stopped;
+  ctx.toggle();
+  assert.equal(stopped, beforeFold + 1);
+  assert.equal(ctx.data.open, false);
+  assert.equal(ctx.data.audioPlaying, false);
+  assert.equal(ctx.data.selected, null);
+  ctx.toggle();
+  assert.equal(ctx.data.items.length, 1);
+  assert.equal(ctx.data.selected, null);
+});
