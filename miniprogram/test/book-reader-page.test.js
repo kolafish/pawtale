@@ -1482,3 +1482,89 @@ for (const shared of [false, true]) test(`${shared ? "shared book" : "owner chap
   assert.equal(context.data.shareImages[0].placement, "chapter_inline");
   assert.ok(context.data.shareImages[0].url);
 });
+
+
+function readerTouch(x, y, timeStamp, ended = false, identifier = 1) {
+  const point = { identifier, clientX: x, clientY: y };
+  return { timeStamp, touches: ended ? [] : [point], changedTouches: [point] };
+}
+function swipeReader(context, fromX, toX) {
+  context.onReaderTouchStart(readerTouch(fromX, 240, 100));
+  context.onReaderTouchMove(readerTouch(toX, 248, 400));
+  context.onReaderTouchEnd(readerTouch(toX, 248, 700, true));
+}
+
+for (const shared of [false, true]) test(`${shared ? "shared" : "owner"} whole book swipes chapters through existing navigation`, async () => {
+  const scrolls = [];
+  global.wx = { getStorageSync: () => "", setStorageSync() {}, pageScrollTo: value => scrolls.push(value) };
+  const { page } = loadBookReaderPage({
+    readMemoirBookShare: async () => sampleFinishedBook(),
+    readMemoirShareLikes: async () => ({ count: 0, likers: [], liked: false, can_like: true }),
+  });
+  const context = pageContext(page);
+  await context.onLoad(shared ? { shareToken: "family-token" } : { projectId: "project/1" });
+  scrolls.length = 0;
+  context.readingScrollTop = 400;
+  context.data.playingTarget = "book";
+  swipeReader(context, 260, 100);
+  assert.equal(context.data.readerChapterIndex, 1);
+  assert.equal(context.data.bookPreviewChapters[0].chapterId, context.bookChapters[1].chapterId);
+  assert.equal(context.data.playingTarget, "");
+  assert.equal(context.readingScrollTop, 0);
+  assert.equal(scrolls.at(-1).selector, "#reader-body");
+  // End-of-book gestures do not loop or interrupt an ongoing reading session.
+  context.data.playingTarget = "book";
+  swipeReader(context, 260, 100);
+  assert.equal(context.data.readerChapterIndex, 1);
+  assert.equal(context.data.playingTarget, "book");
+  assert.equal(scrolls.length, 1);
+  swipeReader(context, 100, 260);
+  assert.equal(context.data.readerChapterIndex, 0);
+  swipeReader(context, 100, 260);
+  assert.equal(context.data.readerChapterIndex, 0);
+  assert.equal(scrolls.length, 2);
+});
+
+test("reading scrolls, selections, edge gestures and multi-touch do not turn chapters", () => {
+  const { page } = loadBookReaderPage();
+  const context = pageContext(page, { readerChapterTotal: 3 });
+  const turns = [];
+  context.showReaderChapter = index => turns.push(index);
+  const start = () => context.onReaderTouchStart(readerTouch(220, 240, 100));
+  const end = () => context.onReaderTouchEnd(readerTouch(60, 245, 400, true));
+  const cases = [
+    () => { start(); context.onReaderTouchEnd(readerTouch(208, 243, 200, true)); }, // tap jitter
+    () => { start(); context.onReaderTouchEnd(readerTouch(60, 370, 400, true)); }, // diagonal
+    () => { start(); context.onReaderTouchMove(readerTouch(218, 280, 200)); end(); }, // vertical, then sideways
+    () => { start(); context.cancelReaderSwipe(); end(); }, // touchcancel / longpress / image gesture
+    () => { start(); context.onReaderTouchEnd(readerTouch(60, 245, 1500, true)); }, // held text
+    () => { context.onReaderTouchStart(readerTouch(10, 240, 100)); context.onReaderTouchEnd(readerTouch(180, 240, 400, true)); },
+    () => { start(); const multi = readerTouch(120, 245, 250); multi.touches.push({ identifier: 2, clientX: 250, clientY: 250 }); context.onReaderTouchMove(multi); end(); },
+    () => { start(); context.onReaderTouchEnd(readerTouch(60, 245, 400, true, 2)); },
+    () => { start(); context.onHide(); end(); },
+  ];
+  for (const gesture of cases) { gesture(); assert.deepEqual(turns, []); }
+  swipeReader(context, 260, 100);
+  assert.deepEqual(turns, [1], "a new intentional swipe still works after cancellation");
+});
+
+test("chapter swipes are disabled outside ready whole-book reading and discard stale touches", () => {
+  const { page } = loadBookReaderPage();
+  const context = pageContext(page, { readerChapterTotal: 3 });
+  const turns = [];
+  context.showReaderChapter = index => turns.push(index);
+  const base = { ...context.data };
+  for (const patch of [{ loading: true }, { error: "读取失败" }, { readerMode: "chapter" },
+    { readerChapterTotal: 1 }, ...["select", "compose", "preview", "shared"].map(excerptMode => ({ excerptMode }))]) {
+    context.data = { ...base, ...patch };
+    swipeReader(context, 260, 100);
+    assert.deepEqual(turns, []);
+  }
+  for (const invalidate of [() => { context.data.readerChapterIndex = 1; }, () => { context.readerAudioVersionId = "new"; }, () => { context.data.loading = true; }]) {
+    context.data = { ...base };
+    context.onReaderTouchStart(readerTouch(260, 240, 100));
+    invalidate();
+    context.onReaderTouchEnd(readerTouch(100, 245, 400, true));
+    assert.deepEqual(turns, []);
+  }
+});
