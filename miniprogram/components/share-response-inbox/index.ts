@@ -1,6 +1,7 @@
 import { getMemoirBookPlan } from "../../services/memoir-book-api";
 import { featureShareResponse, adoptShareResponse, listShareResponses, readShareResponse, downloadShareResponseAudio, type ShareResponseItem } from "../../services/share-responses";
 
+import type { ShareLikerView } from "../../services/share-likes";
 import { AudioPlaybackController } from "../../services/audio-playback";
 const runtimes = new WeakMap<object, { generation: number; playback: AudioPlaybackController }>();
 function runtime(owner: object) {
@@ -11,7 +12,11 @@ function runtime(owner: object) {
 
 Component({
   options: { addGlobalClass: true },
-  properties: { projectId: { type: String, value: "" }, userId: { type: String, value: "" } },
+  properties: {
+    projectId: { type: String, value: "" }, userId: { type: String, value: "" },
+    showLikes: { type: Boolean, value: false }, likeCount: { type: Number, value: 0 },
+    likers: { type: Array, value: [] as ShareLikerView[] },
+  },
   data: { chapterChoices: [] as { id: string; title: string }[], items: [] as ShareResponseItem[], unread: 0, next: "", open: false, selected: null as ShareResponseItem | null, busy: false, error: "", audioPlaying: false },
   observers: { "projectId,userId"() {
     runtime(this).generation += 1; runtime(this).playback.stop();

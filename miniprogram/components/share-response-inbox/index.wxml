@@ -1,5 +1,21 @@
-<view wx:if="{{items.length || error}}" class="response-inbox">
-  <button class="ui-button ui-share-more" bindtap="toggle">家人回应{{unread ? ' · ' + unread + ' 条未读' : ''}} ›</button>
+<import src="../../templates/share-likes.wxml" />
+<view wx:if="{{showLikes || items.length || error}}" class="response-inbox {{showLikes ? 'with-likes' : ''}}">
+  <button wx:if="{{showLikes}}" class="response-summary ui-button" bindtap="toggle" aria-expanded="{{open}}" aria-label="{{likeCount}} 位家人点赞，家人留言{{unread ? '，' + unread + ' 条未读' : ''}}，{{open ? '收起' : '展开'}}">
+    <view wx:if="{{likers.length}}" class="response-avatars" aria-hidden="true">
+      <block wx:for="{{likers}}" wx:key="key">
+        <block wx:if="{{index < 3}}">
+          <image wx:if="{{item.url}}" class="response-avatar" src="{{item.url}}" mode="aspectFill" />
+          <text wx:else class="response-avatar is-placeholder">家</text>
+        </block>
+      </block>
+    </view>
+    <view class="response-summary-copy">
+      <text wx:if="{{likeCount}}">{{likeCount}} 位家人点赞</text>
+      <text>家人留言{{unread ? ' · ' + unread + ' 条未读' : ''}}</text>
+    </view>
+    <text class="response-disclosure" aria-hidden="true">{{open ? '⌃' : '⌄'}}</text>
+  </button>
+  <button wx:else class="ui-button ui-share-more" bindtap="toggle" aria-expanded="{{open}}">家人回应{{unread ? ' · ' + unread + ' 条未读' : ''}} {{open ? '⌃' : '⌄'}}</button>
   <view wx:if="{{open}}">
     <view wx:if="{{selected}}" class="response-detail">
       <text class="response-person">{{selected.display_name}} · {{selected.target_title}}</text>
@@ -18,9 +34,13 @@
       <button class="ui-button ui-share-more" bindtap="back">返回回应列表</button>
     </view>
     <block wx:else>
+      <template wx:if="{{showLikes && likeCount}}" is="shareLikeList" data="{{count: likeCount, likers}}" />
+      <text wx:if="{{showLikes}}" class="response-list-title">家人留言</text>
+      <text wx:if="{{showLikes && busy && !items.length}}" class="response-hint">正在读取留言…</text>
+      <text wx:elif="{{showLikes && !error && !items.length}}" class="response-hint">还没有家人留言。家人可以在分享阅读页留下文字或语音。</text>
       <button wx:for="{{items}}" wx:key="id" data-id="{{item.id}}" class="response-row ui-button" bindtap="select">{{item.display_name}} · {{item.target_title}}{{item.featured_at ? ' · 已精选' : ''}}{{item.adopted_at ? ' · 已收录' : ''}}</button>
       <button wx:if="{{next}}" class="ui-button ui-share-more" bindtap="loadMore" disabled="{{busy}}">查看更多回应</button>
     </block>
   </view>
-  <view wx:if="{{error}}" class="ui-error-banner">{{error}}<button class="ui-button ui-share-more" bindtap="retry">重新读取</button></view>
+  <view wx:if="{{error && (!showLikes || open)}}" class="ui-error-banner">{{error}}<button class="ui-button ui-share-more" bindtap="retry">重新读取</button></view>
 </view>

@@ -1,5 +1,24 @@
+@import "../../templates/share-likes.wxss";
 .response-inbox { margin: 24rpx 0; padding: 24rpx; border-radius: 28rpx; background: var(--ui-surface); }
 .response-person { display: block; font-size: var(--ui-font-caption); color: var(--ui-text-secondary); }
 .response-content { display: block; white-space: pre-wrap; line-height: 1.8; font-size: var(--ui-font-body); margin: 20rpx 0; }
 .response-hint { display: block; font-size: 26rpx; line-height: 1.7; color: var(--ui-text-secondary); margin-bottom: 20rpx; }
 .response-row { white-space: normal; text-align: left; font-size: var(--ui-font-caption); padding: 20rpx 0; }
+
+.response-inbox.with-likes { margin: 24rpx 0 0; padding: 16rpx 0 0; border-top: 1rpx solid var(--ui-divider); border-radius: 0; background: transparent; }
+.response-summary { width: 100%; min-height: var(--ui-hit-size); padding: 8rpx 0; gap: 16rpx; justify-content: flex-start; background: transparent; color: var(--ui-text-secondary); text-align: left; font-size: var(--ui-font-meta); font-weight: 400; line-height: 1.5; }
+.response-avatars { display: flex; flex-shrink: 0; padding-left: 8rpx; }
+.response-avatar { display: block; width: 48rpx; height: 48rpx; margin-left: -8rpx; border: 2rpx solid var(--ui-surface); border-radius: 50%; background: var(--ui-accent-surface); color: var(--ui-accent-strong); font-size: 24rpx; line-height: 44rpx; text-align: center; }
+.response-summary-copy { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 2rpx 16rpx; }
+.response-summary-copy text { overflow-wrap: anywhere; }
+.response-disclosure { flex-shrink: 0; }
+.response-list-title { display: block; margin: 24rpx 0 12rpx; font-size: var(--ui-font-body); font-weight: 600; }
+.with-likes .share-like-list { margin-top: 20rpx; }
+.with-likes .share-like-list-title { color: var(--ui-text-secondary); font-weight: 400; }
+.with-likes .share-like-list-people { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20rpx; }
+.with-likes .share-like-list-person { width: auto; min-width: 0; align-items: flex-start; flex-direction: row; gap: 12rpx; }
+.with-likes .share-like-list-avatar { flex-shrink: 0; width: 56rpx; height: 56rpx; font-size: 28rpx; line-height: 56rpx; }
+.with-likes .share-like-list-name { max-width: none; white-space: normal; overflow: visible; overflow-wrap: anywhere; text-align: left; }
+.with-likes .response-hint { font-size: var(--ui-font-caption); }
+.with-likes .response-row { background: transparent; color: var(--ui-text-primary); width: 100%; min-height: var(--ui-hit-size); justify-content: flex-start; overflow-wrap: anywhere; }
+.with-likes .response-detail { margin-top: 20rpx; }
