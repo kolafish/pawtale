@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass
 from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta, timezone
@@ -386,16 +387,17 @@ def _add_illustrated_cover_page(
             font_name=font_name,
             char_spacing=1.3 if navy else 0.8,
         )
-    builder.add_centered_at(
-        _prepared_by_credit(prepared_by),
-        y=credit_y,
-        font_size=layout.small_font_size + (2 if navy else 1),
-        line_height=layout.line_height,
-        max_units=layout.max_line_units,
-        color=style.text,
-        font_name=font_name,
-        char_spacing=1.3 if navy else 0.8,
-    )
+    if not layout.mirror_body_pages:
+        builder.add_centered_at(
+            _prepared_by_credit(prepared_by),
+            y=credit_y,
+            font_size=layout.small_font_size + (2 if navy else 1),
+            line_height=layout.line_height,
+            max_units=layout.max_line_units,
+            color=style.text,
+            font_name=font_name,
+            char_spacing=1.3 if navy else 0.8,
+        )
     _add_illustrated_separator(builder, style=style, y=layout.margin_bottom + (2 if navy else -7), width=92 if navy else 86)
     builder.add_centered_at(
         _today_date_text()[:4],
@@ -455,7 +457,7 @@ def _add_artwork_cover_page(
         title_lines = _wrap_pdf_line(title, title_units)
         if len(title_lines) * (title_size + 10) <= 185 or title_size <= 18:
             break
-        title_size -= 2
+        title_size = max(18, title_size - 2)
     title_next_y = builder.add_centered_at(
         title,
         y=title_y,
@@ -528,14 +530,15 @@ def _add_cover_credits(
             color=style.text,
             font_name=font_name,
         )
-    builder.add_centered_at(
-        _prepared_by_credit(prepared_by),
-        y=credit_y,
-        font_size=layout.small_font_size + 1,
-        line_height=layout.line_height,
-        color=style.text,
-        font_name=font_name,
-    )
+    if not layout.mirror_body_pages:
+        builder.add_centered_at(
+            _prepared_by_credit(prepared_by),
+            y=credit_y,
+            font_size=layout.small_font_size + 1,
+            line_height=layout.line_height,
+            color=style.text,
+            font_name=font_name,
+        )
     builder.add_centered_at(
         _today_date_text()[:4],
         y=layout.margin_bottom + 22,
@@ -764,7 +767,7 @@ def _add_full_bleed_photo_cover_page(
         char_spacing=char_spacing,
     )
     credit_size = layout.small_font_size + 1
-    credit_parts = [part for part in (f"口述：{narrator_name}" if narrator_name else "", _prepared_by_credit(prepared_by)) if part]
+    credit_parts = [part for part in (f"口述：{narrator_name}" if narrator_name else "", _prepared_by_credit(prepared_by) if not layout.mirror_body_pages else "") if part]
     one_line = "　".join(credit_parts)
     fits_one_line = _text_units(one_line) * credit_size <= layout.page_width - 2 * 48
     credit_lines = [one_line] if fits_one_line else credit_parts
@@ -882,13 +885,14 @@ def _add_preset_cover_page(
             max_units=builder.layout.max_line_units,
             spacing_after=2,
         )
-    builder.add_centered(
-        _prepared_by_credit(prepared_by),
-        font_size=builder.layout.small_font_size,
-        line_height=builder.layout.line_height,
-        max_units=builder.layout.max_line_units,
-        spacing_after=2,
-    )
+    if not builder.layout.mirror_body_pages:
+        builder.add_centered(
+            _prepared_by_credit(prepared_by),
+            font_size=builder.layout.small_font_size,
+            line_height=builder.layout.line_height,
+            max_units=builder.layout.max_line_units,
+            spacing_after=2,
+        )
     builder.add_centered(
         _today_date_text()[:4],
         font_size=builder.layout.small_font_size,
@@ -1053,25 +1057,27 @@ def _add_table_of_contents(
     if not entries:
         builder.add_text("暂无章节。")
         return
-    for entry in entries:
+    for entry_index, entry in enumerate(entries):
+        if builder.layout.mirror_body_pages:
+            if entry_index:
+                builder.y -= 6
+            # Keep a chapter label with at least its first section row.
+            builder._ensure_space_height(builder.layout.font_size + 5 + (16 if entry.section_titles else 0))
         builder.add_toc_row(
             label=_toc_line(entry, builder.layout) if entry.page_number is None else f"第{_chinese_number(entry.index)}章　{entry.title}",
             page_text=str(entry.page_number) if entry.page_number is not None else "",
             target_anchor=entry.anchor if entry.page_number is not None else None,
             font_name=PDF_SERIF_BOLD_FONT_NAME,
         )
-        for section_index, section_title in enumerate(
-            () if builder.layout.reading_edition else entry.section_titles,
-            start=1,
-        ):
+        for section_title in (() if builder.layout.reading_edition else entry.section_titles):
             builder.add_toc_row(
-                label=f"{entry.index}.{section_index}　{section_title}",
+                label=section_title,
                 page_text="",
                 target_anchor=(
                     entry.anchor if entry.page_number is not None else None
                 ),
                 indent=18,
-                font_size=max(builder.layout.small_font_size, builder.layout.font_size - 2),
+                font_size=11 if builder.layout.mirror_body_pages else max(builder.layout.small_font_size, builder.layout.font_size - 2),
             )
 
 
@@ -1508,10 +1514,29 @@ def _add_back_matter(builder: PDFBookBuilder, back_matter: dict[str, Any], *, in
     _add_appendix_record_page(builder, appendix_sections)
 
 
-def _watercolor_back_cover_quote_lines(quote: str, *, max_units: int) -> list[str]:
+def _watercolor_back_cover_quote_lines(quote: str, *, max_units: int, balanced: bool = False) -> list[str]:
     cleaned = quote.strip().strip("“”\"'「」")
     if not cleaned:
         return ["愿这些记忆被家人慢慢翻看。"]
+    if balanced:
+        # Choose a balanced measure without changing the narrator's words.
+        clauses = [part for part in re.split(r"(?<=[，。；！？])", cleaned) if part]
+        candidates = []
+        for width in range(max(6, math.ceil(_text_units(cleaned) / 4)), max_units + 1):
+            lines = []
+            for clause in clauses:
+                for part in _wrap_pdf_line(clause, width, avoid_single_char_last_line=True):
+                    if lines and _text_units(lines[-1] + part) <= width:
+                        lines[-1] += part
+                    else:
+                        lines.append(part)
+            if 3 <= len(lines) <= 4:
+                candidates.append(lines)
+        if candidates:
+            return min(candidates, key=lambda lines: (
+                sum(1 for line in lines[:-1] if line[-1] not in "，。；！？"),
+                max(_text_units(line) for line in lines) - min(_text_units(line) for line in lines),
+            ))
     if "，" in cleaned:
         parts = cleaned.split("，")
         lines = [
@@ -1578,7 +1603,7 @@ def _add_illustrated_back_cover(builder: PDFBookBuilder, *, quote: str, style: P
     if not navy:
         _add_watercolor_cover_label(builder, style=style, y=layout.page_height - 108)
     quote_next_y = layout.page_height - (154 if navy else 214)
-    for line in _watercolor_back_cover_quote_lines(quote, max_units=max(13, layout.max_line_units - 10)):
+    for line in _watercolor_back_cover_quote_lines(quote, max_units=max(13, layout.max_line_units - 10), balanced=layout.mirror_body_pages):
         quote_next_y = builder.add_centered_at(
             line,
             y=quote_next_y,
@@ -1607,7 +1632,7 @@ def _add_artwork_back_cover(
     )
     layout = builder.layout
     quote_lines = _watercolor_back_cover_quote_lines(
-        quote, max_units=max(14, layout.max_line_units - 4)
+        quote, max_units=max(14, layout.max_line_units - 4), balanced=layout.mirror_body_pages
     )
     if len(quote_lines) > 10:
         quote_lines = _wrap_pdf_line(
@@ -1675,13 +1700,17 @@ def _add_back_cover(builder: PDFBookBuilder, *, quote: str, cover_style: str) ->
     )
     builder.add_spacer(6)
     if quote:
-        builder.add_centered(
-            f"“{quote}”",
-            font_size=builder.layout.font_size + 1,
-            line_height=builder.layout.line_height + 4,
-            max_units=max(10, builder.layout.max_line_units - 4),
-            spacing_after=28,
+        lines = (
+            _watercolor_back_cover_quote_lines(f"“{quote}”", max_units=21, balanced=True)
+            if builder.layout.mirror_body_pages else [f"“{quote}”"]
         )
+        for line in lines:
+            builder.add_centered(
+                line,
+                font_size=builder.layout.font_size + 1,
+                line_height=builder.layout.line_height + 4,
+                max_units=max(10, builder.layout.max_line_units - 4),
+            )
     _add_back_cover_brand_signature(builder, style=style)
 
 

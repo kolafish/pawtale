@@ -444,8 +444,8 @@ def test_long_new_template_headings_stay_within_reading_and_print_margins():
                 if command.text in long_title and command.font_size >= 18
             ]
             assert "".join(command.text for command in cover_title_lines) == long_title
-            credit = _text_command(pages[0], "家人整理")
-            assert min(command.y for command in cover_title_lines) > credit.y + 45
+            credit_y = layout.margin_bottom + 72 if layout.mirror_body_pages else _text_command(pages[0], "家人整理").y
+            assert min(command.y for command in cover_title_lines) > credit_y + 45
             for command in cover_title_lines:
                 font_name = command.font_name or PDF_SERIF_FONT_NAME
                 text_width = pdfmetrics.stringWidth(command.text, font_name, command.font_size)
@@ -1007,7 +1007,7 @@ def test_section_heading_keeps_body_start_on_the_same_page(template):
     builder = PDFBookBuilder(title="分页回归", layout=layout)
     builder.new_page("测试章节", body_numbering=True)
     builder.add_text("前一段正文")
-    builder.y = layout.margin_bottom + 100
+    builder.y = layout.margin_bottom + 3 * layout.line_height
     heading = "童年院落里的微光与后来漫长岁月回忆"
     body = "这一段讲述只用于分页测试，标题之后至少保留两行正文，阅读时不必翻页寻找开头。"
 
@@ -1028,7 +1028,7 @@ def test_pdf_heading_and_toc_do_not_leave_a_single_character_last_line():
     )
     builder = PDFBookBuilder(title="换行回归", layout=layout)
     builder.new_page("正文", body_numbering=True)
-    heading = "童年院落里的微光与后来漫长的岁月里"
+    heading = "童年院落里的微光与后来漫长的岁月里" * 2
     builder.add_section_heading(heading)
     heading_lines = [command.text for command in builder.current_page.commands]
 
@@ -1247,3 +1247,42 @@ def test_edited_book_export_relocates_images_by_material_source(tmp_path, monkey
     pages = _build_manuscript_pdf_pages(title="往事", content="", manuscript=resolved.model_dump(mode="json"),
                                       layout=PDF_LAYOUTS[MemoirBookOutputExportLayout.STANDARD])
     assert sum(image.path == image_path for page in pages for image in page.images) == 1
+
+
+@pytest.mark.parametrize("chapter_count", [5, 15])
+def test_print_contents_keep_all_sections_and_resolved_chapter_pages(chapter_count):
+    from copy import deepcopy
+
+    manuscript = _sample_manuscript("这些文字用来核对打印书的目录与正文。")
+    chapter = manuscript["chapters"][0]
+    manuscript["chapters"] = []
+    manuscript["table_of_contents"] = []
+    for index in range(1, chapter_count + 1):
+        item = deepcopy(chapter)
+        item.update(index=index, chapter_id=f"chapter-{index}", title=f"故乡往事与家人记忆{index}")
+        item["sections"] = [
+            {**chapter["sections"][0], "section_id": f"s-{index}-{part}", "title": f"村庄里的日子和后来的生活{index}-{part}"}
+            for part in range(1, 5)
+        ]
+        manuscript["chapters"].append(item)
+    layout = configured_pdf_layout(PDF_LAYOUTS[MemoirBookOutputExportLayout.LARGE_PRINT], template="modern_minimal")
+    pages = _build_manuscript_pdf_pages(title="目录校样", content="", manuscript=manuscript, layout=layout)
+    contents = [page for page in pages if page.section_title == "目录"]
+    assert len(contents) == 1 if chapter_count == 5 else len(contents) > 1
+    commands = [command for page in contents for command in page.commands]
+    for item in manuscript["chapters"]:
+        anchor = f"chapter-{item['index']}"
+        chapter_page = next(page for page in pages if page.anchor == anchor)
+        assert any(command.text == str(chapter_page.body_page_number) and command.target_anchor == anchor for command in commands)
+        for section in item["sections"]:
+            assert any(command.text == section["title"] and command.target_anchor == anchor for command in commands)
+    assert all(command.y >= layout.margin_bottom for command in commands)
+
+
+def test_print_back_cover_balances_short_quote_without_changing_words():
+    quote = "啥子事情不愁，不管你办啥子事情都不难。能够办，办得了，办得好。"
+    lines = book_output_export._watercolor_back_cover_quote_lines(quote, max_units=21, balanced=True)
+    assert 3 <= len(lines) <= 4
+    assert "".join(lines) == quote
+    assert all(len(line) > 2 for line in lines)
+    assert all(line[-1] in "，。；！？" for line in lines)

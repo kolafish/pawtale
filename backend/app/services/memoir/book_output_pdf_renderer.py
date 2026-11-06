@@ -7,6 +7,7 @@ from pathlib import Path
 from threading import Lock
 
 from PIL import Image, ImageOps
+from reportlab.lib.pagesizes import A5
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
@@ -56,8 +57,8 @@ class MemoirBookOutputExportLayout(StrEnum):
 
 @dataclass(frozen=True)
 class PDFLayout:
-    page_width: int
-    page_height: int
+    page_width: float
+    page_height: float
     font_size: int
     line_height: int
     margin_x: int
@@ -92,20 +93,22 @@ PDF_LAYOUTS = {
         reading_edition=True,
     ),
     MemoirBookOutputExportLayout.LARGE_PRINT: PDFLayout(
-        page_width=420,
-        page_height=595,
-        font_size=16,
-        line_height=26,
+        page_width=A5[0],
+        page_height=A5[1],
+        font_size=12,
+        line_height=19,
         margin_x=48,
-        margin_top=62,
-        margin_bottom=50,
-        title_font_size=26,
-        heading_font_size=20,
-        small_font_size=11,
-        max_line_units=20,
+        # Baseline inset includes the 12pt glyph height: visible top ~17mm.
+        margin_top=60,
+        margin_bottom=57,
+        title_font_size=22,
+        heading_font_size=15,
+        small_font_size=9,
+        max_line_units=25,
         filename_suffix="打印版",
         mirror_body_pages=True,
-        inner_margin_delta=10,
+        inner_margin_delta=6,
+        body_font_name=PDF_SERIF_FONT_NAME,
     ),
 }
 
@@ -141,17 +144,24 @@ def configured_pdf_layout(
     else:
         return base
 
+    # Screen template density must not enlarge or narrow the printed text block.
+    if base.mirror_body_pages:
+        font_delta = line_delta = margin_delta = 0
+        title_delta = heading_delta = small_delta = 0
+
     choices = custom_layout or {}
     font_adjustment = 2 if choices.get("font_scale") == "large" else 0
     font_delta += font_adjustment
-    line_delta += {"compact": -3, "relaxed": 5}.get(choices.get("line_spacing"), 0) + font_adjustment
-    margin_delta += {"narrow": -10, "wide": 12}.get(choices.get("page_margin"), 0)
+    line_adjustments = {"compact": -1, "relaxed": 2} if base.mirror_body_pages else {"compact": -3, "relaxed": 5}
+    margin_adjustments = {"wide": 6} if base.mirror_body_pages else {"narrow": -10, "wide": 12}
+    line_delta += line_adjustments.get(choices.get("line_spacing"), 0) + font_adjustment
+    margin_delta += margin_adjustments.get(choices.get("page_margin"), 0)
     title_delta += font_adjustment
     heading_delta += font_adjustment
     small_delta += font_adjustment
     body_font_name = {"serif": PDF_SERIF_FONT_NAME, "sans": PDF_SANS_FONT_NAME}.get(
         choices.get("font_family"),
-        PDF_SANS_FONT_NAME if template == "modern_minimal" else None,
+        PDF_SERIF_FONT_NAME if base.mirror_body_pages else (PDF_SANS_FONT_NAME if template == "modern_minimal" else None),
     )
     font_size = base.font_size + font_delta
     margin_x = base.margin_x + margin_delta
@@ -786,7 +796,8 @@ class PDFBookBuilder:
                     min_start_lines=2, keep_last_lines=2,
                     font_name=self.layout.body_font_name,
                 )
-            self.y -= max(3, self.layout.line_height // 5)
+            if not self.layout.mirror_body_pages:
+                self.y -= max(3, self.layout.line_height // 5)
         self.y -= spacing_after
 
     def add_quote(self, text: str, *, spacing_after: int = 0) -> None:
@@ -1019,7 +1030,7 @@ class PDFBookBuilder:
         font_name: str | None = None,
     ) -> None:
         font_size = font_size or self.layout.font_size
-        line_height = self.layout.line_height + 2
+        line_height = font_size + 5 if self.layout.mirror_body_pages else self.layout.line_height + 2
         label_x = self.layout.margin_x + indent
         page_x = (
             self.layout.page_width
@@ -1056,7 +1067,7 @@ class PDFBookBuilder:
                 leader_units = max(0, (page_x - leader_x - 6) / max(font_size, 1))
                 leaders = (
                     "." * max(2, int(leader_units / _char_units(".")))
-                    if leader_units > 2
+                    if leader_units > 2 and not self.layout.mirror_body_pages
                     else ""
                 )
                 if leaders:
@@ -1092,7 +1103,7 @@ def _pdf_page_commands(page: PDFPage, *, page_number: int, layout: PDFLayout) ->
     }.get(layout.manuscript_template, PDF_HEADER_TEXT)
     running_font = (
         PDF_SERIF_FONT_NAME
-        if layout.manuscript_template in {"heritage_classic", "warm_journal"}
+        if not layout.mirror_body_pages and layout.manuscript_template in {"heritage_classic", "warm_journal"}
         else PDF_SANS_FONT_NAME
     )
     if page.header_title:

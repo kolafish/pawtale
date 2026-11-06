@@ -97,7 +97,8 @@ def test_section_heading_stays_with_its_first_portrait(tmp_path, monkeypatch, ed
         custom_layout={"font_scale": "large", "line_spacing": "relaxed", "page_margin": "wide"} if long_heading else None,
     )
     builder = PDFBookBuilder(title="往事", layout=layout)
-    text = "那年我们沿着河边去学校，路上总有说不完的话。" * 15
+    # Enough prose to wrap this tall portrait at both screen and print density.
+    text = "那年我们沿着河边去学校，路上总有说不完的话。" * 30
     _add_chapters(builder, [{
         "title": "我的童年", "sections": [{"section_id": "s", "title": title, "content": text}],
         "illustrations": [{"storage_path": "portrait.jpg", "placement": "chapter_inline", "section_id": "s", "inline_position": "before"}],
