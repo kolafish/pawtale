@@ -1,3 +1,5 @@
+<page-meta page-style="--ui-navigation-height: {{navigationHeight || 0}}px;" />
+<brand-navigation title="{{navigationTitle || '做成图片或视频'}}" page-class="{{pageClass || homePageClass}}" bindlayout="onNavigationLayout" />
 <import src="../../templates/share-likes.wxml" />
 <import src="../../templates/video-playback.wxml" />
 <view class="ui-page-shell {{pageClass}}">

@@ -1,3 +1,5 @@
+<page-meta page-style="--ui-navigation-height: {{navigationHeight || 0}}px;" />
+<brand-navigation title="{{navigationTitle || '老余口述'}}" page-class="{{pageClass || homePageClass}}" bindlayout="onNavigationLayout" />
 <view class="ui-page-shell {{pageClass}}">
   <view class="brand-row">
     <image class="brand-icon" src="/assets/memoir-gramophone.png" mode="aspectFit" />

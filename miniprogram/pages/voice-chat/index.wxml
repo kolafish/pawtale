@@ -1,1 +1,3 @@
+<page-meta page-style="--ui-navigation-height: {{navigationHeight || 0}}px;" />
+<brand-navigation title="{{navigationTitle || '语音聊天'}}" page-class="{{pageClass || homePageClass}}" bindlayout="onNavigationLayout" />
 <voice-session id="voice-session" wx:if="{{entry}}" entry="{{entry}}" bindexit="exitSession" />

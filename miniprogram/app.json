@@ -27,7 +27,8 @@
     "navigationBarTitleText": "老余口述",
     "navigationBarBackgroundColor": "#F8F4EE",
     "navigationBarTextStyle": "black",
-    "backgroundColor": "#F5F1EA"
+    "backgroundColor": "#F5F1EA",
+    "navigationStyle": "custom"
   },
   "networkTimeout": {
     "request": 60000,
@@ -35,5 +36,8 @@
     "connectSocket": 60000
   },
   "style": "v2",
-  "sitemapLocation": "sitemap.json"
+  "sitemapLocation": "sitemap.json",
+  "usingComponents": {
+    "brand-navigation": "/components/brand-navigation/index"
+  }
 }

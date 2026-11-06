@@ -1,0 +1,70 @@
+:host { display: block; }
+.brand-navigation-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 30;
+  background: #f8f4ee;
+  color: var(--ui-text-primary, #302925);
+  box-sizing: border-box;
+}
+.brand-navigation-signature {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: var(--ui-page-inline, 32rpx);
+  box-sizing: border-box;
+}
+.brand-navigation-portrait-frame {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  border-radius: 50%;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px rgba(48, 41, 37, 0.7);
+}
+.brand-navigation-portrait { display: block; width: 100%; height: 100%; }
+.brand-navigation-wordmark { display: block; width: 92px; height: 29px; flex-shrink: 0; }
+.brand-navigation-context {
+  display: flex;
+  align-items: center;
+  min-height: 48px;
+  padding: 0 8px 4px;
+  box-sizing: border-box;
+}
+.brand-navigation-back, .brand-navigation-balance {
+  flex: 0 0 44px;
+  width: 44px;
+  min-height: 44px;
+}
+.brand-navigation-back {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: inherit;
+  transition: transform 150ms ease-out, background-color 150ms ease-out;
+}
+.brand-navigation-back::after { border: 0; }
+.brand-navigation-back-hover { background: #f2ece4; transform: scale(0.96); }
+.brand-navigation-chevron { width: 10px; height: 10px; border-left: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: translateX(2px) rotate(45deg); }
+.brand-navigation-home { position: relative; width: 13px; height: 12px; margin-top: 5px; border: 1.5px solid currentColor; border-top: 0; border-radius: 1px; }
+.brand-navigation-home::before { content: ""; position: absolute; width: 10px; height: 10px; top: -6px; left: 0; border-top: 1.5px solid currentColor; border-left: 1.5px solid currentColor; transform: rotate(45deg); }
+.brand-navigation-title {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 0;
+  font-family: var(--ui-font-editorial, serif);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.4;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.brand-navigation-large .brand-navigation-title { font-size: 21px; }
+.brand-navigation-large .brand-navigation-back, .brand-navigation-large .brand-navigation-balance { flex-basis: 48px; width: 48px; min-height: 48px; }

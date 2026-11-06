@@ -1,3 +1,5 @@
+<page-meta page-style="--ui-navigation-height: {{navigationHeight || 0}}px;" />
+<brand-navigation title="{{navigationTitle || '本章正文'}}" page-class="{{pageClass || homePageClass}}" bindlayout="onNavigationLayout" />
 <import src="../../templates/reading-share.wxml" />
 <import src="../../templates/share-likes.wxml" />
 <view class="ui-page-shell {{pageClass}}">

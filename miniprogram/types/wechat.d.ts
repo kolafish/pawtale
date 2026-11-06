@@ -2,6 +2,7 @@ declare const wx: WechatMiniprogram.Wx;
 
 interface MiniProgramPageStackItem {
   route?: string;
+  setData?(data: { navigationTitle: string }): void;
 }
 
 declare function getCurrentPages(): MiniProgramPageStackItem[];
@@ -595,7 +596,8 @@ declare namespace WechatMiniprogram {
     switchTab(option: NavigateOption): void;
     navigateBack(option?: NavigateBackOption): void;
     createSelectorQuery(): SelectorQuery;
-    getWindowInfo(): { pixelRatio: number };
+    getWindowInfo(): { pixelRatio: number; statusBarHeight: number; windowWidth: number };
+    getMenuButtonBoundingClientRect(): BoundingClientRectResult;
     pageScrollTo(option: { scrollTop?: number; selector?: string; offsetTop?: number; duration?: number }): void;
     showActionSheet(option: ActionSheetOption): void;
     showModal(option: ModalOption): void;

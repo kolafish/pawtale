@@ -153,7 +153,7 @@
 
 .reader-tts-shell {
   position: sticky;
-  top: 16rpx;
+  top: calc(var(--ui-navigation-height, 0px) + 16rpx);
   z-index: 4;
   margin-top: 24rpx;
 }

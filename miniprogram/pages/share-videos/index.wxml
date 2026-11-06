@@ -1,3 +1,5 @@
+<page-meta page-style="--ui-navigation-height: {{navigationHeight || 0}}px;" />
+<brand-navigation title="{{navigationTitle || '我的分享'}}" page-class="{{pageClass || homePageClass}}" bindlayout="onNavigationLayout" />
 <view class="ui-page-shell {{pageClass}}">
   <view class="ui-page-context-row">
     <text class="ui-page-context">我的回忆录</text>

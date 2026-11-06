@@ -1,3 +1,5 @@
+<page-meta page-style="--ui-navigation-height: {{navigationHeight || 0}}px;" />
+<brand-navigation title="{{navigationTitle || '成书阅读'}}" page-class="{{pageClass || homePageClass}}" bindlayout="onNavigationLayout" />
 <import src="../../templates/share-likes.wxml" />
 <template name="readerHighlightedText">
   <block wx:if="{{active}}">

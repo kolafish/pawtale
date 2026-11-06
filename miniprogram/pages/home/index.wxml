@@ -1,3 +1,5 @@
+<page-meta page-style="--ui-navigation-height: {{navigationHeight || 0}}px;" />
+<brand-navigation title="{{navigationTitle || ''}}" page-class="{{pageClass || homePageClass}}" home="{{true}}" bindlayout="onNavigationLayout" />
 <template name="memoirHomeCard">
     <view class="home-memoir-card ui-pressable {{isDemoSlide ? 'home-memoir-slide' : ''}}"
       data-share-token="{{shareToken}}"
