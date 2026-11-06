@@ -1451,13 +1451,15 @@ test("home blocks voice session creation before voice authorization consent", as
     },
   };
 
+  global.getCurrentPages = () => [context];
+  context.onNavigationLayout({ detail: { height: 91 } });
   await page.startPrimaryVoiceChat.call(context);
 
   assert.equal(createCalls, 0);
   assert.equal(context.data.error, "");
   assert.equal(context.data.voiceAuthorizationRequested, true);
   assert.equal(context.data.showVoiceAuthorizationPanel, true);
-  assert.deepEqual(scrolls, [{ selector: "#home-voice-authorization", duration: 250 }]);
+  assert.deepEqual(scrolls, [{ selector: "#home-voice-authorization", offsetTop: -91, duration: 250 }]);
 });
 
 test("home refreshes voice authorization consent from storage", () => {

@@ -1554,6 +1554,10 @@ test("chapter workspace exposes current draft and update paths from the chapter 
   const context = pageContext(page);
   await page.onLoad.call(context, { projectId: "project-1", chapterId: "chapter-1" });
 
+  global.getCurrentPages = () => [context];
+  const anchors = [];
+  global.wx.pageScrollTo = options => { scrolls.push(options.selector); anchors.push(options); };
+  context.onNavigationLayout({ detail: { height: 195 } });
   page.showDraftUpdate.call(context);
   assert.equal(context.data.editingToolsExpanded, true);
   assert.equal(scrolls.at(-1), "#chapter-sections");
@@ -1562,6 +1566,9 @@ test("chapter workspace exposes current draft and update paths from the chapter 
   await page.runNextAction.call(context);
   assert.equal(context.data.editingToolsExpanded, true);
   assert.equal(scrolls.at(-1), "#chapter-sections");
+
+  context.revealPendingAssignments();
+  assert.deepEqual(anchors, Array(3).fill({ selector: "#chapter-sections", offsetTop: -195, duration: 250 }));
 
   const template = fs.readFileSync(path.join(__dirname, "../pages/chapter-workspace/index.wxml"), "utf8");
   assert.match(template, /bindtap="showDraftUpdate"/);

@@ -1,3 +1,4 @@
+import { scrollPageTo } from "../../services/page-navigation";
 import { NARRATION_MODES, narrationModeForSession, type NarrationMode } from "../../domain/memoir-narration-mode";
 import type {
   VoiceSessionEntry,
@@ -773,7 +774,7 @@ definePage<HomeData>()({
   },
 
   openStoryProgress() {
-    wx.pageScrollTo({ selector: "#home-memoir", duration: 250 });
+    scrollPageTo({ selector: "#home-memoir", duration: 250 });
   },
 
   async refreshStory() {
@@ -991,7 +992,7 @@ definePage<HomeData>()({
     }
     this.pendingNarration = true;
     setHomeData(this, { voiceAuthorizationRequested: true, error: "" }, () => {
-      wx.pageScrollTo({ selector: "#home-voice-authorization", duration: 250 });
+      scrollPageTo({ selector: "#home-voice-authorization", duration: 250 });
     });
     return false;
   },

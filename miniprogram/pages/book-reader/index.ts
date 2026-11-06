@@ -27,7 +27,7 @@ import { routeAuthError } from "../../services/navigation";
 import { ApiError, cleanBaseUrl, readBackendConfig } from "../../services/request";
 import { sharedReadingKey, readSharedReadingProgress, saveSharedReadingProgress, type SharedReadingProgress } from "../../stores/reading-progress";
 import { AudioPlaybackController } from "../../services/audio-playback";
-import { setPageNavigationTitle } from "../../services/page-navigation";
+import { scrollPageTo, setPageNavigationTitle } from "../../services/page-navigation";
 import { readBookTTSRequest } from "../../services/tts-settings";
 import {
   VoiceAssistantTTSProgressRuntime,
@@ -116,17 +116,6 @@ type ReaderDatasetEvent = PageDatasetEvent<{
 
 const PAGE_CLASS = "book-reader-page ui-page-shell ui-accessible-page";
 const FLAT_READER_PAGE_CHARS = 6000;
-
-type WxWithPageScrollTo = typeof wx & {
-  pageScrollTo?: (options: { selector?: string; scrollTop?: number; offsetTop?: number; duration?: number }) => void;
-};
-
-function scrollReader(options: { selector?: string; scrollTop?: number; offsetTop?: number }) {
-  const pageScrollTo = (wx as WxWithPageScrollTo).pageScrollTo;
-  if (typeof pageScrollTo === "function") {
-    pageScrollTo({ ...options, duration: 280 });
-  }
-}
 
 async function readingImageUrl(
   image: Pick<MemoirBookManuscriptIllustration, "image_url" | "image_asset_id">,
@@ -475,8 +464,9 @@ definePage<BookReaderData>()({
     if (index < 0 || index >= this.data.readerChapterTotal) return;
     this.stopPlayback();
     this.readingScrollTop = 0;
-    this.setData({ ...this.readerChapterPatch(index), editionTocOpen: false, resumeAvailable: false }, () => scrollReader({
+    this.setData({ ...this.readerChapterPatch(index), editionTocOpen: false, resumeAvailable: false }, () => scrollPageTo({
       selector: sectionIndex === undefined ? "#reader-body" : `#reader-section-${sectionIndex}`,
+      duration: 280,
     }));
   },
 
@@ -507,7 +497,7 @@ definePage<BookReaderData>()({
   },
 
   scrollReaderToTop() {
-    scrollReader({ scrollTop: 0 });
+    scrollPageTo({ duration: 280, scrollTop: 0 });
   },
 
   async playReaderAudio() {
@@ -640,7 +630,7 @@ definePage<BookReaderData>()({
     this.setData({ resumeAvailable: false });
     if (!saved) {
       if (this.data.readerChapterIndex !== 0) this.showReaderChapter(0);
-      scrollReader({ scrollTop: 0 });
+      scrollPageTo({ duration: 280, scrollTop: 0 });
       return;
     }
     const sameVersion = saved.versionId === this.readerAudioVersionId;
@@ -653,7 +643,7 @@ definePage<BookReaderData>()({
     this.setData({
       ...this.readerChapterPatch(resumeAvailable ? 0 : Math.max(0, index)),
       resumeAvailable, editionTocOpen: false,
-    }, () => scrollReader({ scrollTop: resumeAvailable ? 0 : scrollTop }));
+    }, () => scrollPageTo({ duration: 280, scrollTop: resumeAvailable ? 0 : scrollTop }));
   },
 
   onBookAudioPosition(index: number, seconds: number) {
@@ -711,9 +701,10 @@ definePage<BookReaderData>()({
         }, (player) => {
           if (!player?.height || this.playToken !== playbackToken || this.readerHighlightKey !== key) return;
           // Leave the sentence below the sticky player, including its inset and a reading gap.
-          scrollReader({
+          scrollPageTo({
             selector: "#reader-spoken-sentence",
             offsetTop: -(player.height + (parseFloat(player.top || "0") || 0) + 12),
+            duration: 280,
           });
         }).exec();
       }

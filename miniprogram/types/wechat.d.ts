@@ -2,6 +2,7 @@ declare const wx: WechatMiniprogram.Wx;
 
 interface MiniProgramPageStackItem {
   route?: string;
+  data?: { navigationHeight?: number };
   setData?(data: { navigationTitle: string }): void;
 }
 

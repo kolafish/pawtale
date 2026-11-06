@@ -1,3 +1,4 @@
+import { scrollPageTo } from "../../services/page-navigation";
 import { NARRATION_MODES } from "../../domain/memoir-narration-mode";
 import type {
   MemoirVoiceTranscriptIncludedFilter,
@@ -174,16 +175,6 @@ function transcriptRequestLimit(
   }
   return Math.max(state.limit, state.offset, state.items.length);
 }
-
-type PageScrollTo = (options: {
-  selector: string;
-  offsetTop?: number;
-  duration?: number;
-}) => void;
-
-type WxWithPageScrollTo = typeof wx & {
-  pageScrollTo?: PageScrollTo;
-};
 
 type TranscriptsViewPatch = Pick<
   TranscriptsData,
@@ -961,13 +952,8 @@ definePage<TranscriptsData>()({
   },
 
   scrollToTranscript(item: TranscriptItemView) {
-    const pageScrollTo = (wx as WxWithPageScrollTo).pageScrollTo;
-    if (typeof pageScrollTo !== "function") {
-      return;
-    }
-    pageScrollTo({
+    scrollPageTo({
       selector: `#${item.anchorId}`,
-      offsetTop: 16,
       duration: 240,
     });
   },
