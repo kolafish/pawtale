@@ -12,6 +12,34 @@
       {
         "type": "folder",
         "value": "test"
+      },
+      {
+        "type": "folder",
+        "value": "types"
+      },
+      {
+        "type": "folder",
+        "value": ".ruff_cache"
+      },
+      {
+        "type": "file",
+        "value": "README.md"
+      },
+      {
+        "type": "file",
+        "value": "package.json"
+      },
+      {
+        "type": "file",
+        "value": "package-lock.json"
+      },
+      {
+        "type": "file",
+        "value": "tsconfig.json"
+      },
+      {
+        "type": "suffix",
+        "value": ".DS_Store"
       }
     ]
   },
@@ -24,7 +52,9 @@
     "swc": false,
     "useCompilerPlugins": [
       "typescript"
-    ]
+    ],
+    "minifyWXSS": true,
+    "minifyWXML": true
   },
   "condition": {
     "miniprogram": {

@@ -1,3 +1,5 @@
+<page-meta page-style="--ui-navigation-height: {{navigationHeight || 0}}px;" />
+<brand-navigation title="{{navigationTitle || '我的回忆录'}}" page-class="{{pageClass || homePageClass}}" bindlayout="onNavigationLayout" />
 <view class="ui-page-shell {{pageClass}}">
   <view wx:if="{{error}}" class="error ui-error-banner">
     <text>{{error}}</text>

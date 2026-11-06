@@ -1,0 +1,17 @@
+<view class="brand-navigation-bar {{largeText ? 'brand-navigation-large' : ''}}" style="padding-top: {{statusBarHeight}}px;">
+  <view class="brand-navigation-signature" style="height: {{brandRowHeight}}px; padding-right: {{capsuleSpace}}px;" aria-label="老余口述">
+    <view class="brand-navigation-portrait-frame" aria-hidden="true">
+      <image class="brand-navigation-portrait" src="/assets/brand/laoyu-portrait.png" mode="aspectFit" />
+    </view>
+    <image class="brand-navigation-wordmark" src="/assets/brand/laoyu-wordmark.svg" mode="aspectFit" aria-hidden="true" />
+  </view>
+  <view wx:if="{{!home}}" class="brand-navigation-context">
+    <button class="brand-navigation-back" bindtap="goBack" hover-class="brand-navigation-back-hover" aria-label="{{canGoBack ? '返回上一页' : '返回首页'}}">
+      <view wx:if="{{canGoBack}}" class="brand-navigation-chevron" aria-hidden="true"></view>
+      <view wx:else class="brand-navigation-home" aria-hidden="true"></view>
+    </button>
+    <text class="brand-navigation-title">{{title}}</text>
+    <view class="brand-navigation-balance" aria-hidden="true"></view>
+  </view>
+</view>
+<view style="height: {{navigationHeight}}px;" aria-hidden="true"></view>

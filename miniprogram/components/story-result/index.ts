@@ -155,7 +155,7 @@ Component({
       if (state.context) drawStoryBook(state.context, state.width, state.height, state.dpr, artSeconds, opacity, state.particleRise);
       if (result.celebrate && !state.soundPlayed && state.elapsed >= 400) {
         state.soundPlayed = true;
-        void state.audio.playTempFile("/assets/audio/story-collected.wav").catch(error => console.warn("story result sound unavailable", error));
+        void state.audio.playTempFile("/assets/audio/story-collected.mp3").catch(error => console.warn("story result sound unavailable", error));
       }
       if (state.elapsed - state.lastText >= 50 || state.elapsed === duration) {
         state.lastText = state.elapsed; state.rendering = true;

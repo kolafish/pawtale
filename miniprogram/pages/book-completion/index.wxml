@@ -1,3 +1,5 @@
+<page-meta page-style="--ui-navigation-height: {{navigationHeight || 0}}px;" />
+<brand-navigation title="{{navigationTitle || '书稿建议'}}" page-class="{{pageClass || homePageClass}}" bindlayout="onNavigationLayout" />
 <view class="ui-page-shell {{pageClass}}">
   <view class="flow-context">
     <text class="flow-context-label">{{projectTitle || "我的回忆录"}}</text>

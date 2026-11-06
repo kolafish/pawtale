@@ -26,6 +26,14 @@ export function definePage<TData extends object>() {
   ): void {
     const registeredDefinition = { ...definition };
     const registeredRecord = registeredDefinition as unknown as Record<string, unknown>;
+    // Keep page content outside the navigation component so selector queries and
+    // existing component lifecycles retain their original page ownership.
+    registeredRecord.onNavigationLayout = function (
+      this: { setData(data: { navigationHeight: number }): void },
+      event: { detail: { height: number } },
+    ) {
+      this.setData({ navigationHeight: event.detail.height });
+    };
     const runtimeFields: Array<[string, PageRuntimeFactory]> = [];
     for (const [key, value] of Object.entries(definition)) {
       const factory = value && typeof value === "object"

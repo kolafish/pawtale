@@ -83,7 +83,7 @@ textarea {
 }
 
 .ui-page-shell {
-  min-height: 100vh;
+  min-height: calc(100vh - var(--ui-navigation-height, 0px));
   background:
     linear-gradient(180deg, rgba(255, 253, 250, 0.72) 0, rgba(245, 241, 234, 0) 320rpx),
     var(--ui-page-background);

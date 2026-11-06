@@ -1,3 +1,5 @@
+<page-meta page-style="--ui-navigation-height: {{navigationHeight || 0}}px;" />
+<brand-navigation title="{{navigationTitle || '语音采集与处理授权'}}" page-class="{{pageClass || homePageClass}}" bindlayout="onNavigationLayout" />
 <view class="ui-page-shell {{pageClass}}">
   <view class="ui-page-context-row">
     <text class="ui-page-context ui-tabular">协议版本 {{version}}</text>

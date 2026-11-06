@@ -134,7 +134,7 @@
 
 .version-switch {
   position: sticky;
-  top: 16rpx;
+  top: calc(var(--ui-navigation-height, 0px) + 16rpx);
   z-index: 4;
   min-height: 92rpx;
   padding: 0 18rpx;
