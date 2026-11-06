@@ -22,7 +22,7 @@
   flex: 0 0 32px;
   border-radius: 50%;
   overflow: hidden;
-  box-shadow: inset 0 0 0 1px rgba(48, 41, 37, 0.7);
+  box-shadow: inset 0 0 0 1px rgba(84, 59, 46, 0.12);
 }
 .brand-navigation-portrait { display: block; width: 100%; height: 100%; }
 .brand-navigation-wordmark { display: block; width: 92px; height: 29px; flex-shrink: 0; }
