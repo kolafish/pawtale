@@ -955,6 +955,8 @@ test("transcripts page scrolls to stored uncovered source target", async () => {
     },
   });
   const context = pageContext(page, { limit: 1 });
+  global.getCurrentPages = () => [context];
+  context.onNavigationLayout({ detail: { height: 143 } });
 
   await page.onShow.call(context);
 
@@ -965,7 +967,7 @@ test("transcripts page scrolls to stored uncovered source target", async () => {
   assert.deepEqual(scrolls, [
     {
       selector: "#transcript-utterance-target",
-      offsetTop: 16,
+      offsetTop: -143,
       duration: 240,
     },
   ]);

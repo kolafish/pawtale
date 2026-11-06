@@ -30,7 +30,7 @@ import {
   type PagePickerEvent,
   type PageQuery,
 } from "../../services/page-input";
-import { setPageNavigationTitle } from "../../services/page-navigation";
+import { scrollPageTo, setPageNavigationTitle } from "../../services/page-navigation";
 import { LOADING_NEXT_ACTION } from "./chapter-next-action";
 import {
   chapterCandidateViewPatch,
@@ -55,7 +55,6 @@ import {
   isActiveChapterPreparation,
   readableIssue,
   readableReviewText,
-  scrollToSection,
   type ChapterWorkspaceOperationKind,
   type ChapterWorkspacePageData,
 } from "./chapter-workspace-model";
@@ -692,7 +691,7 @@ definePage<ChapterWorkspacePageData>()({
       return;
     }
     this.setData({ editingToolsExpanded: true }, () => {
-      scrollToSection("#chapter-sections");
+      scrollPageTo({ selector: "#chapter-sections", duration: 250 });
     });
   },
 
@@ -741,7 +740,7 @@ definePage<ChapterWorkspacePageData>()({
     }
     if (action.kind === "review_draft" || action.kind === "complete") {
       this.setData({ editingToolsExpanded: true }, () => {
-        scrollToSection("#chapter-sections");
+        scrollPageTo({ selector: "#chapter-sections", duration: 250 });
       });
     }
   },
@@ -852,7 +851,7 @@ definePage<ChapterWorkspacePageData>()({
       return;
     }
     if (this.data.draftRecoveryActionKind === "status") {
-      scrollToSection("#chapter-status");
+      scrollPageTo({ selector: "#chapter-status", duration: 250 });
     }
   },
 
@@ -892,7 +891,7 @@ definePage<ChapterWorkspacePageData>()({
       return;
     }
     list.openRequiredAnswer(issue.id);
-    scrollToSection("#chapter-suggestions");
+    scrollPageTo({ selector: "#chapter-suggestions", duration: 250 });
   },
 
   ...chapterWorkspaceDraftMethods,

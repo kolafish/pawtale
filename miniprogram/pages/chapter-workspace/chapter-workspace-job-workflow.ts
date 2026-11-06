@@ -1,3 +1,4 @@
+import { scrollPageTo } from "../../services/page-navigation";
 import { PollingTimer } from "../../services/polling-timer";
 import {
   cancelMemoirChapterPreparationJob,
@@ -26,7 +27,6 @@ import {
   chapterPreparationView,
   isActiveChapterPreparation,
   isActiveSectionRegeneration,
-  scrollToSection,
   sectionRegenerationView,
   type ChapterWorkspaceOperationKind,
   type ChapterWorkspacePageData,
@@ -543,7 +543,7 @@ export const chapterWorkspaceJobMethods = defineChapterWorkspaceJobMethods({
           : {}),
       });
     }
-    scrollToSection("#chapter-sections");
+    scrollPageTo({ selector: "#chapter-sections", duration: 250 });
   },
 
   rewriteChapter() {

@@ -347,6 +347,8 @@ test("book reader expands stories and jumps from the table of contents to the te
     { chapterId: "chapter-2", sections: [] },
   ];
   context.data.readerChapterTotal = 2;
+  global.getCurrentPages = () => [context];
+  context.onNavigationLayout({ detail: { height: 139 } });
 
   page.toggleTocChapter.call(context, {
     currentTarget: { dataset: { chapterIndex: "0" } },
@@ -359,11 +361,16 @@ test("book reader expands stories and jumps from the table of contents to the te
   page.toggleTocChapter.call(context, {
     currentTarget: { dataset: { chapterIndex: "1" } },
   });
+  context.onNavigationLayout({ detail: { height: 195 } });
+  context.previousReaderChapter();
+  context.nextReaderChapter();
   page.scrollReaderToTop.call(context);
 
   assert.deepEqual(scrolls, [
-    { selector: "#reader-section-0", duration: 280 },
-    { selector: "#reader-body", duration: 280 },
+    { selector: "#reader-section-0", offsetTop: -139, duration: 280 },
+    { selector: "#reader-body", offsetTop: -139, duration: 280 },
+    { selector: "#reader-body", offsetTop: -195, duration: 280 },
+    { selector: "#reader-body", offsetTop: -195, duration: 280 },
     { scrollTop: 0, duration: 280 },
   ]);
   assert.equal(context.data.readerChapterIndex, 1);
@@ -787,8 +794,9 @@ test("shared narration generates only after play and resumes at the saved segmen
 for (const scope of ["book", "chapter", "story"]) test(`shared ${scope} narration resumes with highlight in the original illustrated body`, async () => {
   const requests = [], played = [], scrolls = [];
   const playerHeight = { book: 96, chapter: 148, story: 192 }[scope];
+  const navigationHeight = scope === "story" ? 195 : 139;
   global.wx = { getStorageSync: () => "", setStorageSync() {}, pageScrollTo: options => scrolls.push(options),
-    createSelectorQuery: playerMeasurement({ height: playerHeight, top: "8px" }),
+    createSelectorQuery: playerMeasurement({ height: playerHeight, top: `${navigationHeight + 8}px` }),
     hideShareMenu() {}, showShareMenu() {} };
   const paragraph = "我记得🌿那个院子。外婆在门口等我。";
   const content = `${paragraph}\r\n\r\n${paragraph}`;
@@ -816,6 +824,8 @@ for (const scope of ["book", "chapter", "story"]) test(`shared ${scope} narratio
     },
   });
   const context = pageContext(page);
+  global.getCurrentPages = () => [context];
+  context.onNavigationLayout({ detail: { height: navigationHeight } });
   await context.onLoad({ shareToken: "family" });
   assert.deepEqual(requests, []);
   context.showReaderChapter(chapterIndex);
@@ -843,7 +853,7 @@ for (const scope of ["book", "chapter", "story"]) test(`shared ${scope} narratio
     assert.equal(context.data.readerHighlightCurrent, "我记得🌿那个院子。");
     assert.equal(JSON.stringify(context.data.bookPreviewChapters), body, "narration preserves the original headings and paragraphs");
     assert.equal(context.data.shareImages.length, 1);
-    assert.deepEqual(scrolls.slice(scrollCount), [{ selector: "#reader-spoken-sentence", offsetTop: -(playerHeight + 8 + 12), duration: 280 }],
+    assert.deepEqual(scrolls.slice(scrollCount), [{ selector: "#reader-spoken-sentence", offsetTop: -(playerHeight + navigationHeight + 8 + 12), duration: 280 }],
       "resuming places the sentence below the measured sticky player, including larger text layouts");
     context.onPageScroll({ scrollTop: 800 });
     const secondSentence = Array.from(content).length - Array.from("外婆在门口等我。").length;

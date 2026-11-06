@@ -222,17 +222,6 @@ export const CLOSED_DRAFT_SECTION_EDITOR = {
   editingInputSignature: "",
 };
 
-type WxWithPageScrollTo = typeof wx & {
-  pageScrollTo?: (options: { selector: string; duration?: number }) => void;
-};
-
-export function scrollToSection(selector: string) {
-  const pageScrollTo = (wx as WxWithPageScrollTo).pageScrollTo;
-  if (typeof pageScrollTo === "function") {
-    pageScrollTo({ selector, duration: 250 });
-  }
-}
-
 export interface ChapterWorkspacePageData extends ReadingShareData {
   pageClass: string;
   loading: boolean;
