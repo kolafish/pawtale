@@ -95,16 +95,16 @@ PDF_LAYOUTS = {
     MemoirBookOutputExportLayout.LARGE_PRINT: PDFLayout(
         page_width=A5[0],
         page_height=A5[1],
-        font_size=12,
-        line_height=19,
+        font_size=13,
+        line_height=21,
         margin_x=48,
-        # Baseline inset includes the 12pt glyph height: visible top ~17mm.
+        # Baseline inset includes the 13pt glyph height: visible top ~17mm.
         margin_top=60,
         margin_bottom=57,
         title_font_size=22,
         heading_font_size=15,
         small_font_size=9,
-        max_line_units=25,
+        max_line_units=24,
         filename_suffix="打印版",
         mirror_body_pages=True,
         inner_margin_delta=6,
