@@ -1329,6 +1329,9 @@ def _add_chapters(builder: PDFBookBuilder, chapters: list[Any]) -> None:
             index=_int(chapter.get("index"), fallback_index),
         )
 
+        if builder.layout.mirror_body_pages:
+            builder.add_spacer(0.75)
+
         hints = [
             _str(chapter.get("time_period")),
             _str(chapter.get("place_hint")),
