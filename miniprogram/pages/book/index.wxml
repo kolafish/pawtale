@@ -52,7 +52,7 @@
       />
     </view>
     <view class="progress-actions">
-      <template wx:if="{{bookContentAvailable}}" is="readingShareActions" data="{{bookShareActive, bookShareReady, bookShareStale, bookShareBusy, bookShareStatusKnown, bookShareDescription, bookShareLikeCount, bookShareLikers, showBookReader: true, bookStaleNotice}}" />
+      <template wx:if="{{bookContentAvailable}}" is="readingShareActions" data="{{bookShareActive, bookShareReady, bookShareStale, bookShareBusy, bookShareStatusKnown, bookShareDescription, bookShareFeedbackVisible, hideShareDescription: true, bookShareLikeCount, bookShareLikers, showBookReader: true, bookStaleNotice}}" />
       <share-response-inbox wx:if="{{bookContentAvailable}}" project-id="{{projectId}}" user-id="{{userId}}" show-likes="{{true}}" like-count="{{bookShareLikeCount}}" likers="{{bookShareLikers}}" />
     </view>
     <view wx:if="{{bookStaleNotice || bookActivityNotice}}" class="book-activity-notice" bindtap="openBookActivity" aria-role="button">

@@ -235,7 +235,9 @@ test("one share action prepares the default book, reuses its link, and can stop 
   const context = pageContext(page, { projectId: "project/1", bookContentAvailable: true, bookPreviewTitle: "外婆回忆录" });
   await context.refreshBookShareStatus();
   assert.equal(calls.length, 0);
+  assert.equal(context.data.bookShareFeedbackVisible, false);
   await context.prepareReadingShare();
+  assert.equal(context.data.bookShareFeedbackVisible, true);
   await context.prepareReadingShare();
   assert.equal(context.data.bookShareReady, true);
   assert.deepEqual(context.onShareAppMessage(), {
@@ -256,6 +258,8 @@ test("existing current shares need no update or configuration", async () => {
   await context.refreshBookShareStatus();
   assert.equal(context.data.bookShareReady, true);
   assert.equal(context.onShareAppMessage().path, "/pages/book-reader/index?shareToken=existing");
+  await context.prepareReadingShare();
+  assert.equal(context.data.bookShareFeedbackVisible, false);
 });
 
 test("a failed preparation stays on the same action and can be retried", async () => {
@@ -268,6 +272,7 @@ test("a failed preparation stays on the same action and can be retried", async (
   await context.prepareReadingShare();
   assert.equal(context.data.bookShareReady, false);
   assert.equal(context.data.bookShareBusy, false);
+  assert.equal(context.data.bookShareFeedbackVisible, true);
   fail = false;
   await context.prepareReadingShare();
   assert.equal(context.data.bookShareReady, true);
