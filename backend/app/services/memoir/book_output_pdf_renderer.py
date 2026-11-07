@@ -494,11 +494,11 @@ class PDFBookBuilder:
     def finish(self, *, back_cover: bool = False) -> list[PDFPage]:
         self._expand_tail_images()
         if self.layout.mirror_body_pages:
-            # Reader imposes the booklet. Keep normal reading order and put
-            # unnumbered filler before the back cover, never after it.
+            # Covers print separately: total pages must be 4n + 2 so the
+            # interior is a complete booklet. Keep filler before the back cover.
             position = len(self.pages) - int(back_cover)
             self.pages[position:position] = [
-                PDFPage(commands=[], show_footer=False) for _ in range(-len(self.pages) % 4)
+                PDFPage(commands=[], show_footer=False) for _ in range((2 - len(self.pages)) % 4)
             ]
         return self.pages
 

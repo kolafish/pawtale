@@ -25,14 +25,16 @@ def test_booklet_padding_preserves_pages_and_keeps_back_cover_last(edition, page
     pages = builder.finish(back_cover=back_cover)
     assert [p for p in pages if p.commands] == original
     if edition == MemoirBookOutputExportLayout.LARGE_PRINT:
-        assert len(pages) == (page_count + 3) // 4 * 4
+        assert len(pages) == (page_count + 1) // 4 * 4 + 2
+        assert (len(pages) - 2) % 4 == 0
         blanks = [p for p in pages if not p.commands]
         assert all(not p.show_footer and not p.header_title and p.body_page_number is None for p in blanks)
         if back_cover:
             assert pages[-1] is original[-1]
     else:
         assert pages == original
-    assert builder.finish(back_cover=back_cover) == pages
+    finished_count = len(pages)
+    assert len(builder.finish(back_cover=back_cover)) == finished_count
 
 
 @pytest.mark.parametrize("mode", ["full", "gallery", "pair"])

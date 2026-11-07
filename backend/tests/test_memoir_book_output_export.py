@@ -322,6 +322,8 @@ def test_generated_cover_and_chapter_artwork_render_in_reading_and_print_pdfs():
             )
             cover = pages[0]
             back_cover = pages[-1]
+            if export_layout == MemoirBookOutputExportLayout.LARGE_PRINT:
+                assert len(pages[1:-1]) % 4 == 0
             chapter = next(page for page in pages if page.anchor == "chapter-1")
             assert cover.background_image_path is not None
             assert cover.background_image_path.name == f"{template}_cover.jpg"
