@@ -97,14 +97,15 @@ PDF_LAYOUTS = {
         page_height=A5[1],
         font_size=13,
         line_height=21,
-        margin_x=48,
-        # Baseline inset includes the 13pt glyph height: visible top ~17mm.
-        margin_top=60,
-        margin_bottom=57,
+        # Mirrored inner/outer margins: 52/40pt (~18.3/14.1mm).
+        margin_x=46,
+        # Baseline inset includes the 13pt glyph height: visible top ~15mm.
+        margin_top=56,
+        margin_bottom=54,
         title_font_size=22,
         heading_font_size=15,
         small_font_size=9,
-        max_line_units=24,
+        max_line_units=25,
         filename_suffix="打印版",
         mirror_body_pages=True,
         inner_margin_delta=6,
@@ -670,9 +671,8 @@ class PDFBookBuilder:
             box_height = min(box_height, fitting_height)
         self._ensure_space_height(min(box_height + caption_height + 18, page_height))
         page = self._ensure_page()
-        x = self._content_left() + int(
-            (self.layout.page_width - self.layout.margin_x * 2 - box_width) / 2
-        )
+        inset = (content_width - box_width) / 2
+        x = self._content_left() + (inset if self.layout.mirror_body_pages else int(inset))
         y = self.y - box_height
         image = PDFImageCommand(path=image_path, x=x, y=y, width=box_width, height=box_height)
         page.images.append(image)

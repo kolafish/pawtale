@@ -23,7 +23,7 @@ from app.services.memoir.book_output_export import (
 )
 
 # Bump when rendering or bundled fonts/artwork change.
-BOOK_EXPORT_RENDER_REVISION = 18
+BOOK_EXPORT_RENDER_REVISION = 19
 
 
 @dataclass(frozen=True)

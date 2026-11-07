@@ -1217,16 +1217,15 @@ def _add_chapter_opening(builder: PDFBookBuilder, *, title: str, label: str, ind
         ),
     )
     long_title = len(_wrap_pdf_line(title, title_max_units)) > 4
-    if template == "heritage_classic":
-        opening_spacer = (
-            1.5 if layout.mirror_body_pages else 2.5
-        ) if long_title else (5 if layout.mirror_body_pages else 3)
+    if layout.mirror_body_pages:
+        # Keep a chapter opening distinct without consuming half an A5 page.
+        opening_spacer = 1 if long_title else 2
+    elif template == "heritage_classic":
+        opening_spacer = 2.5 if long_title else 3
     elif template in {"warm_journal", "modern_minimal"}:
-        opening_spacer = 2 if long_title else (4 if layout.mirror_body_pages else 2.5)
+        opening_spacer = 2 if long_title else 2.5
     else:
-        opening_spacer = 4.0 if layout.mirror_body_pages else 2.5
-    # Reading pages keep the chapter design without a print-sized top void.
-    # Print editions retain their opening space and right-page alignment.
+        opening_spacer = 2.5
     builder.add_spacer(min(opening_spacer, 1) if layout.reading_edition else opening_spacer)
     if template == "heritage_classic":
         builder.add_centered(
