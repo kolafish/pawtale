@@ -110,10 +110,12 @@ export const readingShareMethods = defineReadingShareMethods({
   async prepareReadingShare() {
     const { projectId, chapterId, sectionId, available } = this.readingShareTarget();
     if (!projectId || !available || this.data.bookShareBusy) return;
-    this.setData({ bookShareFeedbackVisible: true });
-    if (this.data.bookShareReady) return;
+    if (this.data.bookShareReady) {
+      if (chapterId || sectionId) this.setData({ bookShareFeedbackVisible: true });
+      return;
+    }
     const sequence = ++this.bookShareStatusSequence;
-    this.setData({ bookShareBusy: true, error: "", bookShareDescription: "正在准备分享内容…" });
+    this.setData({ bookShareBusy: true, bookShareFeedbackVisible: true, error: "", bookShareDescription: "正在准备分享内容…" });
     hideMiniProgramShareMenu();
     try {
       const share = await updateMemoirBookShare(projectId, chapterId, sectionId);
@@ -124,7 +126,7 @@ export const readingShareMethods = defineReadingShareMethods({
       if (!this.isReadingShareTarget(projectId, chapterId, sectionId) || sequence !== this.bookShareStatusSequence) return;
       this.bookShareToken = share.token;
       this.setData({ bookShareActive: true, bookShareReady: true, bookShareStale: false, bookShareStatusKnown: true,
-        bookShareImageUrl: card.imageUrl, bookShareDescription: `已准备好，再点「分享给好友」发送。${DESCRIPTION}` });
+        bookShareImageUrl: card.imageUrl, bookShareDescription: `已准备好，再点「分享给好友」发送。${chapterId || sectionId ? DESCRIPTION : ""}` });
       enableMiniProgramShareMenu();
     } catch (error) {
       if (this.isReadingShareTarget(projectId, chapterId, sectionId) && sequence === this.bookShareStatusSequence && !routeAuthError(error, "login")) {
