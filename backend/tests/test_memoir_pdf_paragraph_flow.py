@@ -14,6 +14,78 @@ from app.services.memoir.book_output_pdf_renderer import (
 
 
 @pytest.mark.parametrize("edition", list(MemoirBookOutputExportLayout))
+@pytest.mark.parametrize("page_count", [4, 5, 6, 7])
+@pytest.mark.parametrize("back_cover", [False, True])
+def test_booklet_padding_preserves_pages_and_keeps_back_cover_last(edition, page_count, back_cover):
+    builder = PDFBookBuilder(title="往事", layout=PDF_LAYOUTS[edition])
+    for index in range(page_count):
+        builder.new_page("封底" if back_cover and index == page_count - 1 else "正文")
+        builder.add_text(f"原页 {index + 1}")
+    original = list(builder.pages)
+    pages = builder.finish(back_cover=back_cover)
+    assert [p for p in pages if p.commands] == original
+    if edition == MemoirBookOutputExportLayout.LARGE_PRINT:
+        assert len(pages) == (page_count + 3) // 4 * 4
+        blanks = [p for p in pages if not p.commands]
+        assert all(not p.show_footer and not p.header_title and p.body_page_number is None for p in blanks)
+        if back_cover:
+            assert pages[-1] is original[-1]
+    else:
+        assert pages == original
+    assert builder.finish(back_cover=back_cover) == pages
+
+
+@pytest.mark.parametrize("mode", ["full", "gallery", "pair"])
+def test_print_tail_images_grow_without_stretching_or_moving_surrounding_text(tmp_path, mode):
+    path = tmp_path / "portrait.jpg"
+    Image.new("RGB", (600, 1200), "#789081").save(path)
+    layout = PDF_LAYOUTS[MemoirBookOutputExportLayout.LARGE_PRINT]
+    builder = PDFBookBuilder(title="往事", layout=layout)
+    builder.new_page("正文", body_numbering=True)
+    builder.add_body_text("图前正文，保留原位。")
+    if mode == "full":
+        builder.add_image(path, caption="照片说明")
+    else:
+        count = 2 if mode == "pair" else 1
+        builder.add_image_gallery([path] * count, captions=["照片说明"] * count)
+    page = builder.current_page
+    before = [(im.x + im.width / 2, im.y + im.height, im.height) for im in page.images]
+    captions = [c for c in page.commands if c.text == "照片说明"]
+    gaps = [im.y - c.y for im, c in zip(page.images, captions)]
+    text_y = page.commands[0].y
+    builder.new_page("下一章", body_numbering=True)
+    for im, (center, top, height), caption, gap in zip(page.images, before, captions, gaps):
+        assert height < im.height <= height * 1.25
+        assert im.width / im.height == pytest.approx(0.5)
+        assert im.x + im.width / 2 == pytest.approx(center)
+        assert im.y + im.height == pytest.approx(top)
+        assert im.y - caption.y == pytest.approx(gap)
+        assert caption.y - caption.font_size * 0.25 >= layout.margin_bottom + layout.line_height
+        assert layout.margin_x <= im.x < im.x + im.width <= layout.page_width - layout.margin_x + layout.inner_margin_delta
+    assert page.commands[0].y == text_y
+    assert len(builder.pages) == 2
+
+
+@pytest.mark.parametrize("case", ["reading", "following_text", "wrap", "little_space", "full_width"])
+def test_images_stay_unchanged_when_tail_enlargement_would_not_fit(tmp_path, case):
+    path = tmp_path / "photo.jpg"
+    Image.new("RGB", (1200, 600) if case == "full_width" else (600, 1200), "#789081").save(path)
+    edition = MemoirBookOutputExportLayout.STANDARD if case == "reading" else MemoirBookOutputExportLayout.LARGE_PRINT
+    layout = PDF_LAYOUTS[edition]
+    builder = PDFBookBuilder(title="往事", layout=layout)
+    builder.new_page("正文", body_numbering=True)
+    if case == "little_space":
+        builder.y = layout.margin_bottom + 260
+    builder.add_image(path, caption="图注", wrap_right=case == "wrap")
+    if case == "following_text":
+        builder.add_body_text("图片后面仍有正文。")
+    page = builder.current_page
+    before = [(im.x, im.y, im.width, im.height) for im in page.images]
+    builder.new_page("下一章")
+    assert [(im.x, im.y, im.width, im.height) for im in page.images] == before
+
+
+@pytest.mark.parametrize("edition", list(MemoirBookOutputExportLayout))
 @pytest.mark.parametrize("separator", ["\n\n", "\r\n\r\n", "\n \n\n"])
 def test_paragraph_separators_do_not_add_an_extra_gap_or_page(edition, separator):
     layout = PDF_LAYOUTS[edition]
