@@ -1758,7 +1758,7 @@ def _build_structured_manuscript_pdf_pages(
     _add_image_appendix(builder, image_appendix)
     _add_back_matter(builder, back_matter, include_source_appendix=include_source_appendix)
     _add_back_cover(builder, quote=back_cover_quote, cover_style=cover_style)
-    return builder.pages
+    return builder.finish(back_cover=True)
 
 
 def _build_manuscript_pdf_pages(
@@ -1780,7 +1780,7 @@ def _build_manuscript_pdf_pages(
         builder.new_page("正文", body_numbering=True)
         builder.add_heading(title)
         builder.add_body_text(content.strip() or title)
-        return builder.pages
+        return builder.finish()
 
     book_title = _str(profile.get("title")) or title
     subtitle = _str(profile.get("subtitle"))

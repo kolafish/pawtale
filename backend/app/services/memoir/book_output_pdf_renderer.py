@@ -227,6 +227,13 @@ class PDFImageCommand:
 
 
 @dataclass
+class _PDFImageWithCaption:
+    image: PDFImageCommand
+    captions: list[PDFTextCommand]
+    column_width: float
+
+
+@dataclass
 class PDFPage:
     commands: list[PDFTextCommand]
     decorations: list[PDFDecorationCommand] = field(default_factory=list)
@@ -440,6 +447,60 @@ class PDFBookBuilder:
         self.y = 0
         self.wrapped_image: PDFImageCommand | None = None
         self.pending_wrapped_images: list[tuple[Path, str]] = []
+        self._tail_image_row: list[_PDFImageWithCaption] = []
+        self._tail_image_command_count = 0
+
+    def _expand_tail_images(self) -> None:
+        """Use spare print-page space only after the last image row is known."""
+        row, self._tail_image_row = self._tail_image_row, []
+        page = self.current_page
+        if not self.layout.mirror_body_pages or not page or not row:
+            return
+        if len(page.commands) != self._tail_image_command_count:
+            return
+        if any(a is not b.image for a, b in zip(page.images[-len(row):], row)):
+            return
+        bounds = []
+        for item in row:
+            image = item.image
+            with Image.open(image.path) as source:
+                width, height = ImageOps.exif_transpose(source).size
+            fit = min(image.width / width, image.height / height)
+            width, height = width * fit, height * fit
+            # drawImage centers an aspect-fitted image inside its original box.
+            x = image.x + (image.width - width) / 2
+            y = image.y + (image.height - height) / 2
+            bottom = min([y] + [c.y - c.font_size * 0.25 for c in item.captions])
+            bounds.append((x, y, width, height, bottom))
+        floor = self.layout.margin_bottom + self.layout.line_height
+        if min(b[4] for b in bounds) - floor < self.layout.line_height * 2:
+            return
+        scale = min(
+            1.25,
+            *(min(item.column_width / width, 1 + (bottom - floor) / height)
+              for item, (_, _, width, height, bottom) in zip(row, bounds)),
+        )
+        if scale < 1.05:
+            return
+        for item, (x, y, width, height, _) in zip(row, bounds):
+            growth = height * (scale - 1)
+            item.image.x = x - width * (scale - 1) / 2
+            item.image.y = y - growth
+            item.image.width = width * scale
+            item.image.height = height * scale
+            for caption in item.captions:
+                caption.y -= growth
+
+    def finish(self, *, back_cover: bool = False) -> list[PDFPage]:
+        self._expand_tail_images()
+        if self.layout.mirror_body_pages:
+            # Reader imposes the booklet. Keep normal reading order and put
+            # unnumbered filler before the back cover, never after it.
+            position = len(self.pages) - int(back_cover)
+            self.pages[position:position] = [
+                PDFPage(commands=[], show_footer=False) for _ in range(-len(self.pages) % 4)
+            ]
+        return self.pages
 
     def _content_left(self) -> int:
         if not self.current_page or not self.layout.mirror_body_pages:
@@ -466,6 +527,7 @@ class PDFBookBuilder:
         background_image_path: Path | None = None,
         text_color: PDFColor | None = None,
     ) -> None:
+        self._expand_tail_images()
         self.current_section = section_title or self.current_section
         self.current_body_numbering = body_numbering
         self.continuation_show_header = (
@@ -612,8 +674,13 @@ class PDFBookBuilder:
             (self.layout.page_width - self.layout.margin_x * 2 - box_width) / 2
         )
         y = self.y - box_height
-        page.images.append(PDFImageCommand(path=image_path, x=x, y=y, width=box_width, height=box_height))
+        image = PDFImageCommand(path=image_path, x=x, y=y, width=box_width, height=box_height)
+        page.images.append(image)
+        caption_start = len(page.commands)
         self.y = self._add_image_caption(caption, x, y, box_width, paginate=True) - 15
+        if self.current_page is page:
+            self._tail_image_row = [_PDFImageWithCaption(image, page.commands[caption_start:], box_width)]
+            self._tail_image_command_count = len(page.commands)
         return True
 
     def _add_pending_image(self) -> None:
@@ -676,14 +743,22 @@ class PDFBookBuilder:
                     row = [(path, width * scale, height * scale, caption, ch) for path, width, height, caption, ch in row]
                     row_height = max(height + ch for _, _, height, _, ch in row)
             self._ensure_space_height(row_height + 18)
+            page = self._ensure_page()
+            self._tail_image_row = []
             for column, (path, width, height, caption, _) in enumerate(row):
                 slot_left = (content_width - column_width) / 2 if len(row) == 1 else column * (column_width + gap)
                 x = self._content_left() + slot_left
-                self._ensure_page().images.append(PDFImageCommand(
+                image = PDFImageCommand(
                     path=path, x=x + (column_width - width) / 2,
                     y=self.y - height, width=width, height=height,
-                ))
+                )
+                page.images.append(image)
+                caption_start = len(page.commands)
                 self._add_image_caption(caption, x, self.y - height, column_width)
+                self._tail_image_row.append(_PDFImageWithCaption(
+                    image, page.commands[caption_start:], content_width if len(row) == 1 else column_width,
+                ))
+            self._tail_image_command_count = len(page.commands)
             self.y -= row_height + 18
         if paths:
             self.y -= self.layout.line_height / 2
