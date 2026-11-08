@@ -1073,6 +1073,18 @@ test("pending narration shows the server detail without leaving the book or hidi
   assert.equal(dialogs.length, 2);
   assert.deepEqual(urls, []);
 
+  snapshot.progress = { status: "failed", pending_material_count: 0, can_retry: false,
+    detail: "首次整理未能生成目录，请稍后查看。" };
+  page.applyBookSnapshot.call(context, snapshot);
+  assert.equal(context.data.stage, "empty");
+  assert.equal(context.data.bookPendingMaterialCount, 0);
+  await context.openBookActivity();
+  assert.equal(dialogs.length, 3);
+  assert.equal(dialogs.at(-1).content, snapshot.progress.detail);
+  assert.equal(dialogs.at(-1).showCancel, false);
+  assert.equal(dialogs.at(-1).confirmText, "知道了");
+  assert.deepEqual(urls, []);
+
   snapshot.plan = samplePlan("confirmed");
   for (const status of ["processing", "failed", "needs_input"]) {
     snapshot.progress.status = status;
@@ -1091,7 +1103,7 @@ test("pending narration shows the server detail without leaving the book or hidi
   assert.equal(context.data.bookActivityNotice, "");
 });
 
-test("pending narration resumes the existing draft job only when allowed and confirmed", async () => {
+for (const initialFailure of [false, true]) test(`${initialFailure ? "initial failure without a plan" : "pending narration"} resumes the existing draft job only when allowed and confirmed`, async () => {
   const calls = [];
   let confirm = false;
   global.wx = {
@@ -1104,10 +1116,11 @@ test("pending narration resumes the existing draft job only when allowed and con
   const context = pageContext(page);
   const snapshot = {
     identity: { active_project_id: "project/1", active_project: { title: "回忆录" } },
-    plan: samplePlan("confirmed"), drafts_by_chapter_id: {}, output: null,
+    plan: initialFailure ? null : samplePlan("confirmed"), drafts_by_chapter_id: {}, output: null,
     automation_events: { items: [] },
-    progress: { status: "partial_ready", pending_material_count: 1, can_retry: true,
-      detail: "讲述已经保存，可以继续整理；已有正文仍可阅读。" },
+    progress: { status: initialFailure ? "failed" : "partial_ready",
+      pending_material_count: initialFailure ? 0 : 1, can_retry: true,
+      detail: initialFailure ? "讲述整理失败，尚未生成目录。" : "讲述已经保存，可以继续整理；已有正文仍可阅读。" },
   };
   page.applyBookSnapshot.call(context, snapshot);
   context.loadBookHome = async () => { calls.push("refresh"); };
@@ -1143,7 +1156,6 @@ test("pending narration resumes the existing draft job only when allowed and con
   await context.openBookActivity();
   assert.deepEqual(calls, ["project/1", "refresh"]);
 });
-
 
 test("legacy outline continues through automatic writing without replacing its structure", async () => {
   const calls = [];
