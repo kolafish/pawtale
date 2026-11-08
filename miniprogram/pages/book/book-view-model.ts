@@ -250,7 +250,7 @@ export function chapterGuidanceText(
       : "本章还没有讲述素材，请回到首页继续讲述与本章有关的回忆。";
   }
   if (pendingCount || removedCount) {
-    return `${changeNotice}。相关内容待更新，当前正文仍可阅读。`;
+    return changeNotice;
   }
   return "";
 }
@@ -266,13 +266,13 @@ export function sourceChangeNotice(
   );
   const changes: string[] = [];
   if (removedCount) {
-    changes.push(`${removedCount} 条讲述已删除`);
+    changes.push(`${removedCount} 条讲述已删除，正文待更新`);
   }
   if (completionCount) {
-    changes.push(`${completionCount} 条补充回答尚未写入正文`);
+    changes.push(`有 ${completionCount} 条补充回答待整理`);
   }
   if (ordinaryCount) {
-    changes.push(`${ordinaryCount} 条新增讲述尚未写入正文`);
+    changes.push(`有 ${ordinaryCount} 条新讲述待整理`);
   }
   return changes.join("，");
 }

@@ -305,10 +305,12 @@ definePage<BookPageData>()({
       ? progress.pending_material_count || 0 : 0;
     this.setData({
       bookPendingMaterialCount,
-      bookActivityNotice: bookPendingMaterialCount
-        ? `还有 ${bookPendingMaterialCount} 段讲述待整理`
-        : progress && progress.status !== "idle" && progress.status !== "ready"
-          ? progress.title || progress.detail : "",
+      bookActivityNotice: progress?.status === "failed"
+        ? "这次整理未完成，查看详情"
+        : bookPendingMaterialCount
+          ? `有 ${bookPendingMaterialCount} 条讲述待整理`
+          : progress && progress.status !== "idle" && progress.status !== "ready"
+            ? progress.title || progress.detail : "",
       chapters: this.data.chapters.map((chapter) => {
         const latest = events.filter((event) => (
           event.chapter_id === chapter.id && event.event_type === "chapter_draft_generated"
