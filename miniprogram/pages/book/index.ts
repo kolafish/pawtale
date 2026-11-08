@@ -472,7 +472,7 @@ definePage<BookPageData>()({
     const projectId = this.data.projectId;
     if (!projectId || this.data.retryingDraft) return;
     const progress = this.bookDraftProgress;
-    if (!this.data.bookPendingMaterialCount || !progress) {
+    if (!progress || (!this.data.bookPendingMaterialCount && this.data.stage === "drafting")) {
       this.openBookCompletion();
       return;
     }
