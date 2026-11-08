@@ -75,6 +75,11 @@ class PDFLayout:
     manuscript_template: str = DEFAULT_BOOK_DESIGN
     body_font_name: str | None = None
 
+    def is_right_page(self, pdf_page_number: int) -> bool:
+        # The separately printed front cover is not part of the interior.
+        interior_number = pdf_page_number - int(self.mirror_body_pages)
+        return interior_number % 2 == 1
+
 
 PDF_LAYOUTS = {
     MemoirBookOutputExportLayout.STANDARD: PDFLayout(
@@ -510,7 +515,7 @@ class PDFBookBuilder:
             return self.layout.margin_x
         page_index = len(self.pages)
         offset = self.layout.inner_margin_delta
-        return self.layout.margin_x + (offset if page_index % 2 else -offset)
+        return self.layout.margin_x + (offset if self.layout.is_right_page(page_index) else -offset)
 
     def new_page(
         self,
@@ -1184,7 +1189,7 @@ def _pdf_page_commands(page: PDFPage, *, page_number: int, layout: PDFLayout) ->
     if page.header_title:
         header_y = layout.page_height - 28
         header_font_size = max(8, layout.small_font_size - 1)
-        if mirrored_body and page_number % 2 == 1:
+        if mirrored_body and layout.is_right_page(page_number):
             if page.section_title:
                 commands.append(
                     PDFTextCommand(
@@ -1244,7 +1249,7 @@ def _pdf_page_commands(page: PDFPage, *, page_number: int, layout: PDFLayout) ->
         if layout.mirror_body_pages:
             footer_x = (
                 outer_margin
-                if page_number % 2 == 0
+                if not layout.is_right_page(page_number)
                 else layout.page_width
                 - outer_margin
                 - _estimated_text_width(footer, layout.small_font_size)

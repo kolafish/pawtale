@@ -464,7 +464,7 @@ def test_long_new_template_headings_stay_within_reading_and_print_margins():
                 if page not in chapter_pages:
                     continue
                 inset = (
-                    layout.inner_margin_delta if page_number % 2 else -layout.inner_margin_delta
+                    layout.inner_margin_delta if (page_number - 1) % 2 else -layout.inner_margin_delta
                 ) if layout.mirror_body_pages else 0
                 right_edge = layout.page_width - layout.margin_x + inset
                 for command in page.commands:
@@ -1086,19 +1086,45 @@ def test_print_chapters_keep_right_page_alignment_and_mirrored_body_margins():
         title="分页测试", content="", manuscript=manuscript, layout=layout
     )
 
-    assert all((index + 1) % 2 == 1 for index, page in enumerate(pages) if page.anchor)
+    assert all(index % 2 == 1 for index, page in enumerate(pages) if page.anchor)
     blank_pages = [page for page in pages if not page.commands and not page.images and not page.decorations]
     assert blank_pages
     assert all(not page.show_footer and not page.header_title and page.body_page_number is None for page in blank_pages)
     for index, page in enumerate(pages):
+        if page.body_page_number is not None:
+            rendered = _pdf_page_commands(page, page_number=index + 1, layout=layout)
+            footer = next(c for c in rendered if c.y == 24)
+            assert (footer.x > layout.page_width / 2) == (index % 2 == 1)
+            headers = [c for c in rendered if c.y == layout.page_height - 28]
+            assert all((c.x > layout.page_width / 2) == (index % 2 == 1) for c in headers)
         body_start = next((command for command in page.commands if command.text.startswith("这一段虚构")), None)
         if body_start is None:
             continue
         assert body_start.x == (
             layout.margin_x
-            + (layout.inner_margin_delta if (index + 1) % 2 else -layout.inner_margin_delta)
+            + (layout.inner_margin_delta if index % 2 else -layout.inner_margin_delta)
             + 2 * layout.font_size
         )
+
+
+@pytest.mark.parametrize("paragraph_count", [1, 80])
+def test_plain_print_export_adds_covers_without_losing_body(paragraph_count):
+    title = "旧书稿"
+    content = "旧日故事要完整保留，不能因为分印封面而少掉正文。" * paragraph_count
+    layout = PDF_LAYOUTS[MemoirBookOutputExportLayout.LARGE_PRINT]
+    pages = _build_manuscript_pdf_pages(title=title, content=content, manuscript={}, layout=layout)
+    assert len(pages) % 4 == 2
+    assert pages[0].body_page_number is None and pages[-1].body_page_number is None
+    assert pages[0].background_image_path or pages[0].background_color
+    assert pages[-1].background_image_path or pages[-1].background_color
+    assert pages[1].body_page_number == 1
+    body = "".join(c.text for p in pages[1:-1] if p.body_page_number is not None for c in p.commands)
+    assert body == title + content
+    reading = _build_manuscript_pdf_pages(
+        title=title, content=content, manuscript={},
+        layout=PDF_LAYOUTS[MemoirBookOutputExportLayout.STANDARD],
+    )
+    assert all(p.body_page_number is not None for p in reading)
 
 
 def test_export_cache_coalesces_processes_and_invalidates_owner_or_renderer_changes(tmp_path, monkeypatch):
