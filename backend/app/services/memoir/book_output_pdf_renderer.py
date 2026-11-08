@@ -654,16 +654,40 @@ class PDFBookBuilder:
                 self.wrapped_image = replace(image, x=caption_x, width=caption_width, y=image.y - caption_height, height=image.height + caption_height)
                 return True
         self.finish_image_wrap()
+        box_width, box_height, caption_height = self._image_box_size(display_size, max_height, caption, image_path)
+        page_height = self.layout.page_height - self.layout.margin_top - self.layout.margin_bottom
+        self._ensure_space_height(min(box_height + caption_height + 18, page_height))
+        page = self._ensure_page()
+        inset = (content_width - box_width) / 2
+        x = self._content_left() + (inset if self.layout.mirror_body_pages else int(inset))
+        y = self.y - box_height
+        image_width = box_width
+        if self.layout.mirror_body_pages:
+            with Image.open(image_path) as source:
+                width, height = ImageOps.exif_transpose(source).size
+            image_width = min(box_width, box_height * width / height)
+        image = PDFImageCommand(path=image_path, x=x + (box_width - image_width) / 2, y=y, width=image_width, height=box_height)
+        page.images.append(image)
+        caption_start = len(page.commands)
+        self.y = self._add_image_caption(caption, x, y, box_width, paginate=True) - 15
+        if self.current_page is page:
+            self._tail_image_row = [_PDFImageWithCaption(image, page.commands[caption_start:], box_width)]
+            self._tail_image_command_count = len(page.commands)
+        return True
+
+    def _image_box_size(self, display_size: str, max_height: int | None, caption: str, image_path: Path) -> tuple[float, float, float]:
         width_ratio = 1.0
         if display_size == "half_width":
             width_ratio = 0.68
         elif display_size == "inline":
             width_ratio = 0.82
+        if self.layout.mirror_body_pages:
+            width_ratio = min(width_ratio, 0.85)
         box_width = int((self.layout.page_width - self.layout.margin_x * 2) * width_ratio)
-        box_height = max_height or min(220, int(self.layout.page_height * 0.34))
+        box_height = max_height or (int(self.layout.page_height * 0.5) if self.layout.mirror_body_pages else min(220, int(self.layout.page_height * 0.34)))
         page_height = self.layout.page_height - self.layout.margin_top - self.layout.margin_bottom
         caption_height = self._image_caption_height(caption, box_width)
-        if caption:
+        if caption or self.layout.mirror_body_pages:
             with Image.open(image_path) as source:
                 width, height = ImageOps.exif_transpose(source).size
             box_height = min(box_height, box_width * height / width)
@@ -674,19 +698,7 @@ class PDFBookBuilder:
         fitting_height = page_height - caption_height - 18
         if fitting_height >= box_height * 0.75:
             box_height = min(box_height, fitting_height)
-        self._ensure_space_height(min(box_height + caption_height + 18, page_height))
-        page = self._ensure_page()
-        inset = (content_width - box_width) / 2
-        x = self._content_left() + (inset if self.layout.mirror_body_pages else int(inset))
-        y = self.y - box_height
-        image = PDFImageCommand(path=image_path, x=x, y=y, width=box_width, height=box_height)
-        page.images.append(image)
-        caption_start = len(page.commands)
-        self.y = self._add_image_caption(caption, x, y, box_width, paginate=True) - 15
-        if self.current_page is page:
-            self._tail_image_row = [_PDFImageWithCaption(image, page.commands[caption_start:], box_width)]
-            self._tail_image_command_count = len(page.commands)
-        return True
+        return box_width, box_height, caption_height
 
     def _add_pending_image(self) -> None:
         path, caption = self.pending_wrapped_images.pop(0)
@@ -983,7 +995,7 @@ class PDFBookBuilder:
         if following_image_height:
             # Match the illustration spacer and add_image's baseline offset.
             image_gap = int(self.layout.line_height * 0.25)
-            bottom_gap = 8 - self.layout.font_size
+            bottom_gap = 0 if self.layout.mirror_body_pages else 8 - self.layout.font_size
             available_height = self.layout.page_height - self.layout.margin_top - self.layout.margin_bottom
             reserved_image_height = max(0, min(following_image_height, available_height - heading_height - image_gap - bottom_gap))
             image_space = image_gap + reserved_image_height + bottom_gap
