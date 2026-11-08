@@ -1127,10 +1127,17 @@ def _add_illustration(builder: PDFBookBuilder, illustration: dict[str, Any], *, 
     path = _illustration_file_path(illustration)
     if not path:
         return
+    max_height = None
+    if builder.layout.mirror_body_pages and wrap_max_height is not None:
+        _, _, caption_height = builder._image_box_size(
+            _str(illustration.get("display_size")) or "full_width", None, _illustration_caption(illustration), path,
+        )
+        max_height = max(40, int(wrap_max_height - caption_height - 18))
     builder.add_image(
         path,
+        max_height=max_height,
         display_size=_str(illustration.get("display_size")) or "full_width",
-        wrap_right=illustration.get("placement") == "chapter_inline",
+        wrap_right=not builder.layout.mirror_body_pages and illustration.get("placement") == "chapter_inline",
         wrap_max_height=wrap_max_height,
         caption=_illustration_caption(illustration),
     )
@@ -1160,6 +1167,9 @@ def _add_illustrations(
 
 
 def _add_illustration_gallery(builder: PDFBookBuilder, illustrations: list[dict[str, Any]]) -> None:
+    if builder.layout.mirror_body_pages:
+        _add_illustrations(builder, illustrations)
+        return
     images = [(path, _illustration_caption(image)) for image in illustrations if (path := _illustration_file_path(image))]
     builder.add_image_gallery([path for path, _ in images], captions=[caption for _, caption in images])
 
@@ -1167,6 +1177,8 @@ def _add_illustration_gallery(builder: PDFBookBuilder, illustrations: list[dict[
 def _needs_illustration_gallery(builder: PDFBookBuilder, paragraphs: list[str], images_before: dict[int, list[dict[str, Any]]]) -> bool:
     """Each insertion point needs enough remaining prose for all later portraits."""
     layout = builder.layout
+    if layout.mirror_body_pages:
+        return False
     content_width = layout.page_width - layout.margin_x * 2
     line_units = (content_width * 0.62 - layout.font_size) / layout.font_size
     max_height = layout.page_height - layout.margin_top - layout.margin_bottom - layout.line_height
@@ -1394,10 +1406,17 @@ def _add_chapters(builder: PDFBookBuilder, chapters: list[Any]) -> None:
                     portrait = aspect_ratio > 1
                     count = len(paragraphs)
                     index = 0 if position == "before" else (count // 2 if portrait else (count + 1) // 2) if position == "middle" else count
-                    if portrait:
+                    if portrait and not builder.layout.mirror_body_pages:
                         index = min(index, max(0, count - 1))
                         if index == 0:
                             first_image_height = max(first_image_height, (builder.layout.page_width - builder.layout.margin_x * 2) * 0.38 * aspect_ratio)
+                    if builder.layout.mirror_body_pages and index == 0:
+                        path = _illustration_file_path(image)
+                        if path:
+                            _, height, caption_height = builder._image_box_size(
+                                _str(image.get("display_size")) or "full_width", None, _illustration_caption(image), path,
+                            )
+                            first_image_height = max(first_image_height, height + caption_height + 18)
                     images_before.setdefault(index, []).append(image)
                 if _needs_illustration_gallery(builder, paragraphs, images_before):
                     builder.add_section_heading(_str(section.get("title")))

@@ -77,7 +77,7 @@ def test_images_stay_unchanged_when_tail_enlargement_would_not_fit(tmp_path, cas
     builder = PDFBookBuilder(title="往事", layout=layout)
     builder.new_page("正文", body_numbering=True)
     if case == "little_space":
-        builder.y = layout.margin_bottom + 260
+        builder.y = layout.margin_bottom + 350
     builder.add_image(path, caption="图注", wrap_right=case == "wrap")
     if case == "following_text":
         builder.add_body_text("图片后面仍有正文。")
@@ -186,7 +186,8 @@ def test_section_heading_stays_with_its_first_portrait(tmp_path, monkeypatch, ed
     assert image.width > 0 and image.height > 0
     assert image.y >= builder.layout.margin_bottom
     assert image.width / image.height == pytest.approx(600 / image_height)
-    assert any(line.font_size == builder.layout.font_size for line in page.commands)
+    if edition == MemoirBookOutputExportLayout.STANDARD:
+        assert any(line.font_size == builder.layout.font_size for line in page.commands)
     assert "".join(line.text for item in builder.pages for line in item.commands if line.font_size == builder.layout.font_size) == text
     assert all(line.y >= builder.layout.margin_bottom for item in builder.pages for line in item.commands)
 
@@ -229,15 +230,24 @@ def test_short_prose_groups_portraits_below_text_in_rows(tmp_path, monkeypatch, 
     assert len(images) == 3
     first_page, first = images[0]
     second_page, second = images[1]
-    assert first_page is second_page
-    assert first.y + first.height == pytest.approx(second.y + second.height)
-    assert first.x + first.width < second.x
-    assert images[2][1].x + images[2][1].width / 2 == pytest.approx(builder._content_left() + (layout.page_width - 2 * layout.margin_x) / 2)
+    if edition == MemoirBookOutputExportLayout.STANDARD:
+        assert first_page is second_page
+        assert first.y + first.height == pytest.approx(second.y + second.height)
+        assert first.x + first.width < second.x
+        assert images[2][1].x + images[2][1].width / 2 == pytest.approx(builder._content_left() + (layout.page_width - 2 * layout.margin_x) / 2)
+    else:
+        for page, image in images:
+            # No body text may share the image's vertical band in print.
+            assert all(line.y + line.font_size <= image.y or line.y >= image.y + image.height
+                       for line in page.commands if line.font_size == layout.font_size)
+        assert first_page is not second_page or second.y + second.height < first.y
     for page, image in images:
-        assert image.width / image.height == pytest.approx(0.6)
+        if edition == MemoirBookOutputExportLayout.STANDARD:
+            assert image.width / image.height == pytest.approx(0.6)
         assert image.y >= layout.margin_bottom
         assert image.y + image.height <= layout.page_height - layout.margin_top
-        assert all(line.y > image.y + image.height for line in page.commands if line.font_size == layout.font_size)
+        if edition == MemoirBookOutputExportLayout.STANDARD:
+            assert all(line.y > image.y + image.height for line in page.commands if line.font_size == layout.font_size)
     assert "".join(line.text for page in builder.pages for line in page.commands if line.font_size == layout.font_size) == text.replace("\n", "")
 
 
@@ -372,3 +382,30 @@ def test_featured_family_note_follows_its_chapter(edition):
     lines = [command.text for page in builder.pages for command in page.commands if hasattr(command, "text")]
     text = "".join(lines)
     assert text.index("家人留言") < text.index("小姑：我也记得这件事。") < text.index("下一章的正文")
+
+
+@pytest.mark.parametrize("position", ["before", "middle", "after"])
+@pytest.mark.parametrize("size", [(900, 600), (600, 900)])
+def test_print_illustrations_are_centered_between_complete_paragraphs(tmp_path, monkeypatch, position, size):
+    from app.services.memoir import book_output_export
+    monkeypatch.setattr(book_output_export, "DATA_DIR", tmp_path)
+    Image.new("RGB", size, "#789081").save(tmp_path / "photo.jpg")
+    layout = PDF_LAYOUTS[MemoirBookOutputExportLayout.LARGE_PRINT]
+    builder = PDFBookBuilder(title="往事", layout=layout)
+    paragraphs = ["第一段完整的故事。" * 20, "第二段完整的故事。" * 20]
+    _add_chapters(builder, [{"title": "往事", "sections": [{"section_id": "s", "title": "那一年", "content": "\n".join(paragraphs)}],
+        "illustrations": [{"storage_path": "photo.jpg", "caption": "照片说明", "placement": "chapter_inline", "section_id": "s", "inline_position": position}]}])
+    builder.finish()
+    ordered = "".join(c.text for p in builder.pages for c in p.commands if c.font_size in {layout.font_size, layout.small_font_size} and (c.text != "01"))
+    # The chapter label uses another style; compare only the story and caption.
+    expected = {"before": "照片说明" + "".join(paragraphs), "middle": paragraphs[0] + "照片说明" + paragraphs[1], "after": "".join(paragraphs) + "照片说明"}[position]
+    assert expected in ordered
+    found = [(i, p, im) for i, p in enumerate(builder.pages) for im in p.images if im.path.name == "photo.jpg"]
+    assert len(found) == 1
+    i, page, image = found[0]
+    assert image.width / image.height == pytest.approx(size[0] / size[1])
+    center = layout.page_width / 2 + (layout.inner_margin_delta if i % 2 else -layout.inner_margin_delta)
+    assert image.x + image.width / 2 == pytest.approx(center)
+    assert image.width <= (layout.page_width - 2 * layout.margin_x) * 0.85
+    assert all(c.y + c.font_size <= image.y or c.y >= image.y + image.height for c in page.commands if c.font_size == layout.font_size)
+    assert any(c.text == "照片说明" and c.y < image.y for c in page.commands)
