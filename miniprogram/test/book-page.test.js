@@ -570,7 +570,7 @@ test("book page identifies a drafted chapter missing from the current book", () 
     "chapter-2": secondDraft,
   });
   page.applyBookOutput.call(context, partialOutput, needsInput);
-  assert.match(context.data.chapters[1].bookInclusionNotice, /新增讲述尚未写入正文/);
+  assert.match(context.data.chapters[1].bookInclusionNotice, /1 条新讲述待整理/);
 
   page.applyBookOutput.call(context, sampleBookOutput(5, "全书正文", false, [], [], sampleBookManuscript()));
   assert.equal(context.data.chapters[1].bookInclusionNotice, "");
@@ -830,7 +830,7 @@ test("book page marks assigned sources as supplemental chapter work", () => {
   });
 
   assert.equal(chapters[0].pendingSourceCount, 1);
-  assert.match(chapters[0].chapterGuidanceText, /新增讲述尚未写入正文.*当前正文仍可阅读/);
+  assert.match(chapters[0].chapterGuidanceText, /1 条新讲述待整理/);
   assert.equal(chapters[0].chapterNeedsAction, true);
 });
 
@@ -846,7 +846,7 @@ test("book page labels completion answers separately from new narration", () => 
 
   assert.equal(chapters[0].pendingCompletionSourceCount, 2);
   assert.equal(chapters[0].pendingNewSourceCount, 0);
-  assert.match(chapters[0].chapterGuidanceText, /补充回答尚未写入正文.*当前正文仍可阅读/);
+  assert.match(chapters[0].chapterGuidanceText, /2 条补充回答待整理/);
   assert.equal(chapters[0].chapterNeedsAction, true);
 });
 
@@ -874,14 +874,14 @@ test("book page marks deleted chapter sources for review", () => {
 
   assert.equal(chapters[0].sourceCount, 0);
   assert.equal(chapters[0].removedSourceCount, 1);
-  assert.match(chapters[0].chapterGuidanceText, /讲述已删除.*当前正文仍可阅读/);
+  assert.match(chapters[0].chapterGuidanceText, /1 条讲述已删除.*正文待更新/);
 
   plan.chapters[0].pending_source_count = 1;
   plan.chapters[0].pending_new_source_count = 1;
   const [changedChapter] = mod.buildChapterViews(plan, {
     "chapter-1": sampleDraft(1, "draft", "第一版正文"),
   });
-  assert.match(changedChapter.chapterGuidanceText, /1 条讲述已删除，1 条新增讲述尚未写入正文/);
+  assert.match(changedChapter.chapterGuidanceText, /1 条讲述已删除.*1 条新讲述待整理/);
 });
 
 test("book page reorders chapters through structure command", async () => {
@@ -1079,7 +1079,8 @@ test("pending narration shows the server detail without leaving the book or hidi
     snapshot.progress.title = `${status} notice`;
     page.applyBookSnapshot.call(context, snapshot);
     assert.equal(context.data.bookPendingMaterialCount, 0);
-    assert.equal(context.data.bookActivityNotice, snapshot.progress.title);
+    assert.equal(context.data.bookActivityNotice, status === "failed"
+      ? "这次整理未完成，查看详情" : snapshot.progress.title);
     await context.openBookActivity();
     assert.match(urls.pop(), /^\/pages\/book-completion\/index\?/);
   }

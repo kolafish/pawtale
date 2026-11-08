@@ -56,7 +56,7 @@
       <share-response-inbox wx:if="{{bookContentAvailable}}" project-id="{{projectId}}" user-id="{{userId}}" show-likes="{{true}}" like-count="{{bookShareLikeCount}}" likers="{{bookShareLikers}}" />
     </view>
     <view wx:if="{{bookStaleNotice || bookActivityNotice}}" class="book-activity-notice" bindtap="openBookActivity" aria-role="button">
-      <text>{{bookPendingMaterialCount ? bookActivityNotice : (bookStaleNotice || (bookActivityNotice === '有内容需要您确认' ? '查看待确认内容' : bookActivityNotice))}}</text><text aria-hidden="true">›</text>
+      <text>{{bookActivityNotice || bookStaleNotice}}</text><text aria-hidden="true">›</text>
     </view>
   </view>
 

@@ -1,18 +1,7 @@
 <import src="../../templates/share-likes.wxml" />
 <view wx:if="{{showLikes || items.length || error}}" class="response-inbox {{showLikes ? 'with-likes' : ''}}">
   <button wx:if="{{showLikes}}" class="response-summary ui-button" bindtap="toggle" aria-expanded="{{open}}" aria-label="{{likeCount}} 位家人点赞，家人留言{{unread ? '，' + unread + ' 条未读' : ''}}，{{open ? '收起' : '展开'}}">
-    <view wx:if="{{likers.length}}" class="response-avatars" aria-hidden="true">
-      <block wx:for="{{likers}}" wx:key="key">
-        <block wx:if="{{index < 3}}">
-          <image wx:if="{{item.url}}" class="response-avatar" src="{{item.url}}" mode="aspectFill" />
-          <text wx:else class="response-avatar is-placeholder">家</text>
-        </block>
-      </block>
-    </view>
-    <view class="response-summary-copy">
-      <text wx:if="{{likeCount}}">{{likeCount}} 位家人点赞</text>
-      <text>家人留言{{unread ? ' · ' + unread + ' 条未读' : ''}}</text>
-    </view>
+    <text class="response-summary-copy"><text wx:if="{{likeCount}}">{{likeCount}} 位家人点赞<text aria-hidden="true"> · </text></text>家人留言{{unread ? ' · ' + unread + ' 条未读' : ''}}</text>
     <text class="response-disclosure" aria-hidden="true">{{open ? '⌃' : '⌄'}}</text>
   </button>
   <button wx:else class="ui-button ui-share-more" bindtap="toggle" aria-expanded="{{open}}">家人回应{{unread ? ' · ' + unread + ' 条未读' : ''}} {{open ? '⌃' : '⌄'}}</button>

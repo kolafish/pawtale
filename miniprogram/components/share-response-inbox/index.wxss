@@ -7,10 +7,7 @@
 
 .response-inbox.with-likes { margin: 24rpx 0 0; padding: 16rpx 0 0; border-top: 1rpx solid var(--ui-divider); border-radius: 0; background: transparent; }
 .response-inbox .response-summary { width: 100%; margin: 0; min-height: var(--ui-hit-size); padding: 8rpx 0; gap: 16rpx; justify-content: flex-start; background: transparent; color: var(--ui-text-secondary); text-align: left; font-size: var(--ui-font-meta); font-weight: 400; line-height: 1.5; }
-.response-avatars { display: flex; flex-shrink: 0; padding-left: 8rpx; }
-.response-avatar { display: block; width: 48rpx; height: 48rpx; margin-left: -8rpx; border: 2rpx solid var(--ui-surface); border-radius: 50%; background: var(--ui-accent-surface); color: var(--ui-accent-strong); font-size: 24rpx; line-height: 44rpx; text-align: center; }
-.response-summary-copy { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 2rpx 16rpx; }
-.response-summary-copy text { overflow-wrap: anywhere; }
+.response-summary-copy { flex: 1; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
 .response-disclosure { flex-shrink: 0; }
 .response-list-title { display: block; margin: 24rpx 0 12rpx; font-size: var(--ui-font-body); font-weight: 600; }
 .with-likes .share-like-list { margin-top: 20rpx; }
