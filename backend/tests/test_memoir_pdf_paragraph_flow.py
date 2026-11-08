@@ -63,7 +63,7 @@ def test_print_tail_images_grow_without_stretching_or_moving_surrounding_text(tm
         assert im.y + im.height == pytest.approx(top)
         assert im.y - caption.y == pytest.approx(gap)
         assert caption.y - caption.font_size * 0.25 >= layout.margin_bottom + layout.line_height
-        assert layout.margin_x <= im.x < im.x + im.width <= layout.page_width - layout.margin_x + layout.inner_margin_delta
+        assert layout.margin_x - layout.inner_margin_delta <= im.x < im.x + im.width <= layout.page_width - layout.margin_x + layout.inner_margin_delta
     assert page.commands[0].y == text_y
     assert len(builder.pages) == 2
 
@@ -350,8 +350,8 @@ def test_max_length_photo_caption_paginates_in_large_type_with_wide_margins(tmp_
     assert sum(len(page.images) for page in builder.pages) == (2 if mode == "gallery" else 1)
     image_page = next(page for page in builder.pages if page.images)
     assert any(line.font_size == layout.small_font_size for line in image_page.commands)
-    for page in builder.pages:
-        offset = layout.inner_margin_delta * (1 if page.body_page_number % 2 else -1) if layout.mirror_body_pages else 0
+    for pdf_index, page in enumerate(builder.pages):
+        offset = layout.inner_margin_delta * (1 if pdf_index % 2 else -1) if layout.mirror_body_pages else 0
         for image in page.images:
             assert image.height > 0 and image.width > 0
             assert layout.margin_bottom <= image.y < image.y + image.height <= layout.page_height - layout.margin_top

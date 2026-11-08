@@ -222,7 +222,7 @@ def _add_section_page(
     if (
         force_right_page
         and not builder.layout.reading_edition
-        and (len(builder.pages) + 1) % 2 == 0
+        and not builder.layout.is_right_page(len(builder.pages) + 1)
     ):
         builder.new_page(show_header=False, show_footer=False)
     builder.new_page(
@@ -1311,7 +1311,7 @@ def _add_chapters(builder: PDFBookBuilder, chapters: list[Any]) -> None:
         title = _chapter_title(chapter, fallback_index)
         label = _chapter_label(chapter, fallback_index)
         anchor = _chapter_anchor(fallback_index)
-        if builder.layout.mirror_body_pages and (len(builder.pages) + 1) % 2 == 0:
+        if builder.layout.mirror_body_pages and not builder.layout.is_right_page(len(builder.pages) + 1):
             builder.new_page(show_header=False, show_footer=False)
         builder.new_page(
             title,
@@ -1776,10 +1776,17 @@ def _build_manuscript_pdf_pages(
     back_matter = _dict(manuscript.get("back_matter"))
     if not profile and not chapters and not front_matter and not back_matter:
         builder = PDFBookBuilder(title=title, layout=layout)
+        if layout.mirror_body_pages:
+            _add_cover_page(
+                builder, title=title, subtitle="", narrator_name="", prepared_by="",
+                cover_style=DEFAULT_BOOK_DESIGN, cover_image=None,
+            )
         builder.new_page("正文", body_numbering=True)
         builder.add_heading(title)
         builder.add_body_text(content.strip() or title)
-        return builder.finish()
+        if layout.mirror_body_pages:
+            _add_back_cover(builder, quote="", cover_style=DEFAULT_BOOK_DESIGN)
+        return builder.finish(back_cover=layout.mirror_body_pages)
 
     book_title = _str(profile.get("title")) or title
     subtitle = _str(profile.get("subtitle"))
