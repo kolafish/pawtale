@@ -698,6 +698,10 @@ class PDFBookBuilder:
         fitting_height = page_height - caption_height - 18
         if fitting_height >= box_height * 0.75:
             box_height = min(box_height, fitting_height)
+        if self.layout.mirror_body_pages:
+            # Heading placement and image pagination share this first-page
+            # budget. The remaining caption is emitted by the paginating writer.
+            caption_height = min(caption_height, 6 + self.layout.small_font_size * 3)
         return box_width, box_height, caption_height
 
     def _add_pending_image(self) -> None:

@@ -409,3 +409,32 @@ def test_print_illustrations_are_centered_between_complete_paragraphs(tmp_path, 
     assert image.width <= (layout.page_width - 2 * layout.margin_x) * 0.85
     assert all(c.y + c.font_size <= image.y or c.y >= image.y + image.height for c in page.commands if c.font_size == layout.font_size)
     assert any(c.text == "照片说明" and c.y < image.y for c in page.commands)
+
+
+@pytest.mark.parametrize("display_size", ["half_width", "full_width"])
+def test_print_heading_and_photo_share_page_when_long_caption_continues(tmp_path, monkeypatch, display_size):
+    from app.services.memoir import book_output_export
+    monkeypatch.setattr(book_output_export, "DATA_DIR", tmp_path)
+    Image.new("RGB", (600, 900), "#789081").save(tmp_path / "photo.jpg")
+    layout = configured_pdf_layout(
+        PDF_LAYOUTS[MemoirBookOutputExportLayout.LARGE_PRINT], template="custom",
+        custom_layout={"font_scale": "large", "line_spacing": "relaxed", "page_margin": "wide"},
+    )
+    caption = ("这张照片记录了家人当年的生活。" * 40)[:500]
+    body = "那年我们回到村里，见到了家人。" * 20
+    builder = PDFBookBuilder(title="测试书稿", layout=layout)
+    _add_chapters(builder, [{"title": "工作经历", "sections": [{"section_id": "s", "title": "那一年", "content": body}],
+        "illustrations": [{"storage_path": "photo.jpg", "placement": "chapter_inline", "section_id": "s",
+                           "inline_position": "before", "display_size": display_size, "caption": caption}]}])
+    page = next(p for p in builder.pages if any(im.path.name == "photo.jpg" for im in p.images))
+    assert any(c.text == "那一年" for c in page.commands)
+    image = next(im for im in page.images if im.path.name == "photo.jpg")
+    assert image.height > 200
+    assert image.width / image.height == pytest.approx(600 / 900)
+    notes = [c for p in builder.pages for c in p.commands if c.font_size == layout.small_font_size]
+    assert "".join(c.text for c in notes) == caption
+    first_notes = [c for c in page.commands if c.font_size == layout.small_font_size]
+    assert 2 <= len(first_notes) < len(notes)
+    assert all(layout.margin_bottom <= c.y < image.y for c in first_notes)
+    assert all(layout.margin_bottom <= c.y <= layout.page_height - layout.margin_top for c in notes)
+    assert "".join(c.text for p in builder.pages for c in p.commands if c.font_size == layout.font_size) == body
