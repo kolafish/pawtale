@@ -106,10 +106,6 @@ _ACTIVE_SHARE_VIDEO_STATUSES = frozenset(
 )
 
 
-class ShareVideoLeaseLostError(RuntimeError):
-    pass
-
-
 class _ShareVideoTitleChoice(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -1074,7 +1070,7 @@ async def _commit_share_video_progress(
         )
     if result.rowcount != 1:
         await db.rollback()
-        raise ShareVideoLeaseLostError("share video job lease lost")
+        raise JobLeaseLostError("share video job lease lost")
     await db.commit()
 
 
@@ -1330,7 +1326,7 @@ async def run_share_video_job_with_session(
         if completed:
             _remove_video_completion_marker(target_path)
         return completed
-    except ShareVideoLeaseLostError:
+    except JobLeaseLostError:
         await db.rollback()
         logger.warning("share video job lease lost job_id=%s", lease.job_id)
         return False

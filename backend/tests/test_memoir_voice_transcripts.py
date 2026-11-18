@@ -1234,7 +1234,7 @@ async def test_mobile_memoir_creates_and_downloads_share_video_job(
         ),
     )
 
-    async def fail_background_generation(_request, *, usage_context=None):
+    async def fail_background_generation(_request, *, slot=None):
         raise share_video_backgrounds.ShareVideoBackgroundGenerationError("provider unavailable")
 
     monkeypatch.setattr(
@@ -2000,7 +2000,7 @@ async def test_mobile_memoir_share_video_job_uses_smart_multi_background_segment
     image_contexts: list[tuple[bool, bool]] = []
     references = []
 
-    async def fake_background(request, *, usage_context=None):
+    async def fake_background(request, *, slot=None):
         prompt = request.prompt
         assert narrator in prompt.prompt and note in prompt.prompt
         references.append(request.reference)

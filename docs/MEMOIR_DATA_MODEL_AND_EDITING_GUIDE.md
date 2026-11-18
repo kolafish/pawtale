@@ -1563,6 +1563,7 @@ Web 保存携带编辑起点的版本 ID；全书信息接口的 `expected_versi
 | `memoir_editing_jobs` | 异步编辑/整理任务 |
 | `memoir_automation_events` | 用户可见自动化事件 |
 | `memoir_material_share_videos` | 素材分享视频任务 |
+| `memoir_share_video_image_receipts` | 按任务和镜头记录生图结果，图片写入缓存并扣费后清除暂存的图像字节 |
 | `memoir_share_video_outputs` | 分享视频文件 |
 
 ---

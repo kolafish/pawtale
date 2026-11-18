@@ -6,7 +6,6 @@ from dataclasses import dataclass
 import logging
 from pathlib import Path
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.memoir import MemoirMaterialShareVideo
@@ -25,6 +24,9 @@ from app.services.memoir.share_video_backgrounds import (
     prepare_share_video_image_request,
     ShareVideoBackgroundRequest,
     ShareVideoImageReference,
+    ShareVideoImageSlot,
+    lock_share_video_image_owner,
+    recover_share_video_background,
     share_video_background_file_path,
     share_video_narrator_context,
     normalize_share_video_background_mode,
@@ -52,6 +54,7 @@ from app.services.memoir.share_video_metadata import (
     ShareVideoScenePlanMetadata,
 )
 from app.services.ai_usage_records import AIUsageContext
+from app.services.memoir.job_leases import JobLease
 
 
 logger = logging.getLogger(__name__)
@@ -173,6 +176,11 @@ async def prepare_share_video_background(
     project_metadata = project.metadata_json if project is not None and isinstance(project.metadata_json, dict) else {}
     narrator_context = share_video_narrator_context(project_metadata.get("memoir_profile"))
 
+    lease = JobLease(job.id, job.lease_token)
+
+    def image_slot(name: str) -> ShareVideoImageSlot | None:
+        return ShareVideoImageSlot(lease, name, usage_context) if usage_context else None
+
     if background_source == SHARE_VIDEO_BACKGROUND_SOURCE_CUSTOM:
         photo_paths = await load_share_video_photo_paths(
             db, project_id=job.project_id, asset_ids=metadata.photo_asset_ids,
@@ -272,7 +280,7 @@ async def prepare_share_video_background(
             scene: ShareVideoPlannedSceneMetadata, request: ShareVideoBackgroundRequest,
         ) -> tuple[ShareVideoPlannedSceneMetadata, ShareVideoBackgroundAsset | None, ShareVideoBackgroundGenerationError | None]:
             try:
-                asset = await get_or_generate_share_video_background(request, usage_context=usage_context)
+                asset = await get_or_generate_share_video_background(request, slot=image_slot(f"scene-{scene.index}"))
             except ShareVideoBackgroundGenerationError as exc:
                 return scene, None, exc
             return scene, asset, None
@@ -321,14 +329,8 @@ async def prepare_share_video_background(
             chosen = await asyncio.to_thread(ShareVideoImageReference.from_path, path)
             # Hold the job row only while publishing the reference and its progress.
             # Deletion or lease transfer must not leave a late JPEG on disk.
-            owner = await db.scalar(
-                select(MemoirMaterialShareVideo.id).where(
-                    MemoirMaterialShareVideo.id == job.id, MemoirMaterialShareVideo.lease_token == job.lease_token,
-                ).with_for_update()
-            )
-            if owner is None:
-                raise rendering.ShareVideoGenerationError("视频任务已结束，无法保存参考图")
-            await asyncio.to_thread(chosen.save, metadata.background_reference_storage_path)
+            await lock_share_video_image_owner(db, lease)
+            chosen.save(metadata.background_reference_storage_path)
             metadata.background_reference_digest = chosen.digest
             return chosen
 
@@ -336,8 +338,14 @@ async def prepare_share_video_background(
         # Look up the original key before building prompts from today's narrator settings.
         for scene in plan.scenes:
             key = metadata.scene_image_requests.get(scene.index)
-            if scene.index not in scene_paths and key and (cached := key.cached_asset()):
-                await record_scene(scene, cached, None)
+            if scene.index not in scene_paths and key:
+                try:
+                    cached = await recover_share_video_background(key, image_slot(f"scene-{scene.index}"))
+                except ShareVideoBackgroundGenerationError as exc:
+                    await record_scene(scene, None, exc)
+                else:
+                    if cached:
+                        await record_scene(scene, cached, None)
 
         reference = None
         reference_error = None
@@ -353,7 +361,8 @@ async def prepare_share_video_background(
                 ):
                     # Older jobs saved the cast status but only cached the original image.
                     already_paid = metadata.cast_reference_status == "ready"
-                    cast = metadata.cast_image_request.cached_asset() if metadata.cast_image_request else None
+                    cast_slot = image_slot("cast")
+                    cast = await recover_share_video_background(metadata.cast_image_request, cast_slot)
                     if cast is None:
                         request = prepare_share_video_image_request(
                             story_text, background_style, cast_subjects=tuple(plan.cast_reference_subjects),
@@ -362,7 +371,7 @@ async def prepare_share_video_background(
                         if not already_paid or not metadata.cast_image_request:
                             metadata.cast_image_request = request.key
                             await persist_progress(metadata)
-                            cast = await get_or_generate_share_video_background(request, usage_context=usage_context, cache_only=already_paid)
+                            cast = await get_or_generate_share_video_background(request, slot=cast_slot, cache_only=already_paid)
                     if cast:
                         reference = await select_reference(cast.path)
                     elif already_paid:
@@ -454,14 +463,15 @@ async def prepare_share_video_background(
         await persist_progress(metadata)
     else:
         try:
-            background = metadata.single_image_request.cached_asset() if metadata.single_image_request else None
+            single_slot = image_slot("single")
+            background = await recover_share_video_background(metadata.single_image_request, single_slot)
             if background is None:
                 request = prepare_share_video_image_request(
                     job.selected_text, background_style, narrator_context=narrator_context, background_note=metadata.background_note,
                 )
                 metadata.single_image_request = request.key
                 await persist_progress(metadata)
-                background = await get_or_generate_share_video_background(request, usage_context=usage_context)
+                background = await get_or_generate_share_video_background(request, slot=single_slot)
         except ShareVideoBackgroundGenerationError as exc:
             metadata.background_status = "failed"
             metadata.background_scene_count = 0
