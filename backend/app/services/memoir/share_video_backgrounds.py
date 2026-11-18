@@ -11,6 +11,7 @@ from uuid import uuid4
 
 import httpx
 from PIL import Image
+from pydantic import BaseModel
 
 from app.config import DATA_DIR, get_settings
 from app.services.provider_limits import provider_concurrency_limiter
@@ -57,6 +58,32 @@ class ShareVideoBackgroundAsset:
     cache_hit: bool
 
 
+class ShareVideoBackgroundCacheKey(BaseModel):
+    storage_path: str
+    style_id: str
+    model: str
+    prompt_hash: str
+    template_version: str
+
+    def asset(self, *, cache_hit: bool, model: str) -> ShareVideoBackgroundAsset:
+        return ShareVideoBackgroundAsset(
+            path=share_video_background_file_path(self.storage_path), storage_path=self.storage_path,
+            style_id=self.style_id, prompt_hash=self.prompt_hash, prompt_template_version=self.template_version,
+            provider=VolcArkImageGenerationService.provider_name, model=model, cache_hit=cache_hit,
+        )
+
+    def cached_asset(self) -> ShareVideoBackgroundAsset | None:
+        asset = self.asset(cache_hit=True, model=self.model)
+        return asset if asset.path.is_file() and asset.path.stat().st_size else None
+
+
+@dataclass(frozen=True)
+class ShareVideoBackgroundRequest:
+    prompt: ShareVideoBackgroundPrompt
+    key: ShareVideoBackgroundCacheKey
+    reference: ShareVideoImageReference | None
+
+
 @dataclass(frozen=True)
 class VolcArkGeneratedImage:
     content: bytes
@@ -82,7 +109,7 @@ class ShareVideoImageReference:
         return hashlib.sha256(self.content).hexdigest()
 
     @classmethod
-    def from_path(cls, path: Path, *, persist: bool = False) -> "ShareVideoImageReference":
+    def from_path(cls, path: Path) -> "ShareVideoImageReference":
         try:
             with Image.open(path) as source:
                 source.thumbnail((1400, 1600))
@@ -90,20 +117,21 @@ class ShareVideoImageReference:
                 source.convert("RGB").save(output, format="JPEG", quality=92)
         except (Image.DecompressionBombError, OSError) as exc:
             raise ShareVideoBackgroundGenerationError("无法读取分享视频人物参考图") from exc
-        reference = cls(output.getvalue())
-        if persist:
-            # Keep the exact bytes sent to Ark even if the source image is later replaced.
-            _write_background(cls._checkpoint_path(reference.digest), reference.content)
-        return reference
+        return cls(output.getvalue())
+
+    def save(self, storage_path: str) -> None:
+        _write_background(share_video_background_file_path(storage_path), self.content)
 
     @staticmethod
-    def _checkpoint_path(digest: str) -> Path:
-        return MEMOIR_SHARE_VIDEO_BACKGROUND_DIR / "references" / f"{digest}.jpg"
+    def legacy_storage_path(digest: object) -> str | None:
+        if isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest):
+            return f"memoir/share-video-backgrounds/references/{digest}.jpg"
+        return None
 
     @classmethod
-    def restore(cls, digest: str) -> "ShareVideoImageReference":
+    def restore(cls, digest: str, storage_path: str) -> "ShareVideoImageReference":
         try:
-            reference = cls(cls._checkpoint_path(digest).read_bytes())
+            reference = cls(share_video_background_file_path(storage_path).read_bytes())
         except OSError as exc:
             raise ShareVideoBackgroundGenerationError("已保存的人物参考图无法读取") from exc
         if reference.digest != digest:
@@ -514,7 +542,7 @@ def _write_background(path: Path, content: bytes) -> None:
         raise ShareVideoBackgroundGenerationError("分享视频背景图缓存写入失败") from exc
 
 
-async def get_or_generate_share_video_background(
+def prepare_share_video_image_request(
     selected_text: str,
     style_id: str | None,
     *,
@@ -525,13 +553,8 @@ async def get_or_generate_share_video_background(
     shot_direction: str = "",
     reference: ShareVideoImageReference | None = None,
     cast_subjects: tuple[str, ...] = (),
-    cache_only: bool = False,
-    usage_context: AIUsageContext | None = None,
-) -> ShareVideoBackgroundAsset | None:
+) -> ShareVideoBackgroundRequest:
     settings = get_settings()
-    if not settings.memoir_share_video_ai_background_enabled or not settings.volc_ark_api_key.strip():
-        return None
-
     if cast_subjects:
         style = share_video_background_style(style_id)
         prompt = _prompt_result(style, selected_text, _CAST_REFERENCE_PROMPT.format(
@@ -551,25 +574,29 @@ async def get_or_generate_share_video_background(
     extension = (settings.volc_ark_image_output_format.strip().lower() or "png").lstrip(".")
     model = settings.volc_ark_image_model.strip()
     storage_path = _background_storage_path(prompt.style.value, model, prompt.prompt_hash, extension)
-    path = share_video_background_file_path(storage_path)
-    if path.exists() and path.stat().st_size > 0:
-        return ShareVideoBackgroundAsset(
-            path=path,
-            storage_path=storage_path,
-            style_id=prompt.style.value,
-            prompt_hash=prompt.prompt_hash,
-            prompt_template_version=prompt.template_version,
-            provider=VolcArkImageGenerationService.provider_name,
-            model=model,
-            cache_hit=True,
-        )
-    if cache_only:
-        return None
+    key = ShareVideoBackgroundCacheKey(
+        storage_path=storage_path, style_id=prompt.style.value, model=model,
+        prompt_hash=prompt.prompt_hash, template_version=prompt.template_version,
+    )
+    return ShareVideoBackgroundRequest(prompt, key, reference)
 
+
+async def get_or_generate_share_video_background(
+    request: ShareVideoBackgroundRequest, *, usage_context: AIUsageContext | None = None,
+    cache_only: bool = False,
+) -> ShareVideoBackgroundAsset | None:
+    if cached := request.key.cached_asset():
+        return cached
+    settings = get_settings()
+    if cache_only or not settings.memoir_share_video_ai_background_enabled or not settings.volc_ark_api_key.strip():
+        return None
+    model = request.key.model
     try:
         if usage_context and usage_context.user_id:
             await assert_ai_credit_available(usage_context.user_id)
-        image = await VolcArkImageGenerationService().generate(prompt.prompt, reference_url=reference.data_url if reference else None)
+        image = await VolcArkImageGenerationService(model=model).generate(
+            request.prompt.prompt, reference_url=request.reference.data_url if request.reference else None,
+        )
     except Exception as exc:
         await record_ai_usage(
             provider=VolcArkImageGenerationService.provider_name,
@@ -597,14 +624,6 @@ async def get_or_generate_share_video_background(
         image_count=1,
         context=usage_context,
     )
-    _write_background(path, image.content)
-    return ShareVideoBackgroundAsset(
-        path=path,
-        storage_path=storage_path,
-        style_id=prompt.style.value,
-        prompt_hash=prompt.prompt_hash,
-        prompt_template_version=prompt.template_version,
-        provider=VolcArkImageGenerationService.provider_name,
-        model=image.model,
-        cache_hit=False,
-    )
+    asset = request.key.asset(cache_hit=False, model=image.model)
+    _write_background(asset.path, image.content)
+    return asset

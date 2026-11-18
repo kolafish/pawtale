@@ -40,6 +40,7 @@ from app.schemas.memoir_voice import (
     MemoirShareVideoCountResponse,
 )
 from app.services.ai_calls import generate_structured_with_client
+from app.services.memoir.project_deletion import delete_unreferenced_media, share_video_media_paths
 from app.services.ai_factory import get_ai_service
 from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_usage_records import AIUsageContext, reset_ai_usage_context, set_ai_usage_context
@@ -660,6 +661,9 @@ async def delete_share_video_job(
     if not finished and job.status != MemoirShareVideoJobStatus.FAILED.value:
         raise HTTPException(status_code=409, detail="视频还在制作中，完成后才能删除")
     video_path = share_video_file_path(job, job.output)
+    media = share_video_media_paths(job)
+    if job.output is not None:
+        media.discard(job.output.storage_path)
     # Illustrations remain reusable in the image library after deleting a video.
     await db.execute(
         update(MemoirImageAsset)
@@ -680,6 +684,7 @@ async def delete_share_video_job(
     except OSError:
         logger.exception("failed to remove deleted share video file job_id=%s", job_id)
     _remove_video_completion_marker(video_path)
+    await delete_unreferenced_media(db, media)
 
 
 async def list_share_video_jobs(
