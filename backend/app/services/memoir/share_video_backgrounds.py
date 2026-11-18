@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from functools import cached_property
 import hashlib
 from io import BytesIO
+import os
 from pathlib import Path
 import re
 from uuid import uuid4
@@ -12,8 +13,14 @@ from uuid import uuid4
 import httpx
 from PIL import Image
 from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import DATA_DIR, get_settings
+from app.database import async_session_maker
+from app.models.memoir import MemoirMaterialShareVideo, MemoirShareVideoImageReceipt
+from app.models.users import User
+from app.services.memoir.job_leases import JobLease, JobLeaseLostError
 from app.services.provider_limits import provider_concurrency_limiter
 from app.services.ai_credits import assert_ai_credit_available
 from app.services.ai_costs import estimate_image_cost
@@ -533,11 +540,22 @@ class VolcArkImageGenerationService:
 
 
 def _write_background(path: Path, content: bytes) -> None:
+    temp_path = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        temp_path = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
-        temp_path.write_bytes(content)
-        temp_path.replace(path)
+        try:
+            with temp_path.open("xb") as output:
+                output.write(content)
+                output.flush()
+                os.fsync(output.fileno())
+            temp_path.replace(path)
+            parent_fd = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(parent_fd)
+            finally:
+                os.close(parent_fd)
+        finally:
+            temp_path.unlink(missing_ok=True)
     except OSError as exc:
         raise ShareVideoBackgroundGenerationError("分享视频背景图缓存写入失败") from exc
 
@@ -581,19 +599,84 @@ def prepare_share_video_image_request(
     return ShareVideoBackgroundRequest(prompt, key, reference)
 
 
+async def lock_share_video_image_owner(db: AsyncSession, lease: JobLease) -> None:
+    owner = await db.scalar(
+        select(MemoirMaterialShareVideo.id).where(
+            MemoirMaterialShareVideo.id == lease.job_id, MemoirMaterialShareVideo.lease_token == lease.token,
+        ).with_for_update()
+    )
+    if owner is None:
+        raise JobLeaseLostError("视频任务已结束，无法保存配图")
+
+
+@dataclass(frozen=True)
+class ShareVideoImageSlot:
+    lease: JobLease
+    name: str
+    usage: AIUsageContext
+
+    async def stage(self, key: ShareVideoBackgroundCacheKey, image: VolcArkGeneratedImage) -> None:
+        async with async_session_maker.begin() as db:
+            await lock_share_video_image_owner(db, self.lease)
+            if await db.get(MemoirShareVideoImageReceipt, (self.lease.job_id, self.name)) is None:
+                db.add(MemoirShareVideoImageReceipt(
+                    job_id=self.lease.job_id, slot=self.name, model=image.model,
+                    cache_key=key.model_dump(), pending_content=image.content,
+                ))
+
+
+async def recover_share_video_background(
+    key: ShareVideoBackgroundCacheKey | None, slot: ShareVideoImageSlot | None, *, cache_hit: bool = True,
+) -> ShareVideoBackgroundAsset | None:
+    if key is None:
+        return None
+    if slot is None:
+        return key.cached_asset()
+    async with async_session_maker.begin() as db:
+        identity = (slot.lease.job_id, slot.name)
+        if slot.usage.user_id:
+            # Account deletion locks the user before collecting jobs. Keep that order
+            # when the debit will also take a foreign-key lock on the same user.
+            await db.scalar(select(User.id).where(User.id == slot.usage.user_id).with_for_update(read=True, key_share=True))
+        await lock_share_video_image_owner(db, slot.lease)
+        receipt = await db.get(MemoirShareVideoImageReceipt, identity)
+        if receipt is None:
+            # Read the receipt and free cache under the same lock as publication.
+            return key.cached_asset()
+        original = ShareVideoBackgroundCacheKey.model_validate(receipt.cache_key)
+        asset = original.asset(cache_hit=cache_hit, model=receipt.model)
+        if receipt.pending_content is None:
+            if not asset.path.is_file() or not asset.path.stat().st_size:
+                raise ShareVideoBackgroundGenerationError("已生成的背景图文件缺失")
+            return asset
+        try:
+            _write_background(asset.path, receipt.pending_content)
+        except ShareVideoBackgroundGenerationError as exc:
+            # Retry the job against the staged bytes, even for a single-frame video.
+            raise OSError("暂存的分享视频背景图尚未写入缓存") from exc
+        await record_ai_usage(
+            provider=asset.provider, model=asset.model, status="succeeded", image_count=1,
+            cost=estimate_image_cost(provider=asset.provider, model=asset.model, image_count=1),
+            context=slot.usage, db=db,
+        )
+        # Clearing the bytes and debiting share one commit under the job lock.
+        receipt.pending_content = None
+        return asset
+
+
 async def get_or_generate_share_video_background(
-    request: ShareVideoBackgroundRequest, *, usage_context: AIUsageContext | None = None,
+    request: ShareVideoBackgroundRequest, *, slot: ShareVideoImageSlot | None = None,
     cache_only: bool = False,
 ) -> ShareVideoBackgroundAsset | None:
-    if cached := request.key.cached_asset():
+    if cached := await recover_share_video_background(request.key, slot):
         return cached
     settings = get_settings()
     if cache_only or not settings.memoir_share_video_ai_background_enabled or not settings.volc_ark_api_key.strip():
         return None
     model = request.key.model
     try:
-        if usage_context and usage_context.user_id:
-            await assert_ai_credit_available(usage_context.user_id)
+        if slot and slot.usage.user_id:
+            await assert_ai_credit_available(slot.usage.user_id)
         image = await VolcArkImageGenerationService(model=model).generate(
             request.prompt.prompt, reference_url=request.reference.data_url if request.reference else None,
         )
@@ -609,21 +692,12 @@ async def get_or_generate_share_video_background(
             ),
             image_count=1,
             error_type=type(exc).__name__,
-            context=usage_context,
+            context=slot.usage if slot else None,
         )
         raise
-    await record_ai_usage(
-        provider=VolcArkImageGenerationService.provider_name,
-        model=image.model,
-        status="succeeded",
-        cost=estimate_image_cost(
-            provider=VolcArkImageGenerationService.provider_name,
-            model=image.model,
-            image_count=1,
-        ),
-        image_count=1,
-        context=usage_context,
-    )
+    if slot:
+        await slot.stage(request.key, image)
+        return await recover_share_video_background(request.key, slot, cache_hit=False)
     asset = request.key.asset(cache_hit=False, model=image.model)
     _write_background(asset.path, image.content)
     return asset

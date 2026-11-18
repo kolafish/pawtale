@@ -8,6 +8,7 @@ import logging
 from uuid import uuid4
 
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session_maker
 from app.models.ai_credits import AICreditAccount, AICreditTransaction
@@ -66,13 +67,15 @@ async def record_ai_usage(
     error_type: str | None = None,
     context: AIUsageContext | None = None,
     billable: bool | None = None,
+    db: AsyncSession | None = None,
 ) -> None:
     """Record the upstream estimate and debit the user at the current rate.
 
     Only successful calls are debited by default. Callers pass ``billable=True``
     for a failed or interrupted call whose usage is still exactly known (for
     example audio already streamed to ASR, or tokens of a rejected structured
-    output), since the provider charges for it.
+    output), since the provider charges for it. With an explicit database session
+    the caller owns the transaction and receives any write error.
     """
     resolved_context = context or _CONTEXT.get()
     if resolved_context is None:
@@ -122,35 +125,43 @@ async def record_ai_usage(
             cost_status=cost.status,
             error_type=error_type,
         )
-        async with async_session_maker() as db:
-            db.add(record)
-            await db.flush()
-            if resolved_context.user_id and charge > 0:
-                await ensure_ai_credit_account(db, resolved_context.user_id, commit=False)
-                account = await db.scalar(
-                    select(AICreditAccount)
-                    .where(AICreditAccount.user_id == resolved_context.user_id)
-                    .with_for_update()
-                )
-                if account is None:
-                    raise RuntimeError("AI credit account could not be initialized")
-                db.add(
-                    AICreditTransaction(
-                        account_id=account.id,
-                        user_id=resolved_context.user_id,
-                        transaction_type=USAGE_DEBIT,
-                        amount_rmb=-charge,
-                        usage_record_id=record.id,
-                        operation_id=resolved_context.operation_id,
-                    )
-                )
-            await db.commit()
+        if db is not None:
+            await _add_usage_and_debit(db, record)
+        else:
+            async with async_session_maker.begin() as own_db:
+                await _add_usage_and_debit(own_db, record)
     except Exception:
+        if db is not None:
+            raise
         logger.exception(
             "AI usage record write failed operation_id=%s provider=%s model=%s",
             resolved_context.operation_id,
             provider,
             model,
+        )
+
+
+async def _add_usage_and_debit(db: AsyncSession, record: AIUsageRecord) -> None:
+    db.add(record)
+    await db.flush()
+    if record.user_id and record.charged_rmb is not None and record.charged_rmb > 0:
+        await ensure_ai_credit_account(db, record.user_id, commit=False)
+        account = await db.scalar(
+            select(AICreditAccount)
+            .where(AICreditAccount.user_id == record.user_id)
+            .with_for_update()
+        )
+        if account is None:
+            raise RuntimeError("AI credit account could not be initialized")
+        db.add(
+            AICreditTransaction(
+                account_id=account.id,
+                user_id=record.user_id,
+                transaction_type=USAGE_DEBIT,
+                amount_rmb=-record.charged_rmb,
+                usage_record_id=record.id,
+                operation_id=record.operation_id,
+            )
         )
 
 

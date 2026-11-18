@@ -144,9 +144,9 @@ async def _referenced_audio_ids(
 
 async def _remaining_media_paths(db: AsyncSession) -> set[str]:
     paths: set[str] = set()
-    for asset in (await db.scalars(select(MemoirImageAsset))).all():
+    for asset in (await db.scalars(select(MemoirImageAsset).execution_options(populate_existing=True))).all():
         paths.update(_image_paths(asset))
-    for job in (await db.scalars(select(MemoirMaterialShareVideo))).all():
+    for job in (await db.scalars(select(MemoirMaterialShareVideo).execution_options(populate_existing=True))).all():
         paths.update(share_video_media_paths(job))
     return paths
 
@@ -265,6 +265,7 @@ async def delete_project(
                 select(MemoirMaterialShareVideo)
                 .where(MemoirMaterialShareVideo.project_id == project_id)
                 .with_for_update(of=MemoirMaterialShareVideo)
+                .execution_options(populate_existing=True)
             )
         ).all()
     )

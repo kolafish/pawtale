@@ -14,6 +14,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Index,
     Integer,
+    LargeBinary,
     JSON,
     String,
     Text,
@@ -454,6 +455,19 @@ class MemoirMaterialShareVideo(Base):
         lazy="joined",
         uselist=False,
     )
+
+
+class MemoirShareVideoImageReceipt(Base):
+    __tablename__ = "memoir_share_video_image_receipts"
+
+    job_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("memoir_material_share_videos.id", ondelete="CASCADE"), primary_key=True,
+    )
+    slot: Mapped[str] = mapped_column(String(32), primary_key=True)
+    model: Mapped[str] = mapped_column(String(120), nullable=False)
+    cache_key: Mapped[dict] = mapped_column(JSON, nullable=False)
+    # Retain the provider result until the cache exists and its debit commits.
+    pending_content: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
 
 
 class MemoirShareVideoOutput(Base):
