@@ -982,6 +982,97 @@ async def test_share_video_planned_direction_and_fixed_reference_reach_each_shot
     assert len(calls) == len(shots) + int(has_cast)
 
 
+@pytest.mark.parametrize(("second_cast", "third_cast", "expected"), [
+    (("我", "邻居"), (), ()),
+    (("我", "妻子", "邻居"), ("妻子",), ("我", "妻子")),
+])
+def test_cast_reference_only_includes_recurring_characters(second_cast, third_cast, expected):
+    def shot(index, characters, clear_faces=()):
+        return share_video_scene_planner.ShareVideoScene(
+            index, index, index + 1, index * 1000, (index + 1) * 1000, "",
+            characters=characters, clear_faces=clear_faces,
+        )
+    scenes = [shot(0, ("我",), ("我",)), shot(1, second_cast), shot(2, third_cast)]
+    assert share_video_scene_planner.share_video_cast_reference_subjects(scenes) == expected
+
+
+@pytest.mark.parametrize("reference_state", ["checkpoint", "legacy", "damaged"])
+async def test_share_video_resume_keeps_second_shot_as_reference_and_reuses_paid_frames(
+    tmp_path, monkeypatch, reference_state,
+):
+    orchestration = share_video_jobs.background_orchestration
+    text = "甲乙丙"
+    job = SimpleNamespace(project_id="project", selected_text=text, start_ms=0, end_ms=30_000)
+    metadata = orchestration.ShareVideoJobMetadata(background_mode="smart_multi", background_scene_plan={
+        "version": share_video_scene_planner.SHARE_VIDEO_SCENE_PLAN_VERSION,
+        "scenes": [
+            {"index": i, "start_char": i, "end_char": i + 1, "start_ms": i * 10_000,
+             "end_ms": (i + 1) * 10_000, "shot_direction": f"镜头{i}"} for i in range(3)
+        ],
+    })
+    project = SimpleNamespace(metadata_json={})
+    db = SimpleNamespace(get=AsyncMock(return_value=project))
+    settings = share_video_backgrounds.get_settings().model_copy(update={
+        "memoir_share_video_ai_background_enabled": True, "volc_ark_api_key": "test",
+    })
+    calls = []
+    async def generate(service, prompt, *, reference_url):
+        shot = next(i for i in range(3) if f"镜头{i}" in prompt)
+        if shot == 2:
+            persisted = share_video_backgrounds.ShareVideoImageReference.restore(saved["background_reference_digest"])
+            assert reference_url == persisted.data_url
+            assert saved["background_scenes"][1]["background_status"] == "ready"
+        calls.append((shot, reference_url))
+        if len(calls) == 1:
+            raise share_video_backgrounds.ShareVideoBackgroundGenerationError("首镜临时失败")
+        buf = BytesIO()
+        Image.new("RGB", (32, 48), (60 * shot, 20, 30)).save(buf, "PNG")
+        return share_video_backgrounds.VolcArkGeneratedImage(buf.getvalue(), "image/png", service.model, {})
+
+    monkeypatch.setattr(share_video_backgrounds, "get_settings", lambda: settings)
+    monkeypatch.setattr(share_video_backgrounds, "MEMOIR_SHARE_VIDEO_BACKGROUND_DIR", tmp_path)
+    monkeypatch.setattr(share_video_backgrounds.VolcArkImageGenerationService, "generate", generate)
+    register = AsyncMock()
+    monkeypatch.setattr(orchestration, "register_share_video_background_asset", register)
+    saved = {}
+    class WorkerStopped(Exception):
+        pass
+
+    async def persist(current):
+        saved.update(current.to_json())
+        if current.background_generated_count == 2:
+            raise WorkerStopped
+
+    async def prepare(data, callback):
+        return await orchestration.prepare_share_video_background(
+            db, job=job, metadata=data, persist_progress=callback, ai_background_enabled=True, volc_ark_api_key="test",
+        )
+
+    with pytest.raises(WorkerStopped):
+        await prepare(metadata, persist)
+    assert [i for i, _ in calls] == [0, 1, 2]
+    anchor = calls[2][1]
+    assert anchor and calls[1][1] is None and saved["background_reference_digest"]
+    paid_paths = [s["background_storage_path"] for s in saved["background_scenes"][1:]]
+    if reference_state == "legacy":
+        saved.pop("background_reference_digest")
+    elif reference_state == "damaged":
+        (tmp_path / "references" / f"{saved['background_reference_digest']}.jpg").write_bytes(b"incomplete")
+    project.metadata_json = {"memoir_profile": {"narrator_gender": "female"}}
+    restored = orchestration.ShareVideoJobMetadata.from_json(saved)
+    prepared = await prepare(restored, AsyncMock())
+    if reference_state == "damaged":
+        assert calls[3:] == [] and register.await_count == 2
+        assert restored.background_status == "partial" and restored.background_generated_count == 2
+        assert prepared.segments[0].image_path == prepared.segments[1].image_path
+    else:
+        assert calls[3:] == [(0, anchor)] and register.await_count == 3
+        assert restored.background_status == "ready" and restored.background_generated_count == 3
+    assert [segment.image_path for segment in prepared.segments[1:]] == [
+        share_video_backgrounds.share_video_background_file_path(path) for path in paid_paths
+    ]
+
+
 def test_share_video_scene_planner_normalizes_continuous_sentence_groups():
     text = "小时候一家人住在老房子里。后来去县城读书。再后来大家各自成家。"
     char_timings = [

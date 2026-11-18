@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import base64
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from functools import cached_property
 import hashlib
 from io import BytesIO
 from pathlib import Path
@@ -70,11 +71,18 @@ class ShareVideoBackgroundGenerationError(RuntimeError):
 
 @dataclass(frozen=True)
 class ShareVideoImageReference:
-    data_url: str
-    digest: str
+    content: bytes = field(repr=False)
+
+    @cached_property
+    def data_url(self) -> str:
+        return "data:image/jpeg;base64," + base64.b64encode(self.content).decode("ascii")
+
+    @cached_property
+    def digest(self) -> str:
+        return hashlib.sha256(self.content).hexdigest()
 
     @classmethod
-    def from_path(cls, path: Path) -> "ShareVideoImageReference":
+    def from_path(cls, path: Path, *, persist: bool = False) -> "ShareVideoImageReference":
         try:
             with Image.open(path) as source:
                 source.thumbnail((1400, 1600))
@@ -82,11 +90,25 @@ class ShareVideoImageReference:
                 source.convert("RGB").save(output, format="JPEG", quality=92)
         except (Image.DecompressionBombError, OSError) as exc:
             raise ShareVideoBackgroundGenerationError("无法读取分享视频人物参考图") from exc
-        content = output.getvalue()
-        return cls(
-            data_url="data:image/jpeg;base64," + base64.b64encode(content).decode("ascii"),
-            digest=hashlib.sha256(content).hexdigest(),
-        )
+        reference = cls(output.getvalue())
+        if persist:
+            # Keep the exact bytes sent to Ark even if the source image is later replaced.
+            _write_background(cls._checkpoint_path(reference.digest), reference.content)
+        return reference
+
+    @staticmethod
+    def _checkpoint_path(digest: str) -> Path:
+        return MEMOIR_SHARE_VIDEO_BACKGROUND_DIR / "references" / f"{digest}.jpg"
+
+    @classmethod
+    def restore(cls, digest: str) -> "ShareVideoImageReference":
+        try:
+            reference = cls(cls._checkpoint_path(digest).read_bytes())
+        except OSError as exc:
+            raise ShareVideoBackgroundGenerationError("已保存的人物参考图无法读取") from exc
+        if reference.digest != digest:
+            raise ShareVideoBackgroundGenerationError("已保存的人物参考图内容不匹配")
+        return reference
 
 
 _VIDEO_BACKGROUND_PROMPT = """根据以下口述内容，创作一张竖版 9:16 的短视频画面：
@@ -375,8 +397,10 @@ def _background_storage_path(style_id: str, model: str, prompt_hash: str, extens
     )
 
 
-def _background_file_path(storage_path: str) -> Path:
+def share_video_background_file_path(storage_path: str) -> Path:
     relative = Path(storage_path).relative_to(Path("memoir") / "share-video-backgrounds")
+    if ".." in relative.parts:
+        raise ValueError("分享视频背景图路径无效")
     return MEMOIR_SHARE_VIDEO_BACKGROUND_DIR / relative
 
 
@@ -501,6 +525,7 @@ async def get_or_generate_share_video_background(
     shot_direction: str = "",
     reference: ShareVideoImageReference | None = None,
     cast_subjects: tuple[str, ...] = (),
+    cache_only: bool = False,
     usage_context: AIUsageContext | None = None,
 ) -> ShareVideoBackgroundAsset | None:
     settings = get_settings()
@@ -526,7 +551,7 @@ async def get_or_generate_share_video_background(
     extension = (settings.volc_ark_image_output_format.strip().lower() or "png").lstrip(".")
     model = settings.volc_ark_image_model.strip()
     storage_path = _background_storage_path(prompt.style.value, model, prompt.prompt_hash, extension)
-    path = _background_file_path(storage_path)
+    path = share_video_background_file_path(storage_path)
     if path.exists() and path.stat().st_size > 0:
         return ShareVideoBackgroundAsset(
             path=path,
@@ -538,6 +563,8 @@ async def get_or_generate_share_video_background(
             model=model,
             cache_hit=True,
         )
+    if cache_only:
+        return None
 
     try:
         if usage_context and usage_context.user_id:

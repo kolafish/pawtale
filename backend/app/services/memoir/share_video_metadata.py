@@ -93,6 +93,7 @@ class ShareVideoJobMetadata(_ShareVideoMetadataModel):
     background_scene_count: int = Field(default=0, ge=0)
     background_generated_count: int = Field(default=0, ge=0)
     background_reused_scene_count: int = Field(default=0, ge=0)
+    background_reference_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     cast_reference_status: Literal["ready", "failed"] | None = None
     background_scene_plan: ShareVideoScenePlanMetadata | None = None
     background_scenes: list[ShareVideoSceneAssetMetadata] = Field(default_factory=list)
