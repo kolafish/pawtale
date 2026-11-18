@@ -22,6 +22,7 @@ from app.services.memoir.share_video_backgrounds import (
     ShareVideoBackgroundGenerationError,
     get_or_generate_share_video_background,
     ShareVideoImageReference,
+    share_video_background_file_path,
     share_video_narrator_context,
     normalize_share_video_background_mode,
     normalize_share_video_background_style,
@@ -38,6 +39,7 @@ from app.services.memoir.share_video_scene_planner import (
     group_share_video_sentences,
     plan_share_video_background_scenes,
     scene_plan_to_metadata,
+    share_video_cast_reference_subjects,
 )
 from app.services.memoir.share_video_metadata import (
     BackgroundStatus,
@@ -206,23 +208,39 @@ async def prepare_share_video_background(
             plan = ShareVideoScenePlanMetadata.model_validate(scene_plan_to_metadata(planned))
             metadata.background_scene_plan = plan
             metadata.cast_reference_status = None
+            metadata.background_reference_digest = None
+            metadata.background_scenes = []
+        elif metadata.cast_reference_status is None and not metadata.background_scenes and not metadata.background_reference_digest:
+            # An unfinished plan from before the recurring-cast rule may not have drawn anything yet.
+            plan.cast_reference_subjects = list(share_video_cast_reference_subjects(plan.scenes))
         metadata.background_status = "generating"
         metadata.background_scene_count = len(plan.scenes)
-        metadata.background_generated_count = 0
-        metadata.background_scenes = []
         metadata.background_reused_scene_count = 0
         metadata.background_plan_provider = plan.provider
         metadata.background_plan_model = plan.model
         metadata.background_error_message = ""
-        await persist_progress(metadata)
 
         story_text = job.selected_text
         visual_context = plan.visual_context
         if plan.person_count:
             visual_context += f"\n参与这段经历的人物数量：{plan.person_count}。"
-        scene_assets: dict[int, ShareVideoSceneAssetMetadata] = {}
+        scene_assets = {scene.index: scene for scene in metadata.background_scenes}
         scene_paths: dict[int, Path | None] = {}
-        errors: dict[int, str] = {}
+        for scene in scene_assets.values():
+            if scene.background_storage_path:
+                path = share_video_background_file_path(scene.background_storage_path)
+                if path.is_file() and path.stat().st_size:
+                    scene_paths[scene.index] = path
+                    scene.background_cache_hit = True
+                    scene.background_status = "ready"
+                    scene.background_error_message = ""
+                else:
+                    # Retain the receipt for a paid image even if its file was removed.
+                    scene_paths[scene.index] = None
+                    scene.background_status = "failed"
+                    scene.background_error_message = "已生成的背景图文件缺失"
+        metadata.background_generated_count = sum(path is not None for path in scene_paths.values())
+        await persist_progress(metadata)
 
         async def generate_scene(
             scene: ShareVideoPlannedSceneMetadata, reference: ShareVideoImageReference | None,
@@ -250,7 +268,6 @@ async def prepare_share_video_background(
         ) -> None:
             scene_info = ShareVideoSceneAssetMetadata.model_validate(scene.model_dump())
             if error is not None:
-                errors[scene.index] = f"{scene.index + 1}: {str(error)[:120]}"
                 scene_info.background_status = "failed"
                 scene_info.background_error_message = str(error)[:300]
                 scene_paths[scene.index] = None
@@ -284,31 +301,61 @@ async def prepare_share_video_background(
             metadata.background_scenes = [scene_assets[index] for index in sorted(scene_assets)]
             await persist_progress(metadata)
 
+        async def select_reference(path: Path) -> ShareVideoImageReference:
+            chosen = await asyncio.to_thread(ShareVideoImageReference.from_path, path, persist=True)
+            metadata.background_reference_digest = chosen.digest
+            return chosen
+
         reference = None
-        if plan.cast_reference_subjects and metadata.cast_reference_status != "failed":
+        reference_error = None
+        unfinished = [scene for scene in plan.scenes if scene.index not in scene_paths]
+        if unfinished:
             try:
-                cast = await get_or_generate_share_video_background(
-                    story_text, background_style, cast_subjects=tuple(plan.cast_reference_subjects),
-                    visual_context=visual_context, narrator_context=narrator_context,
-                    background_note=metadata.background_note, usage_context=usage_context,
-                )
-                if cast:
-                    reference = await asyncio.to_thread(ShareVideoImageReference.from_path, cast.path)
+                if metadata.background_reference_digest:
+                    reference = await asyncio.to_thread(ShareVideoImageReference.restore, metadata.background_reference_digest)
+                elif metadata.cast_reference_status == "ready" or (
+                    plan.cast_reference_subjects and metadata.cast_reference_status != "failed" and not scene_paths
+                ):
+                    # Older jobs saved the cast status but only cached the original image.
+                    already_paid = metadata.cast_reference_status == "ready"
+                    cast = await get_or_generate_share_video_background(
+                        story_text, background_style, cast_subjects=tuple(plan.cast_reference_subjects),
+                        visual_context=visual_context, narrator_context=narrator_context,
+                        background_note=metadata.background_note, usage_context=usage_context, cache_only=already_paid,
+                    )
+                    if cast:
+                        reference = await select_reference(cast.path)
+                    elif already_paid:
+                        raise ShareVideoBackgroundGenerationError("原有的多人定稿图已缺失")
+                    metadata.cast_reference_status = "ready" if reference else "failed"
+                elif scene_paths:
+                    # Before checkpoints, the first successful scene was the fixed reference.
+                    anchor = scene_paths[min(scene_paths)]
+                    if anchor is None:
+                        raise ShareVideoBackgroundGenerationError("原有的首张参考图已缺失")
+                    reference = await select_reference(anchor)
             except ShareVideoBackgroundGenerationError as exc:
-                logger.warning("Share video cast reference unavailable: %s", exc)
-            metadata.cast_reference_status = "ready" if reference else "failed"
+                if metadata.background_reference_digest or metadata.cast_reference_status == "ready" or scene_paths:
+                    reference_error = exc
+                else:
+                    metadata.cast_reference_status = "failed"
+                logger.warning("Share video reference unavailable: %s", exc)
             await persist_progress(metadata)
 
-        remaining = iter(plan.scenes)
-        if reference is None and len(plan.scenes) > 1:
-            # The first usable on-screen image anchors every later scene.
+        remaining = iter(unfinished)
+        if reference_error:
+            # Preserve paid frames and let the renderer fill gaps with adjacent frames.
+            for scene in remaining:
+                await record_scene(scene, None, reference_error)
+        elif reference is None and len(plan.scenes) > 1:
             for scene in remaining:
                 _, asset, error = await generate_scene(scene, None)
-                if asset and scene.index < len(plan.scenes) - 1:
+                if asset:
                     try:
-                        reference = await asyncio.to_thread(ShareVideoImageReference.from_path, asset.path)
+                        reference = await select_reference(asset.path)
                     except ShareVideoBackgroundGenerationError as exc:
                         asset, error = None, exc
+                # The scene receipt and the chosen reference commit in the same transaction.
                 await record_scene(scene, asset, error)
                 if reference:
                     break
@@ -331,7 +378,10 @@ async def prepare_share_video_background(
         first_asset_provider = ready_assets[0].background_provider if ready_assets else None
         first_asset_model = ready_assets[0].background_model if ready_assets else None
         scene_asset_list = [scene_assets[index] for index in sorted(scene_assets)]
-        error_messages = [errors[index] for index in sorted(errors)]
+        error_messages = [
+            f"{scene.index + 1}: {scene.background_error_message[:120]}"
+            for scene in scene_asset_list if scene.background_error_message
+        ]
 
         if first_valid_path is None:
             metadata.background_status = "failed"

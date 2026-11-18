@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from hashlib import sha256
 import logging
 import re
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -13,6 +15,10 @@ from app.services.ai_calls import generate_structured_with_client
 from app.services.ai_factory import get_ai_service
 from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
+
+
+if TYPE_CHECKING:
+    from app.services.memoir.share_video_metadata import ShareVideoPlannedSceneMetadata
 
 
 logger = logging.getLogger(__name__)
@@ -538,14 +544,15 @@ def _normalize_llm_sentence_scenes(
     return [replace(scene, index=i) for i, scene in enumerate(scenes)]
 
 
-def _cast_reference_subjects(scenes: list[ShareVideoScene]) -> tuple[str, ...]:
-    appearances = Counter(name for scene in scenes for name in scene.characters)
-    if len(appearances) < 2 or max(appearances.values()) < 2:
+def share_video_cast_reference_subjects(
+    scenes: Sequence[ShareVideoScene | ShareVideoPlannedSceneMetadata],
+) -> tuple[str, ...]:
+    appearances = Counter(name for scene in scenes for name in dict.fromkeys(scene.characters))
+    recurring = tuple(name for name, count in appearances.items() if count >= 2)
+    if len(recurring) < 2:
         return ()
     first_faces = set(scenes[0].clear_faces).intersection(scenes[0].characters)
-    if any(name not in first_faces for scene in scenes[1:] for name in scene.characters):
-        return tuple(appearances)
-    return ()
+    return () if first_faces.issuperset(recurring) else recurring
 
 
 async def plan_share_video_background_scenes(
@@ -597,7 +604,7 @@ async def plan_share_video_background_scenes(
             raise ShareVideoScenePlanningError("LLM scene plan is empty or invalid")
         return ShareVideoScenePlan(
             scenes=scenes,
-            cast_reference_subjects=_cast_reference_subjects(scenes),
+            cast_reference_subjects=share_video_cast_reference_subjects(scenes),
             provider=client.provider_name,
             model=client.model_name,
             strategy="llm_sentence_units",
