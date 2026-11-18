@@ -44,6 +44,9 @@ class ShareVideoPlannedSceneMetadata(_ShareVideoMetadataModel):
     title: str = ""
     sentence_ids: list[int] = Field(default_factory=list)
     evidence_quote: str = ""
+    shot_direction: str = ""
+    characters: list[str] = Field(default_factory=list)
+    clear_faces: list[str] = Field(default_factory=list)
 
 
 class ShareVideoScenePlanMetadata(_ShareVideoMetadataModel):
@@ -54,6 +57,7 @@ class ShareVideoScenePlanMetadata(_ShareVideoMetadataModel):
     plan_hash: str = ""
     visual_context: str = ""
     person_count: str = ""
+    cast_reference_subjects: list[str] = Field(default_factory=list)
     scenes: list[ShareVideoPlannedSceneMetadata] = Field(default_factory=list)
 
 
@@ -89,6 +93,7 @@ class ShareVideoJobMetadata(_ShareVideoMetadataModel):
     background_scene_count: int = Field(default=0, ge=0)
     background_generated_count: int = Field(default=0, ge=0)
     background_reused_scene_count: int = Field(default=0, ge=0)
+    cast_reference_status: Literal["ready", "failed"] | None = None
     background_scene_plan: ShareVideoScenePlanMetadata | None = None
     background_scenes: list[ShareVideoSceneAssetMetadata] = Field(default_factory=list)
     background_plan_provider: str | None = None

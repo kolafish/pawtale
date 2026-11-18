@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections import Counter
+from dataclasses import dataclass, replace
 from hashlib import sha256
+import logging
 import re
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -13,7 +15,9 @@ from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 
 
-SHARE_VIDEO_SCENE_PLAN_VERSION = "memoir-share-video-scene-plan-v10"
+logger = logging.getLogger(__name__)
+
+SHARE_VIDEO_SCENE_PLAN_VERSION = "memoir-share-video-scene-plan-v11"
 SHARE_VIDEO_SCENE_MIN_DURATION_MS = 6000
 SHARE_VIDEO_SCENE_MAX_COUNT = 5
 SHARE_VIDEO_SCENE_TEXT_MAX_CHARS = 220
@@ -36,6 +40,9 @@ class ShareVideoScene:
     title: str
     sentence_ids: tuple[int, ...] = ()
     evidence_quote: str = ""
+    shot_direction: str = ""
+    characters: tuple[str, ...] = ()
+    clear_faces: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -58,6 +65,7 @@ class ShareVideoScenePlan:
     visual_context: str = ""
     person_count: str = ""
     version: str = SHARE_VIDEO_SCENE_PLAN_VERSION
+    cast_reference_subjects: tuple[str, ...] = ()
 
 
 class ShareVideoScenePlanningError(RuntimeError):
@@ -68,6 +76,9 @@ class _ShareVideoSceneOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     sentence_ids: list[int] = Field(default_factory=list)
+    shot_direction: str = Field(min_length=1)
+    characters: list[str]
+    clear_faces: list[str]
 
 
 class _ShareVideoScenePlanOutput(BaseModel):
@@ -374,7 +385,10 @@ def _user_prompt(
     duration_ms: int,
     narrator_context: str = "",
     background_note: str = "",
+    *,
+    max_scene_count: int | None = None,
 ) -> str:
+    _, upper = _scene_count_range(duration_ms, len(sentences), max_scene_count)
     note = re.sub(r"\s+", " ", background_note.strip())
     note_line = f"用户补充的人物背景（人物性别、年龄和关系以此为准）：{note}\n" if note else ""
     narrator_line = (
@@ -389,14 +403,16 @@ def _user_prompt(
     return f"""请为以下完整口述内容规划视频背景画面，结合讲述内容和视频时长，自主确定画面数量与切换位置。
 
 要求：
-1. 输出 JSON 对象，格式为 {{"person_count":"人数说明","visual_context":"...","scenes":[...]}}。
+1. 输出 JSON 对象，从 1 到 {upper} 镜，格式为 {{"person_count":"人数说明","visual_context":"共同设定","scenes":[{{"sentence_ids":[0],"shot_direction":"本镜拍法","characters":[],"clear_faces":[]}}]}}。
 2. 规划分镜时，综合考虑口述内容、音频总时长，以及各句子／短句单元的起止时间，判断每个画面适合承载的内容范围和停留时长，使画面与讲述进度相协调。
 3. 根据叙事重点、人物动作、关键物件及时间、地点的变化安排画面衔接，让每个画面表达明确、观看节奏自然。画面数量由以上因素共同决定，不预设数量，也不按固定时间间隔切分。同时考虑各句的叙事作用与前后关联，使每个画面组都对应一个清晰、可呈现的内容重点；表达评价、语气或承接的句子，应结合其所依附的事件理解。
-4. 每个 scene 只包含 sentence_ids。
+4. 看完整段故事后，为每镜写一句可以直接交给画师的拍法：观众要看清什么，主体在做什么，选什么景别或视角，怎样安排人物、物件或空间关系。原地连续的两镜也要随叙事转移视觉重点。环境或物件是重点时可以让人物很小或不入镜。镜头的景别、视角和主体位置由你决定。人物、行为、时代、季节和道具必须有口述依据。抽象的感受并入原文已有的事件，不编造一场戏来说明它。每镜约 30–100 字。
 5. sentence_ids 只能引用下面的“句子/短句单元”编号，必须连续、递增、不重叠，并且所有编号从 0 到 {len(sentences) - 1} 必须刚好覆盖一次。
 6. 不要拆开任何一个句子/短句单元；不要输出 start_char/end_char。
 7. visual_context 用一两句话写出所有画面共用的设定，让分开生成的几张画面里人物和环境保持一致：主要人物是谁（用原文里的称呼）、大致年龄和穿着，以及地点、年代和季节。只写原文或用户补充的人物背景支持的内容，不知道的不写。人物的性别、年龄和关系以用户补充的人物背景为准；背景里没说的，从口述内容推断（称呼、关系、经历和说话内容都可以作为依据）；仍推断不出讲述者“我”的性别或年龄时，再用下面的讲述者资料；都没有就不写。不超过 {SHARE_VIDEO_VISUAL_CONTEXT_MAX_CHARS} 字。
 8. person_count 用简短文字明确这段经历中实际参与者的人数。原文或用户补充的人物背景能确定准确人数时写清人数；只有“我们”等多人称呼、没有说明准确人数时，写“至少2人，准确人数未说明”。区分讲述者与同行者，不把共同经历概括成一个人的独自经历；不把仅被提及、未参与场景的人算入。visual_context 必须与人数说明一致，保留原文和用户补充背景支持的参与者关系，不猜测同伴的身份、性别或年龄。
+
+9. 每镜写完拍法，再填两个列表供画师识别人物。characters 列出本镜画面中实际出现、需要认出是谁的主要人物。只听见的讲述者、仅被提到的人和无须辨认的路人、人群不列。clear_faces 是其中能看清正脸或侧脸的人；背影、远景小人、只露手的角色仍可在 characters 里，但不能列入 clear_faces。没有相应人物写 []。同一个人跨镜必须使用同一称呼，从头到尾用“我”指讲述者。
 
 音频时长：{round(duration_ms / 1000, 1)} 秒
 原文字符数：{len(selected_text)}
@@ -436,6 +452,9 @@ def _scene_from_sentence_payload(
         end_ms=max(start_ms + 1, end_ms),
         title=_fallback_title(scene_text, index),
         sentence_ids=tuple(sentence_ids),
+        shot_direction=_compact_text(item.get("shot_direction", ""), limit=160),
+        characters=tuple(dict.fromkeys(name.strip() for name in item.get("characters", []) if name.strip())),
+        clear_faces=tuple(name.strip() for name in item.get("clear_faces", [])),
         evidence_quote=_compact_text(scene_text, limit=90),
     )
 
@@ -472,7 +491,7 @@ def _normalize_llm_sentence_scenes(
     raw_scenes = payload.get("scenes")
     if not isinstance(raw_scenes, list):
         return []
-    if not (min_scene_count <= len(raw_scenes) <= max_scene_count):
+    if not min_scene_count <= len(raw_scenes) <= len(sentences):
         return []
     scenes: list[ShareVideoScene] = []
     next_sentence_id = 0
@@ -502,7 +521,31 @@ def _normalize_llm_sentence_scenes(
         next_sentence_id += len(sentence_ids)
     if next_sentence_id != len(sentences):
         return []
-    return scenes
+
+    # A valid plan can still exceed the image budget. Combine the shortest
+    # adjacent pair, keeping the longer shot's direction and both spoken spans.
+    while len(scenes) > max_scene_count:
+        i = min(range(len(scenes) - 1), key=lambda j: scenes[j + 1].end_ms - scenes[j].start_ms)
+        left, right = scenes[i:i + 2]
+        focus = max((left, right), key=lambda scene: scene.end_ms - scene.start_ms)
+        quote = text[left.start_char:right.end_char]
+        scenes[i:i + 2] = [replace(
+            focus, start_char=left.start_char, start_ms=left.start_ms,
+            end_char=right.end_char, end_ms=right.end_ms,
+            title=_fallback_title(quote, i), sentence_ids=left.sentence_ids + right.sentence_ids,
+            evidence_quote=_compact_text(quote, limit=90),
+        )]
+    return [replace(scene, index=i) for i, scene in enumerate(scenes)]
+
+
+def _cast_reference_subjects(scenes: list[ShareVideoScene]) -> tuple[str, ...]:
+    appearances = Counter(name for scene in scenes for name in scene.characters)
+    if len(appearances) < 2 or max(appearances.values()) < 2:
+        return ()
+    first_faces = set(scenes[0].clear_faces).intersection(scenes[0].characters)
+    if any(name not in first_faces for scene in scenes[1:] for name in scene.characters):
+        return tuple(appearances)
+    return ()
 
 
 async def plan_share_video_background_scenes(
@@ -533,7 +576,7 @@ async def plan_share_video_background_scenes(
         generated = await generate_structured_with_client(
             client,
             _system_prompt(),
-            _user_prompt(selected_text, sentences, duration_ms, narrator_context, background_note),
+            _user_prompt(selected_text, sentences, duration_ms, narrator_context, background_note, max_scene_count=max_count),
             output_model=_ShareVideoScenePlanOutput,
             requested_model=model,
             temperature=0.2,
@@ -554,6 +597,7 @@ async def plan_share_video_background_scenes(
             raise ShareVideoScenePlanningError("LLM scene plan is empty or invalid")
         return ShareVideoScenePlan(
             scenes=scenes,
+            cast_reference_subjects=_cast_reference_subjects(scenes),
             provider=client.provider_name,
             model=client.model_name,
             strategy="llm_sentence_units",
@@ -561,7 +605,8 @@ async def plan_share_video_background_scenes(
             visual_context=_normalize_visual_context(generated.value.visual_context),
             person_count=generated.value.person_count.strip(),
         )
-    except Exception:
+    except Exception as exc:
+        logger.warning("Share video scene planner used sentence fallback: %s", type(exc).__name__)
         return fallback_share_video_scene_plan(
             selected_text,
             char_timings,
@@ -579,6 +624,7 @@ def scene_plan_to_metadata(plan: ShareVideoScenePlan) -> dict[str, object]:
         "plan_hash": plan.plan_hash,
         "visual_context": plan.visual_context,
         "person_count": plan.person_count,
+        "cast_reference_subjects": list(plan.cast_reference_subjects),
         "scenes": [
             {
                 "index": scene.index,
@@ -589,6 +635,9 @@ def scene_plan_to_metadata(plan: ShareVideoScenePlan) -> dict[str, object]:
                 "title": scene.title,
                 "sentence_ids": list(scene.sentence_ids),
                 "evidence_quote": scene.evidence_quote,
+                "shot_direction": scene.shot_direction,
+                "characters": list(scene.characters),
+                "clear_faces": list(scene.clear_faces),
             }
             for scene in plan.scenes
         ],

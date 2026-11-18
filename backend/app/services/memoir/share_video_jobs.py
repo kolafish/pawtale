@@ -251,12 +251,18 @@ def _share_video_options_signature(metadata: ShareVideoJobMetadata) -> tuple[str
     )
 
 
+def _pipeline_version(background_source: str) -> str:
+    if background_source == SHARE_VIDEO_BACKGROUND_SOURCE_AI:
+        return "memoir-share-video-v5"
+    return SHARE_VIDEO_PIPELINE_VERSION
+
+
 def _completed_share_video_is_reusable(
     job: MemoirMaterialShareVideo,
     metadata: ShareVideoJobMetadata,
 ) -> bool:
     output = job.output
-    if output is None or metadata.pipeline_version != SHARE_VIDEO_PIPELINE_VERSION:
+    if output is None or metadata.pipeline_version != _pipeline_version(metadata.background_source):
         return False
     if metadata.background_source == SHARE_VIDEO_BACKGROUND_SOURCE_AI and metadata.background_status not in {
         "ready",
@@ -539,7 +545,7 @@ async def create_share_video_job(
         raise HTTPException(status_code=422, detail="开场句要是所选片段里不超过 20 字的一句原话")
 
     metadata = ShareVideoJobMetadata(
-        pipeline_version=SHARE_VIDEO_PIPELINE_VERSION,
+        pipeline_version=_pipeline_version(background_source),
         title=fallback_share_video_title(alignment.transcript_text[start_char:end_char]),
         hook_text=hook_text,
         alignment_strategy=alignment.strategy,
