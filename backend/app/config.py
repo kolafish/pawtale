@@ -69,7 +69,7 @@ class Settings(BaseSettings):
     volc_ark_model: str = "doubao-seed-2-0-pro-260215"
     volc_ark_thinking_type: str = "disabled"
     memoir_excerpt_image_model: str = "doubao-seedream-5-0-flash-260915"
-    volc_ark_image_model: str = "doubao-seedream-5-0-lite-260128"
+    volc_ark_image_model: str = "doubao-seedream-5-0-flash-260915"
     volc_ark_image_size: str = "2K"
     volc_ark_image_output_format: str = "png"
     volc_ark_image_response_format: str = "b64_json"

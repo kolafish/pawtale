@@ -25,7 +25,7 @@ def image_unit_price_rmb(model: str) -> str | None:
 
 def share_video_style_options(image_price: str | None) -> list[dict[str, str]]:
     price_note = (
-        f"按张计费，约 {image_price} 元/张，一条最多 {SHARE_VIDEO_SCENE_MAX_COUNT} 张。" if image_price else ""
+        f"按张计费，约 {image_price} 元/张，最多 {SHARE_VIDEO_SCENE_MAX_COUNT} 张视频画面。多人故事如需统一人物形象，另计 1 张定稿图。" if image_price else ""
     )
     return [
         {

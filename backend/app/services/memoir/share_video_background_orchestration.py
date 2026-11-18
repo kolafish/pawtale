@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+import logging
 from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,7 +21,7 @@ from app.services.memoir.share_video_backgrounds import (
     SHARE_VIDEO_BACKGROUND_MODE_SMART_MULTI,
     ShareVideoBackgroundGenerationError,
     get_or_generate_share_video_background,
-    get_or_generate_share_video_background_set,
+    ShareVideoImageReference,
     share_video_narrator_context,
     normalize_share_video_background_mode,
     normalize_share_video_background_style,
@@ -33,7 +34,7 @@ from app.services.memoir.share_video_custom_backgrounds import (
 )
 from app.services.memoir.share_video_scene_planner import (
     SHARE_VIDEO_SCENE_MIN_DURATION_MS,
-    ShareVideoScene,
+    SHARE_VIDEO_SCENE_PLAN_VERSION,
     group_share_video_sentences,
     plan_share_video_background_scenes,
     scene_plan_to_metadata,
@@ -41,11 +42,14 @@ from app.services.memoir.share_video_scene_planner import (
 from app.services.memoir.share_video_metadata import (
     BackgroundStatus,
     ShareVideoJobMetadata,
+    ShareVideoPlannedSceneMetadata,
     ShareVideoSceneAssetMetadata,
     ShareVideoScenePlanMetadata,
 )
 from app.services.ai_usage_records import AIUsageContext
 
+
+logger = logging.getLogger(__name__)
 
 ProgressCallback = Callable[[ShareVideoJobMetadata], Awaitable[None]]
 
@@ -82,25 +86,12 @@ def initial_background_status(
     return "pending" if ai_background_enabled else "disabled"
 
 
-def _scene_metadata(scene: ShareVideoScene) -> dict[str, object]:
-    return {
-        "index": scene.index,
-        "start_char": scene.start_char,
-        "end_char": scene.end_char,
-        "start_ms": scene.start_ms,
-        "end_ms": scene.end_ms,
-        "title": scene.title,
-        "sentence_ids": list(scene.sentence_ids),
-        "evidence_quote": scene.evidence_quote,
-    }
-
-
-def _scene_source_text(selected_text: str, scene: ShareVideoScene) -> str:
+def _scene_source_text(selected_text: str, scene: ShareVideoPlannedSceneMetadata) -> str:
     return selected_text[scene.start_char:scene.end_char].strip()
 
 
 def _render_background_segments(
-    scenes: list[ShareVideoScene],
+    scenes: list[ShareVideoPlannedSceneMetadata],
     image_paths: list[Path],
     duration_ms: int,
 ) -> list[rendering.ShareVideoBackgroundSegment]:
@@ -202,25 +193,24 @@ async def prepare_share_video_background(
         metadata.background_error_message = ""
         await persist_progress(metadata)
     elif effective_mode == SHARE_VIDEO_BACKGROUND_MODE_SMART_MULTI:
-        char_timings = metadata.char_timing_dicts()
-        metadata.background_status = "planning"
-        metadata.background_error_message = ""
-        await persist_progress(metadata)
-
-        plan = await plan_share_video_background_scenes(
-            job.selected_text,
-            char_timings,
-            duration_ms,
-            ai_model=metadata.ai_model,
-            narrator_context=narrator_context,
-            background_note=metadata.background_note,
-        )
+        plan = metadata.background_scene_plan
+        if plan is None or plan.version != SHARE_VIDEO_SCENE_PLAN_VERSION or not plan.scenes:
+            metadata.background_status = "planning"
+            metadata.background_error_message = ""
+            await persist_progress(metadata)
+            planned = await plan_share_video_background_scenes(
+                job.selected_text, metadata.char_timing_dicts(), duration_ms,
+                ai_model=metadata.ai_model, narrator_context=narrator_context,
+                background_note=metadata.background_note,
+            )
+            plan = ShareVideoScenePlanMetadata.model_validate(scene_plan_to_metadata(planned))
+            metadata.background_scene_plan = plan
+            metadata.cast_reference_status = None
         metadata.background_status = "generating"
-        metadata.background_scene_plan = ShareVideoScenePlanMetadata.model_validate(
-            scene_plan_to_metadata(plan)
-        )
         metadata.background_scene_count = len(plan.scenes)
         metadata.background_generated_count = 0
+        metadata.background_scenes = []
+        metadata.background_reused_scene_count = 0
         metadata.background_plan_provider = plan.provider
         metadata.background_plan_model = plan.model
         metadata.background_error_message = ""
@@ -235,12 +225,14 @@ async def prepare_share_video_background(
         errors: dict[int, str] = {}
 
         async def generate_scene(
-            scene: ShareVideoScene,
-        ) -> tuple[ShareVideoScene, ShareVideoBackgroundAsset | None, ShareVideoBackgroundGenerationError | None]:
+            scene: ShareVideoPlannedSceneMetadata, reference: ShareVideoImageReference | None,
+        ) -> tuple[ShareVideoPlannedSceneMetadata, ShareVideoBackgroundAsset | None, ShareVideoBackgroundGenerationError | None]:
             try:
                 asset = await get_or_generate_share_video_background(
                     _scene_source_text(job.selected_text, scene),
                     background_style,
+                    shot_direction=scene.shot_direction,
+                    reference=reference,
                     story_text=story_text,
                     visual_context=visual_context,
                     narrator_context=narrator_context,
@@ -252,11 +244,11 @@ async def prepare_share_video_background(
             return scene, asset, None
 
         async def record_scene(
-            scene: ShareVideoScene,
+            scene: ShareVideoPlannedSceneMetadata,
             asset: ShareVideoBackgroundAsset | None,
             error: ShareVideoBackgroundGenerationError | None,
         ) -> None:
-            scene_info = ShareVideoSceneAssetMetadata.model_validate(_scene_metadata(scene))
+            scene_info = ShareVideoSceneAssetMetadata.model_validate(scene.model_dump())
             if error is not None:
                 errors[scene.index] = f"{scene.index + 1}: {str(error)[:120]}"
                 scene_info.background_status = "failed"
@@ -292,36 +284,42 @@ async def prepare_share_video_background(
             metadata.background_scenes = [scene_assets[index] for index in sorted(scene_assets)]
             await persist_progress(metadata)
 
-        # Several scenes are drawn in one group request so the people stay the
-        # same; a failed group, or any image it did not return, is drawn alone.
-        set_assets: list[ShareVideoBackgroundAsset | None] | None = None
-        if len(plan.scenes) > 1:
+        reference = None
+        if plan.cast_reference_subjects and metadata.cast_reference_status != "failed":
             try:
-                set_assets = await get_or_generate_share_video_background_set(
-                    [_scene_source_text(job.selected_text, scene) for scene in plan.scenes],
-                    background_style,
-                    story_text=story_text,
-                    visual_context=visual_context,
-                    narrator_context=narrator_context,
-                    background_note=metadata.background_note,
-                    usage_context=usage_context,
+                cast = await get_or_generate_share_video_background(
+                    story_text, background_style, cast_subjects=tuple(plan.cast_reference_subjects),
+                    visual_context=visual_context, narrator_context=narrator_context,
+                    background_note=metadata.background_note, usage_context=usage_context,
                 )
-            except ShareVideoBackgroundGenerationError:
-                set_assets = None
-        remaining: list[ShareVideoScene] = []
-        for index, scene in enumerate(plan.scenes):
-            set_asset = set_assets[index] if set_assets is not None else None
-            if set_asset is None:
-                remaining.append(scene)
-            else:
-                await record_scene(scene, set_asset, None)
-        pending = [asyncio.create_task(generate_scene(scene)) for scene in remaining]
+                if cast:
+                    reference = await asyncio.to_thread(ShareVideoImageReference.from_path, cast.path)
+            except ShareVideoBackgroundGenerationError as exc:
+                logger.warning("Share video cast reference unavailable: %s", exc)
+            metadata.cast_reference_status = "ready" if reference else "failed"
+            await persist_progress(metadata)
+
+        remaining = iter(plan.scenes)
+        if reference is None and len(plan.scenes) > 1:
+            # The first usable on-screen image anchors every later scene.
+            for scene in remaining:
+                _, asset, error = await generate_scene(scene, None)
+                if asset and scene.index < len(plan.scenes) - 1:
+                    try:
+                        reference = await asyncio.to_thread(ShareVideoImageReference.from_path, asset.path)
+                    except ShareVideoBackgroundGenerationError as exc:
+                        asset, error = None, exc
+                await record_scene(scene, asset, error)
+                if reference:
+                    break
+        pending = [asyncio.create_task(generate_scene(scene, reference)) for scene in remaining]
         try:
             for finished in asyncio.as_completed(pending):
                 await record_scene(*await finished)
         finally:
             for task in pending:
                 task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
 
         valid_paths = [scene_paths.get(scene.index) for scene in plan.scenes]
         ready_assets = [

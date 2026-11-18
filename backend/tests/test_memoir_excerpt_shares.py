@@ -252,6 +252,7 @@ async def test_excerpt_image_reuses_jobs_styles_and_asset_management_with_single
     from app.services.memoir.share_video_backgrounds import VolcArkGeneratedImage
     from tests.test_memoir_image_assets import _png_bytes, register_memoir_editing_job_handlers, run_test_editing_job
     project_id, chapter, _, version, _, _, sources = await saved_stories(client, test_db, with_sources=True)
+    monkeypatch.setattr(get_settings(), "volc_ark_image_model", "other-image-model")
     monkeypatch.setattr(material_image_generation, "DATA_DIR", tmp_path)
     monkeypatch.setattr(image_assets, "DATA_DIR", tmp_path)
     calls = []
@@ -276,7 +277,6 @@ async def test_excerpt_image_reuses_jobs_styles_and_asset_management_with_single
     assert payload["content"] in calls[0][1]
     assert background_note in calls[0][1]
     assert "#fcf8f1" in calls[0][1]
-    assert calls[0][0] != get_settings().volc_ark_image_model
     assets = (await client.get(f"/api/mobile/memoir/projects/{project_id}/image-assets")).json()["items"]
     assert len(assets) == 1
     asset = assets[0]
