@@ -20,7 +20,8 @@ from app.models.memoir import (
 )
 from app.models.projects import Project
 from app.models.users import User
-from app.services.memoir import share_video_jobs, share_video_shares
+from app.services.memoir import project_deletion, share_video_jobs, share_video_shares
+from app.services import account_deletion
 from tests.memoir_helpers import create_test_voice_transcript, ensure_mobile_memoir_project
 
 
@@ -66,6 +67,43 @@ async def _add_video_job(
             size_bytes=1024,
         )
     return job
+
+
+@pytest.mark.parametrize("last_owner", ["video", "project", "account"])
+async def test_reference_files_follow_last_owner_deletion(client, test_db, tmp_path, monkeypatch, last_owner):
+    monkeypatch.setattr(project_deletion, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(account_deletion, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(share_video_jobs, "MEMOIR_SHARE_VIDEO_DIR", tmp_path / "memoir/share-videos")
+    first = await create_test_voice_transcript(client, test_db)
+    project = (await client.post("/api/mobile/memoir/projects", json={"title": "另一段回忆"})).json()
+    second = await create_test_voice_transcript(client, test_db, project_id=project["id"])
+    digest = "a" * 64
+    shared_path = f"memoir/share-video-backgrounds/references/{digest}.jpg"
+    owned_path = "memoir/share-video-backgrounds/references/jobs/owned-video.jpg"
+    for name, created, metadata in [
+        ("legacy-one", first, {"background_reference_digest": digest}),
+        ("legacy-two", second, {"background_reference_digest": digest}),
+        ("owned-video", second, {"background_reference_digest": digest, "background_reference_storage_path": owned_path}),
+    ]:
+        await _add_video_job(test_db, created, job_id=name, status=MemoirShareVideoJobStatus.FAILED,
+                             created_at=utcnow_naive(), with_output=False, metadata=metadata)
+    await test_db.commit()
+    for storage in (shared_path, owned_path):
+        path = tmp_path / storage
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"reference")
+
+    await share_video_jobs.delete_share_video_job(test_db, "legacy-one", first["user_id"])
+    assert (tmp_path / shared_path).is_file() and (tmp_path / owned_path).is_file()
+    if last_owner == "video":
+        await share_video_jobs.delete_share_video_job(test_db, "owned-video", second["user_id"])
+        assert (tmp_path / shared_path).is_file() and not (tmp_path / owned_path).exists()
+        await share_video_jobs.delete_share_video_job(test_db, "legacy-two", second["user_id"])
+    elif last_owner == "project":
+        assert (await client.delete(f"/api/mobile/memoir/projects/{project['id']}")).status_code == 204
+    else:
+        await account_deletion.delete_account(test_db, await test_db.get(User, second["user_id"]))
+    assert not (tmp_path / shared_path).exists() and not (tmp_path / owned_path).exists()
 
 
 async def test_share_video_library_lists_completed_jobs_with_stable_pagination(client, test_db):

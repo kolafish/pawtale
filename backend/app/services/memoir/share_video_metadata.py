@@ -8,6 +8,7 @@ from app.services.memoir.share_video_backgrounds import (
     DEFAULT_SHARE_VIDEO_BACKGROUND_MODE,
     DEFAULT_SHARE_VIDEO_BACKGROUND_STYLE,
     SHARE_VIDEO_BACKGROUND_MODE_SINGLE,
+    ShareVideoBackgroundCacheKey,
 )
 from app.services.memoir.share_video_custom_backgrounds import DEFAULT_SHARE_VIDEO_BACKGROUND_SOURCE
 from app.services.memoir.share_video_styles import DEFAULT_SHARE_VIDEO_STYLE, ShareVideoStyle, normalize_share_video_style
@@ -94,6 +95,10 @@ class ShareVideoJobMetadata(_ShareVideoMetadataModel):
     background_generated_count: int = Field(default=0, ge=0)
     background_reused_scene_count: int = Field(default=0, ge=0)
     background_reference_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    background_reference_storage_path: str | None = None
+    scene_image_requests: dict[int, ShareVideoBackgroundCacheKey] = Field(default_factory=dict)
+    cast_image_request: ShareVideoBackgroundCacheKey | None = None
+    single_image_request: ShareVideoBackgroundCacheKey | None = None
     cast_reference_status: Literal["ready", "failed"] | None = None
     background_scene_plan: ShareVideoScenePlanMetadata | None = None
     background_scenes: list[ShareVideoSceneAssetMetadata] = Field(default_factory=list)

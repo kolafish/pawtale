@@ -25,6 +25,7 @@ from app.models.memoir_common import AudioFile
 from app.models.projects import Project
 import app.services.project_documents as project_documents
 from app.services.memoir import audio_files
+from app.services.memoir.share_video_backgrounds import ShareVideoImageReference
 
 
 logger = logging.getLogger(__name__)
@@ -57,15 +58,17 @@ def _image_paths(asset: MemoirImageAsset) -> set[str]:
     }
 
 
-def _share_video_paths(job: MemoirMaterialShareVideo) -> set[str]:
-    return {
-        value
-        for value in (
-            job.output.storage_path if job.output is not None else None,
-            *_metadata_storage_paths(job.metadata_json),
-        )
-        if value
-    }
+def share_video_media_paths(job: MemoirMaterialShareVideo) -> set[str]:
+    metadata = job.metadata_json or {}
+    paths = _metadata_storage_paths(metadata)
+    # Jobs written before reference paths were recorded can share one JPEG by digest.
+    if not metadata.get("background_reference_storage_path"):
+        legacy = ShareVideoImageReference.legacy_storage_path(metadata.get("background_reference_digest"))
+        if legacy:
+            paths.add(legacy)
+    if job.output is not None and job.output.storage_path:
+        paths.add(job.output.storage_path)
+    return paths
 
 
 def _data_file_path(storage_path: str) -> Path | None:
@@ -144,7 +147,7 @@ async def _remaining_media_paths(db: AsyncSession) -> set[str]:
     for asset in (await db.scalars(select(MemoirImageAsset))).all():
         paths.update(_image_paths(asset))
     for job in (await db.scalars(select(MemoirMaterialShareVideo))).all():
-        paths.update(_share_video_paths(job))
+        paths.update(share_video_media_paths(job))
     return paths
 
 
@@ -213,12 +216,17 @@ def _delete_media_paths(storage_paths: set[str]) -> None:
             logger.warning("Failed to delete memoir project media path=%s", path, exc_info=True)
 
 
+async def delete_unreferenced_media(db: AsyncSession, paths: set[str]) -> None:
+    if paths:
+        _delete_media_paths(paths - await _remaining_media_paths(db))
+
+
 async def _delete_project_media(
-    *, project_id: str, audio_files_to_delete: list[AudioFile], media_paths: set[str],
+    db: AsyncSession, *, project_id: str, audio_files_to_delete: list[AudioFile], media_paths: set[str],
 ) -> None:
     try:
         await audio_files.delete_audio_file_paths(audio_files_to_delete)
-        _delete_media_paths(media_paths)
+        await delete_unreferenced_media(db, media_paths)
     except Exception:
         logger.warning(
             "Failed to delete memoir project files project_id=%s",
@@ -254,9 +262,9 @@ async def delete_project(
     video_candidates = list(
         (
             await db.scalars(
-                select(MemoirMaterialShareVideo).where(
-                    MemoirMaterialShareVideo.project_id == project_id
-                )
+                select(MemoirMaterialShareVideo)
+                .where(MemoirMaterialShareVideo.project_id == project_id)
+                .with_for_update(of=MemoirMaterialShareVideo)
             )
         ).all()
     )
@@ -267,7 +275,7 @@ async def delete_project(
     } | {
         path
         for job in video_candidates
-        for path in _share_video_paths(job)
+        for path in share_video_media_paths(job)
     }
     session_ids = list(
         (
@@ -330,7 +338,6 @@ async def delete_project(
                     AudioFile.id.in_([audio_file.id for audio_file in deletable_audio])
                 )
             )
-        remaining_media_paths = await _remaining_media_paths(db)
         await project_documents.delete_project(
             db, project, post_commit_cleanups=post_commit_cleanups,
         )
@@ -338,19 +345,14 @@ async def delete_project(
         await db.rollback()
         raise
 
-    media_paths = media_candidates - remaining_media_paths
     if post_commit_cleanups is not None:
         async def cleanup_media() -> None:
             await _delete_project_media(
-                project_id=project_id,
-                audio_files_to_delete=deletable_audio,
-                media_paths=media_paths,
+                db, project_id=project_id, audio_files_to_delete=deletable_audio, media_paths=media_candidates,
             )
 
         post_commit_cleanups.append(cleanup_media)
         return
     await _delete_project_media(
-        project_id=project_id,
-        audio_files_to_delete=deletable_audio,
-        media_paths=media_paths,
+        db, project_id=project_id, audio_files_to_delete=deletable_audio, media_paths=media_candidates,
     )
