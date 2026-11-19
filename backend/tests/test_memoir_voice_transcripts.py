@@ -944,7 +944,7 @@ async def test_share_video_planned_direction_and_fixed_reference_reach_each_shot
     })))
     async def prepare(job_metadata):
         return await orchestration.prepare_share_video_background(
-            db, job=SimpleNamespace(id="video-test", lease_token="test-lease", project_id="test", selected_text=text, start_ms=0, end_ms=31_400),
+            db, job=SimpleNamespace(id="video-test", lease_token="test-lease", user_id=None, project_id="test", selected_text=text, start_ms=0, end_ms=31_400),
             metadata=job_metadata, persist_progress=AsyncMock(), ai_background_enabled=True, volc_ark_api_key="test",
         )
 
@@ -1004,7 +1004,7 @@ async def test_share_video_resume_keeps_second_shot_as_reference_and_reuses_paid
 ):
     orchestration = share_video_jobs.background_orchestration
     text = "甲乙丙"
-    job = SimpleNamespace(id="video-test", lease_token="test-lease", project_id="project", selected_text=text, start_ms=0, end_ms=30_000)
+    job = SimpleNamespace(id="video-test", lease_token="test-lease", user_id=None, project_id="project", selected_text=text, start_ms=0, end_ms=30_000)
     metadata = orchestration.ShareVideoJobMetadata(background_mode="smart_multi", background_scene_plan={
         "version": share_video_scene_planner.SHARE_VIDEO_SCENE_PLAN_VERSION,
         "scenes": [

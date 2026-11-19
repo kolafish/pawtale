@@ -5,9 +5,11 @@ from dataclasses import dataclass, field
 from functools import cached_property
 import hashlib
 from io import BytesIO
+from itertools import chain
 import os
 from pathlib import Path
 import re
+import stat
 from uuid import uuid4
 
 import httpx
@@ -71,17 +73,30 @@ class ShareVideoBackgroundCacheKey(BaseModel):
     model: str
     prompt_hash: str
     template_version: str
+    # storage_path is the old shared file and identifies the cache directory.
+    image_storage_path: str | None = None
+
+    @property
+    def cache_directory(self) -> Path:
+        path = Path(self.storage_path)
+        return path.with_name(f"{path.name}.images")
+
+    def for_slot(self, slot: ShareVideoImageSlot) -> ShareVideoBackgroundCacheKey:
+        suffix = Path(self.storage_path).suffix
+        slot_dir = f"{slot.lease.job_id}-{slot.name}"
+        return self.model_copy(update={"image_storage_path": str(self.cache_directory / slot_dir / f"image{suffix}")})
 
     def asset(self, *, cache_hit: bool, model: str) -> ShareVideoBackgroundAsset:
+        storage_path = self.image_storage_path or self.storage_path
         return ShareVideoBackgroundAsset(
-            path=share_video_background_file_path(self.storage_path), storage_path=self.storage_path,
+            path=share_video_background_file_path(storage_path), storage_path=storage_path,
             style_id=self.style_id, prompt_hash=self.prompt_hash, prompt_template_version=self.template_version,
             provider=VolcArkImageGenerationService.provider_name, model=model, cache_hit=cache_hit,
         )
 
     def cached_asset(self) -> ShareVideoBackgroundAsset | None:
         asset = self.asset(cache_hit=True, model=self.model)
-        return asset if asset.path.is_file() and asset.path.stat().st_size else None
+        return asset if _image_file_exists(asset.path) else None
 
 
 @dataclass(frozen=True)
@@ -539,7 +554,36 @@ class VolcArkImageGenerationService:
         return None
 
 
-def _write_background(path: Path, content: bytes) -> None:
+def _image_file_exists(path: Path) -> bool:
+    try:
+        info = path.stat()
+    except FileNotFoundError:
+        return False
+    return stat.S_ISREG(info.st_mode) and info.st_size > 0
+
+
+def _reuse_background(key: ShareVideoBackgroundCacheKey) -> ShareVideoBackgroundAsset | None:
+    if cached := key.cached_asset():
+        return cached
+    if key.image_storage_path is None:
+        return None
+    asset = key.asset(cache_hit=True, model=key.model)
+    legacy = share_video_background_file_path(key.storage_path)
+    cache_dir = share_video_background_file_path(str(key.cache_directory))
+    for source in chain((legacy,), cache_dir.glob(f"*/image{asset.path.suffix}")):
+        if not _image_file_exists(source):
+            continue
+        asset.path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            asset.path.hardlink_to(source)
+        except FileNotFoundError:
+            # The source owner may delete its name while we borrow the image.
+            continue
+        return asset
+    return None
+
+
+def _write_background(path: Path, content: bytes, *, overwrite: bool = True) -> bool:
     temp_path = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -548,12 +592,20 @@ def _write_background(path: Path, content: bytes) -> None:
                 output.write(content)
                 output.flush()
                 os.fsync(output.fileno())
-            temp_path.replace(path)
+            installed = True
+            if overwrite:
+                temp_path.replace(path)
+            else:
+                try:
+                    path.hardlink_to(temp_path)
+                except FileExistsError:
+                    installed = False
             parent_fd = os.open(path.parent, os.O_RDONLY)
             try:
                 os.fsync(parent_fd)
             finally:
                 os.close(parent_fd)
+            return installed
         finally:
             temp_path.unlink(missing_ok=True)
     except OSError as exc:
@@ -571,6 +623,7 @@ def prepare_share_video_image_request(
     shot_direction: str = "",
     reference: ShareVideoImageReference | None = None,
     cast_subjects: tuple[str, ...] = (),
+    slot: ShareVideoImageSlot | None = None,
 ) -> ShareVideoBackgroundRequest:
     settings = get_settings()
     if cast_subjects:
@@ -596,10 +649,14 @@ def prepare_share_video_image_request(
         storage_path=storage_path, style_id=prompt.style.value, model=model,
         prompt_hash=prompt.prompt_hash, template_version=prompt.template_version,
     )
-    return ShareVideoBackgroundRequest(prompt, key, reference)
+    return ShareVideoBackgroundRequest(prompt, key.for_slot(slot) if slot else key, reference)
 
 
-async def lock_share_video_image_owner(db: AsyncSession, lease: JobLease) -> None:
+async def lock_share_video_image_owner(db: AsyncSession, lease: JobLease, *, user_id: str | None) -> None:
+    # Account deletion locks the user before the job. Asset registration and
+    # billing both take foreign-key locks on the user in the same transaction.
+    if user_id:
+        await db.scalar(select(User.id).where(User.id == user_id).with_for_update(read=True, key_share=True))
     owner = await db.scalar(
         select(MemoirMaterialShareVideo.id).where(
             MemoirMaterialShareVideo.id == lease.job_id, MemoirMaterialShareVideo.lease_token == lease.token,
@@ -615,14 +672,19 @@ class ShareVideoImageSlot:
     name: str
     usage: AIUsageContext
 
-    async def stage(self, key: ShareVideoBackgroundCacheKey, image: VolcArkGeneratedImage) -> None:
+    async def stage(self, key: ShareVideoBackgroundCacheKey, image: VolcArkGeneratedImage) -> bool:
         async with async_session_maker.begin() as db:
-            await lock_share_video_image_owner(db, self.lease)
-            if await db.get(MemoirShareVideoImageReceipt, (self.lease.job_id, self.name)) is None:
-                db.add(MemoirShareVideoImageReceipt(
-                    job_id=self.lease.job_id, slot=self.name, model=image.model,
-                    cache_key=key.model_dump(), pending_content=image.content,
-                ))
+            await lock_share_video_image_owner(db, self.lease, user_id=self.usage.user_id)
+            if await db.get(MemoirShareVideoImageReceipt, (self.lease.job_id, self.name)) is not None:
+                return False
+            if key.cached_asset():
+                # Another delivery of this slot has already acquired a free image.
+                return False
+            db.add(MemoirShareVideoImageReceipt(
+                job_id=self.lease.job_id, slot=self.name, model=image.model,
+                cache_key=key.model_dump(), pending_content=image.content,
+            ))
+            return True
 
 
 async def recover_share_video_background(
@@ -634,23 +696,27 @@ async def recover_share_video_background(
         return key.cached_asset()
     async with async_session_maker.begin() as db:
         identity = (slot.lease.job_id, slot.name)
-        if slot.usage.user_id:
-            # Account deletion locks the user before collecting jobs. Keep that order
-            # when the debit will also take a foreign-key lock on the same user.
-            await db.scalar(select(User.id).where(User.id == slot.usage.user_id).with_for_update(read=True, key_share=True))
-        await lock_share_video_image_owner(db, slot.lease)
+        await lock_share_video_image_owner(db, slot.lease, user_id=slot.usage.user_id)
         receipt = await db.get(MemoirShareVideoImageReceipt, identity)
         if receipt is None:
-            # Read the receipt and free cache under the same lock as publication.
-            return key.cached_asset()
+            return _reuse_background(key)
         original = ShareVideoBackgroundCacheKey.model_validate(receipt.cache_key)
+        if receipt.pending_content is not None and original.image_storage_path is None:
+            # Older, unsettled receipts still point to the shared file. The worker
+            # checkpoints a new slot path before resuming them.
+            if key.storage_path != original.storage_path or key.image_storage_path is None:
+                raise ShareVideoBackgroundGenerationError("暂存背景图的保存路径尚未登记")
+            original = key
+            receipt.cache_key = original.model_dump()
         asset = original.asset(cache_hit=cache_hit, model=receipt.model)
         if receipt.pending_content is None:
-            if not asset.path.is_file() or not asset.path.stat().st_size:
+            if not _image_file_exists(asset.path):
                 raise ShareVideoBackgroundGenerationError("已生成的背景图文件缺失")
             return asset
         try:
-            _write_background(asset.path, receipt.pending_content)
+            if not _write_background(asset.path, receipt.pending_content, overwrite=False):
+                if asset.path.read_bytes() != receipt.pending_content:
+                    raise ShareVideoBackgroundGenerationError("已保存的背景图与暂存内容不匹配")
         except ShareVideoBackgroundGenerationError as exc:
             # Retry the job against the staged bytes, even for a single-frame video.
             raise OSError("暂存的分享视频背景图尚未写入缓存") from exc
@@ -696,8 +762,9 @@ async def get_or_generate_share_video_background(
         )
         raise
     if slot:
-        await slot.stage(request.key, image)
-        return await recover_share_video_background(request.key, slot, cache_hit=False)
+        staged = await slot.stage(request.key, image)
+        return await recover_share_video_background(request.key, slot, cache_hit=not staged)
     asset = request.key.asset(cache_hit=False, model=image.model)
-    _write_background(asset.path, image.content)
-    return asset
+    if _write_background(asset.path, image.content, overwrite=False):
+        return asset
+    return request.key.cached_asset()
