@@ -5,7 +5,6 @@ from dataclasses import dataclass, field
 from functools import cached_property
 import hashlib
 from io import BytesIO
-from itertools import chain
 import os
 from pathlib import Path
 import re
@@ -14,13 +13,14 @@ from uuid import uuid4
 
 import httpx
 from PIL import Image
-from pydantic import BaseModel
-from sqlalchemy import select
+from pydantic import BaseModel, model_validator
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import DATA_DIR, get_settings
 from app.database import async_session_maker
-from app.models.memoir import MemoirMaterialShareVideo, MemoirShareVideoImageReceipt
+from app.domain.memoir.types import MemoirImageAssetSourceType, MemoirImageAssetStatus
+from app.models.memoir import MemoirImageAsset, MemoirMaterialShareVideo, MemoirShareVideoImageReceipt
 from app.models.users import User
 from app.services.memoir.job_leases import JobLease, JobLeaseLostError
 from app.services.provider_limits import provider_concurrency_limiter
@@ -65,6 +65,7 @@ class ShareVideoBackgroundAsset:
     provider: str
     model: str
     cache_hit: bool
+    cache_lookup_path: str | None = None
 
 
 class ShareVideoBackgroundCacheKey(BaseModel):
@@ -73,25 +74,30 @@ class ShareVideoBackgroundCacheKey(BaseModel):
     model: str
     prompt_hash: str
     template_version: str
-    # storage_path is the old shared file and identifies the cache directory.
-    image_storage_path: str | None = None
+    cache_lookup_path: str | None = None
 
-    @property
-    def cache_directory(self) -> Path:
-        path = Path(self.storage_path)
-        return path.with_name(f"{path.name}.images")
+    @model_validator(mode="before")
+    @classmethod
+    def read_old_scoped_key(cls, value: object) -> object:
+        if isinstance(value, dict) and value.get("image_storage_path"):
+            return {**value, "cache_lookup_path": value.get("storage_path"), "storage_path": value["image_storage_path"]}
+        return value
 
     def for_slot(self, slot: ShareVideoImageSlot) -> ShareVideoBackgroundCacheKey:
-        suffix = Path(self.storage_path).suffix
+        lookup = Path(self.cache_lookup_path or self.storage_path)
+        cache_dir = lookup.with_name(f"{lookup.name}.images")
         slot_dir = f"{slot.lease.job_id}-{slot.name}"
-        return self.model_copy(update={"image_storage_path": str(self.cache_directory / slot_dir / f"image{suffix}")})
+        return self.model_copy(update={
+            "cache_lookup_path": str(lookup),
+            "storage_path": str(cache_dir / slot_dir / f"image{lookup.suffix}"),
+        })
 
-    def asset(self, *, cache_hit: bool, model: str) -> ShareVideoBackgroundAsset:
-        storage_path = self.image_storage_path or self.storage_path
+    def asset(self, *, cache_hit: bool, model: str, reusable: bool = False) -> ShareVideoBackgroundAsset:
         return ShareVideoBackgroundAsset(
-            path=share_video_background_file_path(storage_path), storage_path=storage_path,
+            path=share_video_background_file_path(self.storage_path), storage_path=self.storage_path,
             style_id=self.style_id, prompt_hash=self.prompt_hash, prompt_template_version=self.template_version,
             provider=VolcArkImageGenerationService.provider_name, model=model, cache_hit=cache_hit,
+            cache_lookup_path=(self.cache_lookup_path or self.storage_path) if reusable else None,
         )
 
     def cached_asset(self) -> ShareVideoBackgroundAsset | None:
@@ -562,23 +568,61 @@ def _image_file_exists(path: Path) -> bool:
     return stat.S_ISREG(info.st_mode) and info.st_size > 0
 
 
-def _reuse_background(key: ShareVideoBackgroundCacheKey) -> ShareVideoBackgroundAsset | None:
+async def _reuse_background(
+    db: AsyncSession, key: ShareVideoBackgroundCacheKey, slot: ShareVideoImageSlot,
+) -> ShareVideoBackgroundAsset | None:
     if cached := key.cached_asset():
+        # A previous delivery may have written our own link before interruption.
+        # Only a committed receipt makes that file discoverable by another task.
         return cached
-    if key.image_storage_path is None:
+    lookup = key.cache_lookup_path
+    if lookup is None:
         return None
-    asset = key.asset(cache_hit=True, model=key.model)
-    legacy = share_video_background_file_path(key.storage_path)
-    cache_dir = share_video_background_file_path(str(key.cache_directory))
-    for source in chain((legacy,), cache_dir.glob(f"*/image{asset.path.suffix}")):
+
+    receipt = MemoirShareVideoImageReceipt
+    legacy_path = receipt.cache_key["storage_path"].as_string()
+    scoped_lookup = receipt.cache_key["cache_lookup_path"].as_string()
+    old_image_path = receipt.cache_key["image_storage_path"].as_string()
+    stored_image_path = func.coalesce(old_image_path, legacy_path)
+    # Older workers could leave unsettled bytes at the shared legacy path.
+    legacy_unsettled = (
+        select(receipt.job_id).where(
+            legacy_path == lookup, scoped_lookup.is_(None), old_image_path.is_(None),
+            receipt.pending_content.is_not(None),
+        ).exists().correlate(None)
+    )
+    settled = select(stored_image_path, receipt.model).where(
+        func.coalesce(scoped_lookup, legacy_path) == lookup,
+        receipt.pending_content.is_(None),
+        or_(stored_image_path != lookup, ~legacy_unsettled),
+    )
+    # The image library can keep a confirmed image after its video and receipt are deleted.
+    registered = select(MemoirImageAsset.storage_path, MemoirImageAsset.model).where(
+        MemoirImageAsset.prompt_hash == key.prompt_hash,
+        MemoirImageAsset.source_type == MemoirImageAssetSourceType.SHARE_VIDEO_BACKGROUND.value,
+        MemoirImageAsset.status == MemoirImageAssetStatus.READY.value,
+        or_(
+            and_(MemoirImageAsset.storage_path == lookup, ~legacy_unsettled),
+            and_(
+                MemoirImageAsset.storage_path != lookup,
+                MemoirImageAsset.metadata_json["share_video_image_cache_lookup_path"].as_string() == lookup,
+            ),
+        ),
+    )
+    for storage_path, model in await db.execute(settled.union_all(registered)):
+        source = share_video_background_file_path(storage_path)
         if not _image_file_exists(source):
             continue
+        asset = key.asset(cache_hit=True, model=model, reusable=True)
         asset.path.parent.mkdir(parents=True, exist_ok=True)
         try:
             asset.path.hardlink_to(source)
         except FileNotFoundError:
             # The source owner may delete its name while we borrow the image.
             continue
+        db.add(receipt(
+            job_id=slot.lease.job_id, slot=slot.name, model=model, cache_key=key.model_dump(),
+        ))
         return asset
     return None
 
@@ -699,16 +743,16 @@ async def recover_share_video_background(
         await lock_share_video_image_owner(db, slot.lease, user_id=slot.usage.user_id)
         receipt = await db.get(MemoirShareVideoImageReceipt, identity)
         if receipt is None:
-            return _reuse_background(key)
+            return await _reuse_background(db, key, slot)
         original = ShareVideoBackgroundCacheKey.model_validate(receipt.cache_key)
-        if receipt.pending_content is not None and original.image_storage_path is None:
+        if receipt.pending_content is not None and original.cache_lookup_path is None:
             # Older, unsettled receipts still point to the shared file. The worker
             # checkpoints a new slot path before resuming them.
-            if key.storage_path != original.storage_path or key.image_storage_path is None:
+            if key.cache_lookup_path != original.storage_path:
                 raise ShareVideoBackgroundGenerationError("暂存背景图的保存路径尚未登记")
             original = key
             receipt.cache_key = original.model_dump()
-        asset = original.asset(cache_hit=cache_hit, model=receipt.model)
+        asset = original.asset(cache_hit=cache_hit, model=receipt.model, reusable=True)
         if receipt.pending_content is None:
             if not _image_file_exists(asset.path):
                 raise ShareVideoBackgroundGenerationError("已生成的背景图文件缺失")

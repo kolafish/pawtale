@@ -99,7 +99,7 @@ async def test_interrupted_image_returns_original_and_debits_once(image_job, tes
     project = await test_db.get(Project, project_id)
     project.metadata_json = {**project.metadata_json, "memoir_profile": {"narrator_gender": "female"}}
     job = await test_db.get(MemoirMaterialShareVideo, job_id, populate_existing=True)
-    original_path = job.metadata_json["single_image_request"]["image_storage_path"]
+    original_path = job.metadata_json["single_image_request"]["storage_path"]
     job.lease_token = str(uuid4())
     await test_db.commit()
 
@@ -203,7 +203,8 @@ async def test_recovering_first_job_preserves_second_jobs_original_image(image_j
     if legacy_pending:
         first_job = await test_db.get(MemoirMaterialShareVideo, first_id, populate_existing=True)
         receipt = await test_db.get(MemoirShareVideoImageReceipt, (first_id, "single"))
-        old_key = {key: value for key, value in receipt.cache_key.items() if key != "image_storage_path"}
+        old_key = {key: value for key, value in receipt.cache_key.items() if key != "cache_lookup_path"}
+        old_key["storage_path"] = receipt.cache_key["cache_lookup_path"]
         first_job.metadata_json = {**first_job.metadata_json, "single_image_request": old_key}
         receipt.cache_key = old_key
         await test_db.commit()
@@ -309,3 +310,96 @@ async def test_account_deletion_racing_first_scene_registration(image_job, test_
                 await asyncio.gather(task, return_exceptions=True)
     assert await test_db.scalar(select(User.id).where(User.id == user_id)) is None
     assert not list(tmp_path.rglob("*.jpg"))
+
+
+async def test_failed_settlement_cannot_feed_shared_cache(image_job, client, test_db, monkeypatch):
+    first_id, first_project_id, generate = image_job
+    other = await client.post("/api/mobile/memoir/projects", json={"title": "另一份回忆录"})
+    second_id, _ = await create_image_job(client, test_db, project_id=other.json()["id"])
+    first_image = generate.return_value
+    record_usage = backgrounds.record_ai_usage
+
+    async def abort_debit(**kwargs):
+        await record_usage(**kwargs)
+        raise RuntimeError("billing rolled back")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(backgrounds, "record_ai_usage", abort_debit)
+        with pytest.raises(RuntimeError, match="billing rolled back"):
+            await prepare(first_id)
+    first_receipt = await test_db.get(MemoirShareVideoImageReceipt, (first_id, "single"))
+    first_path = backgrounds.ShareVideoBackgroundCacheKey.model_validate(first_receipt.cache_key).asset(
+        cache_hit=False, model=first_image.model,
+    ).path
+    assert first_path.read_bytes() == first_image.content
+    assert first_receipt.pending_content == first_image.content
+    assert not (await test_db.scalars(select(AICreditTransaction.amount_rmb))).all()
+
+    buffer = BytesIO()
+    Image.new("RGB", (16, 24), "green").save(buffer, "PNG")
+    generate.return_value = backgrounds.VolcArkGeneratedImage(buffer.getvalue(), "image/png", first_image.model, {})
+    second = await prepare(second_id)
+    assert second.image_path.read_bytes() == buffer.getvalue()
+    assert generate.await_count == 2
+    assert (await test_db.scalars(select(AICreditTransaction.amount_rmb))).all() == [Decimal("-0.18")]
+    assert (await client.delete(f"/api/mobile/memoir/projects/{first_project_id}")).status_code == 204
+    assert not first_path.exists()
+    assert second.image_path.read_bytes() == buffer.getvalue()
+
+
+@pytest.mark.parametrize("checkpoint_format", ["1710", "current", "legacy_receipt"])
+async def test_scoped_request_does_not_keep_legacy_cache_file_alive(image_job, client, test_db, checkpoint_format):
+    legacy_id, legacy_project_id, generate = image_job
+    other = await client.post("/api/mobile/memoir/projects", json={"title": "另一份回忆录"})
+    scoped_id, _ = await create_image_job(client, test_db, project_id=other.json()["id"])
+    legacy = await test_db.get(MemoirMaterialShareVideo, legacy_id, populate_existing=True)
+    scoped = await test_db.get(MemoirMaterialShareVideo, scoped_id, populate_existing=True)
+    key = backgrounds.prepare_share_video_image_request(legacy.selected_text, "watercolor").key
+    canonical = backgrounds.share_video_background_file_path(key.storage_path)
+    scope = backgrounds.ShareVideoImageSlot(jobs.JobLease(scoped.id, scoped.lease_token), "single",
+                                           AIUsageContext(str(uuid4()), "memoir.share_video_generation", scoped.user_id, scoped.project_id))
+    own = key.for_slot(scope).asset(cache_hit=False, model=key.model)
+    canonical.parent.mkdir(parents=True, exist_ok=True)
+    canonical.write_bytes(generate.return_value.content)
+    own.path.parent.mkdir(parents=True)
+    own.path.write_bytes(b"independent image bytes")
+    old_checkpoint = {
+        "storage_path": key.storage_path, "style_id": key.style_id, "model": key.model,
+        "prompt_hash": key.prompt_hash, "template_version": key.template_version,
+    }
+    legacy.metadata_json = {**legacy.metadata_json, "background_storage_path": key.storage_path}
+    checkpoint = key.for_slot(scope).model_dump()
+    if checkpoint_format == "1710":
+        checkpoint = {**old_checkpoint, "image_storage_path": own.storage_path}
+    scoped.metadata_json = {**scoped.metadata_json, "single_image_request": checkpoint}
+    if checkpoint_format == "legacy_receipt":
+        test_db.add(MemoirShareVideoImageReceipt(
+            job_id=scoped_id, slot="single", model=key.model, cache_key=old_checkpoint,
+        ))
+    await test_db.commit()
+
+    assert (await client.delete(f"/api/mobile/memoir/projects/{legacy_project_id}")).status_code == 204
+    assert canonical.exists() == (checkpoint_format == "legacy_receipt")
+    assert own.path.read_bytes() == b"independent image bytes"
+
+
+async def test_cache_reuses_confirmed_library_image_after_video_deletion(image_job, client, test_db):
+    first_id, first_project_id, generate = image_job
+    first = await prepare(first_id)
+    first_job = await test_db.get(MemoirMaterialShareVideo, first_id, populate_existing=True)
+    first_job.status = "failed"
+    first_job.lease_token = None
+    await test_db.commit()
+    await jobs.delete_share_video_job(test_db, first_id, first_job.user_id)
+    assert await test_db.get(MemoirShareVideoImageReceipt, (first_id, "single")) is None
+    assert first.image_path.is_file()
+
+    other = await client.post("/api/mobile/memoir/projects", json={"title": "复用素材的回忆录"})
+    second_id, _ = await create_image_job(client, test_db, project_id=other.json()["id"])
+    second = await prepare(second_id)
+    assert second.image_path != first.image_path
+    assert generate.await_count == 1
+    assert (await test_db.scalars(select(AICreditTransaction.amount_rmb))).all() == [Decimal("-0.18")]
+    assert (await client.delete(f"/api/mobile/memoir/projects/{first_project_id}")).status_code == 204
+    assert not first.image_path.exists()
+    assert second.image_path.read_bytes() == generate.return_value.content

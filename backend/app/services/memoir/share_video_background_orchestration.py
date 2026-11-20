@@ -186,7 +186,7 @@ async def prepare_share_video_background(
 
     def checkpoint_key(key: ShareVideoBackgroundCacheKey, name: str) -> ShareVideoBackgroundCacheKey:
         slot = image_slot(name)
-        return key.for_slot(slot) if slot and key.image_storage_path is None else key
+        return key.for_slot(slot) if slot and key.cache_lookup_path is None else key
 
     if background_source == SHARE_VIDEO_BACKGROUND_SOURCE_CUSTOM:
         photo_paths = await load_share_video_photo_paths(
@@ -267,7 +267,7 @@ async def prepare_share_video_background(
         for index, key in metadata.scene_image_requests.items():
             if index not in scene_paths:
                 metadata.scene_image_requests[index] = checkpoint_key(key, f"scene-{index}")
-        if metadata.cast_image_request:
+        if metadata.cast_image_request and metadata.cast_reference_status != "ready":
             metadata.cast_image_request = checkpoint_key(metadata.cast_image_request, "cast")
         await persist_progress(metadata)
 
@@ -381,7 +381,7 @@ async def prepare_share_video_background(
                         request = prepare_share_video_image_request(
                             story_text, background_style, cast_subjects=tuple(plan.cast_reference_subjects),
                             visual_context=visual_context, narrator_context=narrator_context, background_note=metadata.background_note,
-                            slot=cast_slot,
+                            slot=None if already_paid else cast_slot,
                         )
                         if not already_paid or not metadata.cast_image_request:
                             metadata.cast_image_request = request.key

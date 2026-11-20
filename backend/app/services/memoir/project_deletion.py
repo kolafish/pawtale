@@ -14,6 +14,7 @@ from app.models.memoir import (
     MemoirChatMessage,
     MemoirImageAsset,
     MemoirMaterialShareVideo,
+    MemoirShareVideoImageReceipt,
     MemoirTranscriptAlignment,
     MemoirTranscriptVersion,
     MemoirVoiceAuthorizationConsent,
@@ -58,9 +59,25 @@ def _image_paths(asset: MemoirImageAsset) -> set[str]:
     }
 
 
+def _background_request_path(value: object) -> str | None:
+    if isinstance(value, dict):
+        path = value.get("image_storage_path") or value.get("storage_path")
+        if isinstance(path, str) and path.strip():
+            return path.strip()
+    return None
+
+
 def share_video_media_paths(job: MemoirMaterialShareVideo) -> set[str]:
-    metadata = job.metadata_json or {}
+    metadata = dict(job.metadata_json or {})
+    scenes = metadata.pop("scene_image_requests", None)
+    requests = [
+        metadata.pop("single_image_request", None),
+        metadata.pop("cast_image_request", None),
+    ]
+    if isinstance(scenes, dict):
+        requests.extend(scenes.values())
     paths = _metadata_storage_paths(metadata)
+    paths.update(path for request in requests if (path := _background_request_path(request)))
     # Jobs written before reference paths were recorded can share one JPEG by digest.
     if not metadata.get("background_reference_storage_path"):
         legacy = ShareVideoImageReference.legacy_storage_path(metadata.get("background_reference_digest"))
@@ -69,6 +86,15 @@ def share_video_media_paths(job: MemoirMaterialShareVideo) -> set[str]:
     if job.output is not None and job.output.storage_path:
         paths.add(job.output.storage_path)
     return paths
+
+
+async def share_video_receipt_paths(db: AsyncSession, job_ids: list[str] | None = None) -> set[str]:
+    if job_ids == []:
+        return set()
+    query = select(MemoirShareVideoImageReceipt.cache_key)
+    if job_ids is not None:
+        query = query.where(MemoirShareVideoImageReceipt.job_id.in_(job_ids))
+    return {path for key in await db.scalars(query) if (path := _background_request_path(key))}
 
 
 def _data_file_path(storage_path: str) -> Path | None:
@@ -143,7 +169,7 @@ async def _referenced_audio_ids(
 
 
 async def _remaining_media_paths(db: AsyncSession) -> set[str]:
-    paths: set[str] = set()
+    paths = await share_video_receipt_paths(db)
     for asset in (await db.scalars(select(MemoirImageAsset).execution_options(populate_existing=True))).all():
         paths.update(_image_paths(asset))
     for job in (await db.scalars(select(MemoirMaterialShareVideo).execution_options(populate_existing=True))).all():
@@ -278,6 +304,7 @@ async def delete_project(
         for job in video_candidates
         for path in share_video_media_paths(job)
     }
+    media_candidates.update(await share_video_receipt_paths(db, [job.id for job in video_candidates]))
     session_ids = list(
         (
             await db.scalars(

@@ -1248,6 +1248,8 @@ async def register_share_video_background_asset(
         "share_video_text_hash": job.text_hash,
         "scene_index": context.scene_index,
     }
+    if background.cache_lookup_path:
+        metadata["share_video_image_cache_lookup_path"] = background.cache_lookup_path
     if existing:
         existing.status = MemoirImageAssetStatus.READY.value
         existing.storage_path = background.storage_path
