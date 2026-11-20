@@ -27,6 +27,7 @@ from app.models.memoir import (
     MemoirImageAsset,
     MemoirMaterialShareVideo,
     MemoirShareLike,
+    MemoirShareVideoImageReceipt,
     MemoirShareVideoOutput,
     MemoirVoiceUtterance,
 )
@@ -59,6 +60,7 @@ from app.services.memoir.job_leases import (
 )
 from app.services.memoir.share_video_backgrounds import (
     SHARE_VIDEO_BACKGROUND_MODE_SINGLE,
+    ShareVideoImageReceiptKey,
     normalize_share_video_background_mode,
     normalize_share_video_background_style,
     share_video_background_style_label,
@@ -614,11 +616,12 @@ async def _load_owned_job(
     user_id: str,
     *,
     allow_admin: bool = False,
+    for_update: bool = False,
 ) -> MemoirMaterialShareVideo:
     filters = [MemoirMaterialShareVideo.id == job_id]
     if not allow_admin:
         filters.append(or_(MemoirMaterialShareVideo.user_id == user_id, Project.user_id == user_id))
-    result = await db.execute(
+    statement = (
         select(MemoirMaterialShareVideo)
         .join(Project, MemoirMaterialShareVideo.project_id == Project.id)
         .where(*filters)
@@ -627,6 +630,9 @@ async def _load_owned_job(
             selectinload(MemoirMaterialShareVideo.utterance),
         )
     )
+    if for_update:
+        statement = statement.with_for_update(of=MemoirMaterialShareVideo).execution_options(populate_existing=True)
+    result = await db.execute(statement)
     job = result.scalar_one_or_none()
     if not job:
         raise HTTPException(status_code=404, detail="分享视频任务不存在")
@@ -651,7 +657,7 @@ async def delete_share_video_job(
     *,
     allow_admin: bool = False,
 ) -> None:
-    job = await _load_owned_job(db, job_id, user_id, allow_admin=allow_admin)
+    job = await _load_owned_job(db, job_id, user_id, allow_admin=allow_admin, for_update=True)
     # Failed jobs can be cleared too; only work still in progress is kept.
     finished = job.status == MemoirShareVideoJobStatus.SUCCEEDED.value and job.output is not None
     if not finished and job.status != MemoirShareVideoJobStatus.FAILED.value:
@@ -660,12 +666,27 @@ async def delete_share_video_job(
     media = share_video_media_paths(job) | await share_video_receipt_paths(db, [job.id])
     if job.output is not None:
         media.discard(job.output.storage_path)
-    # Illustrations remain reusable in the image library after deleting a video.
-    await db.execute(
-        update(MemoirImageAsset)
+    # Keep evidence of confirmed images in the library when the job and
+    # its receipts go away. Match the actual file, including older slot paths.
+    confirmed: dict[str, str] = {}
+    receipt = MemoirShareVideoImageReceipt
+    for data in await db.scalars(select(receipt.cache_key).where(
+        receipt.job_id == job.id, receipt.pending_content.is_(None),
+    )):
+        key = ShareVideoImageReceiptKey.model_validate(data)
+        if key.cache_lookup_path and key.pending_reuse is None:
+            confirmed[key.storage_path] = key.cache_lookup_path
+    assets = await db.scalars(
+        select(MemoirImageAsset)
         .where(MemoirImageAsset.share_video_job_id == job.id)
-        .values(share_video_job_id=None)
+        .with_for_update()
+        .execution_options(populate_existing=True)
     )
+    for asset in assets:
+        if lookup := confirmed.get(asset.storage_path):
+            asset.metadata_json = {**(asset.metadata_json or {}), "share_video_image_cache_lookup_path": lookup}
+        asset.share_video_job_id = None
+    await db.flush()
     await db.delete(job)
     await db.commit()
     # Never remove the file before the database deletion has succeeded.
