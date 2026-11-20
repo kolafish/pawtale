@@ -8,7 +8,7 @@ from uuid import uuid4
 
 import pytest
 from PIL import Image
-from sqlalchemy import select, text
+from sqlalchemy import delete, select, text
 
 from app.database import async_session_maker
 from app.models.ai_credits import AICreditTransaction
@@ -282,7 +282,7 @@ async def test_account_deletion_racing_first_scene_registration(image_job, test_
         if metadata.background_generated_count == 1:
             raise FirstSceneCommitted
 
-    async def delete():
+    async def delete_account():
         async with async_session_maker() as db:
             await db.execute(text("SET LOCAL deadlock_timeout = '100ms'"))
             deletion_pid.set_result(await db.scalar(text("SELECT pg_backend_pid()")))
@@ -293,7 +293,7 @@ async def test_account_deletion_racing_first_scene_registration(image_job, test_
     deleting = None
     try:
         await asyncio.wait_for(registering.wait(), 5)
-        deleting = asyncio.create_task(delete())
+        deleting = asyncio.create_task(delete_account())
         pid = await asyncio.wait_for(deletion_pid, 5)
         async with asyncio.timeout(5):
             async with async_session_maker() as observer:
@@ -383,15 +383,30 @@ async def test_scoped_request_does_not_keep_legacy_cache_file_alive(image_job, c
     assert own.path.read_bytes() == b"independent image bytes"
 
 
-async def test_cache_reuses_confirmed_library_image_after_video_deletion(image_job, client, test_db):
+@pytest.mark.parametrize("old_asset", [False, True])
+async def test_cache_reuses_confirmed_library_image_after_video_deletion(image_job, client, test_db, old_asset):
     first_id, first_project_id, generate = image_job
     first = await prepare(first_id)
     first_job = await test_db.get(MemoirMaterialShareVideo, first_id, populate_existing=True)
+    if old_asset:
+        asset = await test_db.scalar(select(MemoirImageAsset).where(MemoirImageAsset.share_video_job_id == first_id))
+        asset.metadata_json = {
+            name: value for name, value in asset.metadata_json.items()
+            if name != "share_video_image_cache_lookup_path"
+        }
+        receipt = await test_db.get(MemoirShareVideoImageReceipt, (first_id, "single"))
+        old_key = {name: value for name, value in receipt.cache_key.items() if name != "cache_lookup_path"}
+        old_key["storage_path"] = receipt.cache_key["cache_lookup_path"]
+        old_key["image_storage_path"] = receipt.cache_key["storage_path"]
+        receipt.cache_key = old_key
+        first_job.metadata_json = {**first_job.metadata_json, "single_image_request": old_key}
     first_job.status = "failed"
     first_job.lease_token = None
     await test_db.commit()
     await jobs.delete_share_video_job(test_db, first_id, first_job.user_id)
-    assert await test_db.get(MemoirShareVideoImageReceipt, (first_id, "single")) is None
+    assert await test_db.scalar(select(MemoirShareVideoImageReceipt.job_id).where(
+        MemoirShareVideoImageReceipt.job_id == first_id,
+    )) is None
     assert first.image_path.is_file()
 
     other = await client.post("/api/mobile/memoir/projects", json={"title": "复用素材的回忆录"})
@@ -403,3 +418,100 @@ async def test_cache_reuses_confirmed_library_image_after_video_deletion(image_j
     assert (await client.delete(f"/api/mobile/memoir/projects/{first_project_id}")).status_code == 204
     assert not first.image_path.exists()
     assert second.image_path.read_bytes() == generate.return_value.content
+
+
+@pytest.mark.parametrize("interruption", ["after_link", "before_link", "older_worker"])
+async def test_interrupted_free_copy_keeps_confirmed_evidence(
+    image_job, client, test_db, monkeypatch, interruption,
+):
+    source_id, source_project, generate = image_job
+    first = await prepare(source_id)
+    project = await client.post("/api/mobile/memoir/projects", json={"title": "复用已付费图"})
+    assert project.is_success
+    copy_id, _ = await create_image_job(client, test_db, project_id=project.json()["id"])
+    hardlink = Path.hardlink_to
+
+    def interrupt_link(path, source):
+        assert path.parent.name == f"{copy_id}-single"
+        if interruption != "before_link":
+            hardlink(path, source)
+        raise asyncio.CancelledError
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "hardlink_to", interrupt_link)
+        with pytest.raises(asyncio.CancelledError):
+            await prepare(copy_id)
+
+    source_receipt = await test_db.get(MemoirShareVideoImageReceipt, (source_id, "single"))
+    receipt = await test_db.get(MemoirShareVideoImageReceipt, (copy_id, "single"))
+    assert receipt.cache_key["pending_reuse"]["file_path"] == source_receipt.cache_key["storage_path"]
+
+    if interruption == "older_worker":
+        # Earlier versions left the link without first committing a receipt.
+        await test_db.execute(delete(MemoirShareVideoImageReceipt).where(
+            MemoirShareVideoImageReceipt.job_id == copy_id,
+        ))
+        await test_db.commit()
+        assert (await prepare(copy_id)).image_path.samefile(first.image_path)
+    assert (await client.delete(f"/api/mobile/memoir/projects/{source_project}")).status_code == 204
+    assert not first.image_path.exists()
+
+    copied = await prepare(copy_id)
+    assert copied.image_path.read_bytes() == generate.return_value.content
+    third_project = await client.post("/api/mobile/memoir/projects", json={"title": "继续复用副本"})
+    assert third_project.is_success
+    third_id, _ = await create_image_job(client, test_db, project_id=third_project.json()["id"])
+    assert (await prepare(third_id)).image_path.samefile(copied.image_path)
+    expected = 2 if interruption == "before_link" else 1
+    assert generate.await_count == expected
+    assert (await test_db.scalars(select(AICreditTransaction.amount_rmb))).all() == [Decimal("-0.18")] * expected
+
+
+async def test_detaching_video_does_not_confirm_unproven_library_image(image_job, client, test_db):
+    source_id, _, generate = image_job
+    first = await prepare(source_id)
+    job = await test_db.get(MemoirMaterialShareVideo, source_id, populate_existing=True)
+    asset = await test_db.scalar(select(MemoirImageAsset).where(MemoirImageAsset.share_video_job_id == source_id))
+    asset.metadata_json = {
+        name: value for name, value in asset.metadata_json.items()
+        if name != "share_video_image_cache_lookup_path"
+    }
+    # This is the shape an older unverified free copy could have.
+    await test_db.execute(delete(MemoirShareVideoImageReceipt).where(
+        MemoirShareVideoImageReceipt.job_id == source_id,
+    ))
+    job.status = "failed"
+    job.lease_token = None
+    await test_db.commit()
+    await jobs.delete_share_video_job(test_db, source_id, job.user_id)
+    assert first.image_path.is_file()
+
+    project = await client.post("/api/mobile/memoir/projects", json={"title": "同文不同已确认状态"})
+    assert project.is_success
+    other_id, _ = await create_image_job(client, test_db, project_id=project.json()["id"])
+    await prepare(other_id)
+    assert generate.await_count == 2
+
+
+async def test_free_reuse_tries_another_copy_if_reserved_source_disappears(image_job, client, test_db, monkeypatch):
+    source_id, _, generate = image_job
+    await prepare(source_id)
+    duplicate_id, _ = await create_image_job(client, test_db)
+    await prepare(duplicate_id)
+    next_id, _ = await create_image_job(client, test_db)
+
+    hardlink = Path.hardlink_to
+    vanished = []
+
+    def unlink_first_source(destination, source):
+        if not vanished:
+            source.unlink()
+            vanished.append(source)
+        return hardlink(destination, source)
+
+    monkeypatch.setattr(Path, "hardlink_to", unlink_first_source)
+    reused = await prepare(next_id)
+    assert reused.image_path.read_bytes() == generate.return_value.content
+    assert vanished and not vanished[0].exists()
+    assert generate.await_count == 1
+    assert (await test_db.scalars(select(AICreditTransaction.amount_rmb))).all() == [Decimal("-0.18")]

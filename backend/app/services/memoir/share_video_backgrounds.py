@@ -105,6 +105,15 @@ class ShareVideoBackgroundCacheKey(BaseModel):
         return asset if _image_file_exists(asset.path) else None
 
 
+class ShareVideoReuseSource(BaseModel):
+    file_path: str
+    sha256: str
+
+
+class ShareVideoImageReceiptKey(ShareVideoBackgroundCacheKey):
+    pending_reuse: ShareVideoReuseSource | None = None
+
+
 @dataclass(frozen=True)
 class ShareVideoBackgroundRequest:
     prompt: ShareVideoBackgroundPrompt
@@ -568,16 +577,29 @@ def _image_file_exists(path: Path) -> bool:
     return stat.S_ISREG(info.st_mode) and info.st_size > 0
 
 
+def _sync_background_directory(path: Path) -> None:
+    dir_fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(dir_fd)
+    finally:
+        os.close(dir_fd)
+
+
+def _background_file_digest(path: Path) -> str | None:
+    try:
+        with path.open("rb") as image:
+            return hashlib.file_digest(image, "sha256").hexdigest()
+    except FileNotFoundError:
+        return None
+
+
 async def _reuse_background(
     db: AsyncSession, key: ShareVideoBackgroundCacheKey, slot: ShareVideoImageSlot,
 ) -> ShareVideoBackgroundAsset | None:
-    if cached := key.cached_asset():
-        # A previous delivery may have written our own link before interruption.
-        # Only a committed receipt makes that file discoverable by another task.
-        return cached
+    cached = key.cached_asset()
     lookup = key.cache_lookup_path
     if lookup is None:
-        return None
+        return cached
 
     receipt = MemoirShareVideoImageReceipt
     legacy_path = receipt.cache_key["storage_path"].as_string()
@@ -594,6 +616,7 @@ async def _reuse_background(
     settled = select(stored_image_path, receipt.model).where(
         func.coalesce(scoped_lookup, legacy_path) == lookup,
         receipt.pending_content.is_(None),
+        receipt.cache_key["pending_reuse"].as_string().is_(None),
         or_(stored_image_path != lookup, ~legacy_unsettled),
     )
     # The image library can keep a confirmed image after its video and receipt are deleted.
@@ -609,22 +632,69 @@ async def _reuse_background(
             ),
         ),
     )
-    for storage_path, model in await db.execute(settled.union_all(registered)):
+    for storage_path, model in await db.execute(settled.union(registered)):
         source = share_video_background_file_path(storage_path)
         if not _image_file_exists(source):
             continue
-        asset = key.asset(cache_hit=True, model=model, reusable=True)
+        if cached:
+            # Old workers may have left an unregistered link. Verify its source
+            # rather than certifying every file left by an older worker.
+            try:
+                if not cached.path.samefile(source):
+                    continue
+            except FileNotFoundError:
+                continue
+            _sync_background_directory(cached.path.parent)
+            db.add(receipt(
+                job_id=slot.lease.job_id, slot=slot.name, model=model, cache_key=key.model_dump(),
+            ))
+            return key.asset(cache_hit=True, model=model, reusable=True)
+
+        digest = _background_file_digest(source)
+        if digest is None:
+            continue
+        reservation = ShareVideoImageReceiptKey(
+            **key.model_dump(), pending_reuse=ShareVideoReuseSource(file_path=storage_path, sha256=digest),
+        )
+        identity = (slot.lease.job_id, slot.name)
+        db.add(receipt(
+            job_id=slot.lease.job_id, slot=slot.name, model=model, cache_key=reservation.model_dump(),
+        ))
+        # Commit evidence of a confirmed source before creating a link. Recovery
+        # can verify the destination even if that source has since been deleted.
+        await db.commit()
+        await lock_share_video_image_owner(db, slot.lease, user_id=slot.usage.user_id)
+        reserved = await db.get(receipt, identity, populate_existing=True)
+        if reserved is None:
+            return None
+        asset = await _recover_image_receipt(db, key, slot, reserved, cache_hit=True)
+        if asset is not None:
+            return asset
+        # The reserved source disappeared. Other confirmed copies can still be used.
+        await db.flush()
+    return cached
+
+
+async def _finish_background_reuse(
+    db: AsyncSession, receipt: MemoirShareVideoImageReceipt, key: ShareVideoImageReceiptKey,
+    source: ShareVideoReuseSource, asset: ShareVideoBackgroundAsset,
+) -> ShareVideoBackgroundAsset | None:
+    if not asset.path.exists():
+        original = share_video_background_file_path(source.file_path)
         asset.path.parent.mkdir(parents=True, exist_ok=True)
         try:
-            asset.path.hardlink_to(source)
+            asset.path.hardlink_to(original)
         except FileNotFoundError:
-            # The source owner may delete its name while we borrow the image.
-            continue
-        db.add(receipt(
-            job_id=slot.lease.job_id, slot=slot.name, model=model, cache_key=key.model_dump(),
-        ))
-        return asset
-    return None
+            # Nothing was copied, so a later provider request may fill the slot.
+            await db.delete(receipt)
+            return None
+    if _background_file_digest(asset.path) != source.sha256:
+        asset.path.unlink(missing_ok=True)
+        await db.delete(receipt)
+        return None
+    _sync_background_directory(asset.path.parent)
+    receipt.cache_key = key.model_dump(exclude={"pending_reuse"})
+    return asset
 
 
 def _write_background(path: Path, content: bytes, *, overwrite: bool = True) -> bool:
@@ -644,11 +714,7 @@ def _write_background(path: Path, content: bytes, *, overwrite: bool = True) -> 
                     path.hardlink_to(temp_path)
                 except FileExistsError:
                     installed = False
-            parent_fd = os.open(path.parent, os.O_RDONLY)
-            try:
-                os.fsync(parent_fd)
-            finally:
-                os.close(parent_fd)
+            _sync_background_directory(path.parent)
             return installed
         finally:
             temp_path.unlink(missing_ok=True)
@@ -731,6 +797,44 @@ class ShareVideoImageSlot:
             return True
 
 
+async def _recover_image_receipt(
+    db: AsyncSession, key: ShareVideoBackgroundCacheKey, slot: ShareVideoImageSlot,
+    receipt: MemoirShareVideoImageReceipt, *, cache_hit: bool,
+) -> ShareVideoBackgroundAsset | None:
+    receipt_key = ShareVideoImageReceiptKey.model_validate(receipt.cache_key)
+    if receipt_key.pending_reuse is not None:
+        asset = receipt_key.asset(cache_hit=True, model=receipt.model, reusable=True)
+        return await _finish_background_reuse(db, receipt, receipt_key, receipt_key.pending_reuse, asset)
+    original: ShareVideoBackgroundCacheKey = receipt_key
+    if receipt.pending_content is not None and original.cache_lookup_path is None:
+        # Older, unsettled receipts still point to the shared file. The worker
+        # checkpoints a new slot path before resuming them.
+        if key.cache_lookup_path != original.storage_path:
+            raise ShareVideoBackgroundGenerationError("暂存背景图的保存路径尚未登记")
+        original = key
+        receipt.cache_key = original.model_dump()
+    asset = original.asset(cache_hit=cache_hit, model=receipt.model, reusable=True)
+    if receipt.pending_content is None:
+        if not _image_file_exists(asset.path):
+            raise ShareVideoBackgroundGenerationError("已生成的背景图文件缺失")
+        return asset
+    try:
+        if not _write_background(asset.path, receipt.pending_content, overwrite=False):
+            if asset.path.read_bytes() != receipt.pending_content:
+                raise ShareVideoBackgroundGenerationError("已保存的背景图与暂存内容不匹配")
+    except ShareVideoBackgroundGenerationError as exc:
+        # Retry the job against the staged bytes, even for a single-frame video.
+        raise OSError("暂存的分享视频背景图尚未写入缓存") from exc
+    await record_ai_usage(
+        provider=asset.provider, model=asset.model, status="succeeded", image_count=1,
+        cost=estimate_image_cost(provider=asset.provider, model=asset.model, image_count=1),
+        context=slot.usage, db=db,
+    )
+    # Clearing the bytes and debiting share one commit under the job lock.
+    receipt.pending_content = None
+    return asset
+
+
 async def recover_share_video_background(
     key: ShareVideoBackgroundCacheKey | None, slot: ShareVideoImageSlot | None, *, cache_hit: bool = True,
 ) -> ShareVideoBackgroundAsset | None:
@@ -738,39 +842,14 @@ async def recover_share_video_background(
         return None
     if slot is None:
         return key.cached_asset()
-    async with async_session_maker.begin() as db:
-        identity = (slot.lease.job_id, slot.name)
+    async with async_session_maker() as db:
         await lock_share_video_image_owner(db, slot.lease, user_id=slot.usage.user_id)
-        receipt = await db.get(MemoirShareVideoImageReceipt, identity)
+        receipt = await db.get(MemoirShareVideoImageReceipt, (slot.lease.job_id, slot.name))
         if receipt is None:
-            return await _reuse_background(db, key, slot)
-        original = ShareVideoBackgroundCacheKey.model_validate(receipt.cache_key)
-        if receipt.pending_content is not None and original.cache_lookup_path is None:
-            # Older, unsettled receipts still point to the shared file. The worker
-            # checkpoints a new slot path before resuming them.
-            if key.cache_lookup_path != original.storage_path:
-                raise ShareVideoBackgroundGenerationError("暂存背景图的保存路径尚未登记")
-            original = key
-            receipt.cache_key = original.model_dump()
-        asset = original.asset(cache_hit=cache_hit, model=receipt.model, reusable=True)
-        if receipt.pending_content is None:
-            if not _image_file_exists(asset.path):
-                raise ShareVideoBackgroundGenerationError("已生成的背景图文件缺失")
-            return asset
-        try:
-            if not _write_background(asset.path, receipt.pending_content, overwrite=False):
-                if asset.path.read_bytes() != receipt.pending_content:
-                    raise ShareVideoBackgroundGenerationError("已保存的背景图与暂存内容不匹配")
-        except ShareVideoBackgroundGenerationError as exc:
-            # Retry the job against the staged bytes, even for a single-frame video.
-            raise OSError("暂存的分享视频背景图尚未写入缓存") from exc
-        await record_ai_usage(
-            provider=asset.provider, model=asset.model, status="succeeded", image_count=1,
-            cost=estimate_image_cost(provider=asset.provider, model=asset.model, image_count=1),
-            context=slot.usage, db=db,
-        )
-        # Clearing the bytes and debiting share one commit under the job lock.
-        receipt.pending_content = None
+            asset = await _reuse_background(db, key, slot)
+        else:
+            asset = await _recover_image_receipt(db, key, slot, receipt, cache_hit=cache_hit)
+        await db.commit()
         return asset
 
 
