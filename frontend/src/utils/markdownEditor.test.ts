@@ -1,3 +1,8 @@
+// @vitest-environment happy-dom
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { describe, expect, it } from 'vitest';
 import {
   applyMarkdownFormat,
@@ -5,6 +10,12 @@ import {
   continueMarkdownLine,
   getMarkdownKeyboardCommand,
 } from './markdownEditor';
+
+function renderPreview(text: string): HTMLElement {
+  const preview = document.createElement('div');
+  preview.innerHTML = renderToStaticMarkup(createElement(ReactMarkdown, { remarkPlugins: [remarkGfm] }, text));
+  return preview;
+}
 
 describe('applyMarkdownFormat', () => {
   it('wraps selected text with inline markdown markers', () => {
@@ -76,13 +87,67 @@ describe('applyMarkdownFormat', () => {
 
     expect(result.text).toBe('前文\n\n---\n\n后文');
   });
+
+  it('inserts image syntax and selects the URL when the description is supplied', () => {
+    const result = applyMarkdownFormat('旧照[一]', { start: 0, end: 5 }, 'image');
+    expect(result.text.slice(result.start, result.end)).toBe('https://');
+    const text = result.text.replace('https://', '/photo.png');
+    expect(renderPreview(text).querySelector('img')?.alt).toBe('旧照[一]');
+  });
+
+  it('appends a footnote definition using an unused label and selects its body', () => {
+    const result = applyMarkdownFormat('旧备注[^1]，新备注\n\n[^1]: 旧内容', { start: 8, end: 11 }, 'footnote');
+    expect(renderPreview(result.text).querySelectorAll('a[data-footnote-ref]')).toHaveLength(2);
+    expect(result.text.slice(result.start, result.end)).toBe('脚注内容');
+  });
+
+  it('adds a hard break on an existing newline without splitting the paragraph', () => {
+    const result = applyMarkdownFormat('第一行\n第二行', { start: 3, end: 3 }, 'hard-break');
+    expect(result.text).toBe('第一行  \n第二行');
+    expect(renderPreview(result.text).querySelector('p > br')).not.toBeNull();
+    expect(result.start).toBe(6);
+  });
+
+  it.each(['heading-4', 'heading-5', 'heading-6'] as const)('renders %s', (format) => {
+    const result = applyMarkdownFormat('## 小标题', { start: 3, end: 6 }, format);
+    expect(renderPreview(result.text).querySelector(`h${format.at(-1)}`)?.textContent).toBe('小标题');
+  });
 });
 
 describe('applyMarkdownIndent', () => {
-  it('indents selected non-empty lines', () => {
-    const result = applyMarkdownIndent('- 第一项\n- 第二项', { start: 0, end: 11 }, 'in');
+  it('nests the selected siblings without including a line at the selection end', () => {
+    const source = '- 父项\n- 第一项\n- 第二项\n- 末项';
+    const result = applyMarkdownIndent(source, { start: 5, end: source.lastIndexOf('- 末项') }, 'in');
 
-    expect(result.text).toBe('  - 第一项\n  - 第二项');
+    expect(result.text).toBe('- 父项\n  - 第一项\n  - 第二项\n- 末项');
+    expect(result.text.slice(result.start, result.end)).toBe('  - 第一项\n  - 第二项\n');
+  });
+
+  it('supports mixed third-level items under multi-digit ordered lists and keeps the caret', () => {
+    const text = '10. 父项\n    - [x] 子项\n    - 第三层';
+    const result = applyMarkdownIndent(text, { start: text.length, end: text.length }, 'in');
+    const leaf = renderPreview(result.text).querySelector('ol > li > ul > li > ul > li');
+
+    expect(leaf?.textContent).toBe('第三层');
+    expect(result.start).toBe(result.text.length);
+    expect(result.end).toBe(result.start);
+    expect(applyMarkdownIndent(result.text, result, 'out').text).toBe(text);
+  });
+
+  it('nests a numbered sibling while retaining its number and descendant items', () => {
+    const text = '1. 父项\n2. 子项\n   - 孙项\n3. 末项';
+    const cursor = text.indexOf('子项');
+    const result = applyMarkdownIndent(text, { start: cursor, end: cursor }, 'in');
+    const preview = renderPreview(result.text);
+
+    expect(preview.querySelector('ol > li > ol')?.getAttribute('start')).toBe('2');
+    expect(preview.querySelector('ol > li > ol > li > ul > li')?.textContent).toBe('孙项');
+    expect(result.text.slice(result.start, result.start + 2)).toBe('子项');
+  });
+
+  it('keeps the first item at its current level when there is no preceding sibling', () => {
+    const source = '- 父项\n  - 子项';
+    expect(applyMarkdownIndent(source, { start: source.length, end: source.length }, 'in').text).toBe(source);
   });
 
   it('outdents selected lines by one markdown indent level', () => {
@@ -104,6 +169,13 @@ describe('continueMarkdownLine', () => {
     const result = continueMarkdownLine('2. 第二项', { start: 6, end: 6 });
 
     expect(result?.text).toBe('2. 第二项\n3. ');
+  });
+
+  it('continues additional list markers at their existing indentation', () => {
+    const task = '  + [x] 完成';
+    const ordered = '    10) 第十项';
+    expect(continueMarkdownLine(task, { start: task.length, end: task.length })?.text).toBe(`${task}\n  + [ ] `);
+    expect(continueMarkdownLine(ordered, { start: ordered.length, end: ordered.length })?.text).toBe(`${ordered}\n    11) `);
   });
 
   it('exits an empty list item', () => {
@@ -139,6 +211,7 @@ describe('getMarkdownKeyboardCommand', () => {
     expect(getMarkdownKeyboardCommand({ key: 'Tab' })).toEqual({ type: 'indent', direction: 'in' });
     expect(getMarkdownKeyboardCommand({ key: 'Tab', shiftKey: true })).toEqual({ type: 'indent', direction: 'out' });
     expect(getMarkdownKeyboardCommand({ key: 'Enter' })).toEqual({ type: 'continue-line' });
+    expect(getMarkdownKeyboardCommand({ key: 'Enter', shiftKey: true })).toEqual({ type: 'format', format: 'hard-break' });
     expect(getMarkdownKeyboardCommand({ key: 'b', metaKey: true, isComposing: true })).toBeNull();
   });
 });
