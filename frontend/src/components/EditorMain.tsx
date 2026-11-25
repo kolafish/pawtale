@@ -12,6 +12,8 @@ import {
   Link,
   List,
   ListChecks,
+  ListIndentDecrease,
+  ListIndentIncrease,
   ListOrdered,
   Minus,
   Pencil,
@@ -103,6 +105,22 @@ const MARKDOWN_TOOLS: MarkdownTool[] = [
   { format: 'divider', title: '分隔线', icon: Minus },
 ];
 
+const EXTRA_MARKDOWN_TOOLS: { format: MarkdownFormat; label: string }[] = [
+  { format: 'heading-4', label: '四级标题' },
+  { format: 'heading-5', label: '五级标题' },
+  { format: 'heading-6', label: '六级标题' },
+  { format: 'image', label: '图片' },
+  { format: 'footnote', label: '脚注' },
+  { format: 'hard-break', label: '硬换行' },
+];
+
+const INDENT_TOOLS = [
+  { direction: 'out', label: '减少缩进', shortcut: 'Shift+Tab', icon: ListIndentDecrease },
+  { direction: 'in', label: '增加缩进', shortcut: 'Tab', icon: ListIndentIncrease },
+] as const;
+
+const MARKDOWN_ACTION_BUTTON_CLASS = 'inline-flex h-10 w-10 items-center justify-center rounded-md text-gray-600 transition-[background-color,color,transform] hover:bg-pink-50 hover:text-pink-600 active:scale-[0.96] focus-visible:outline-2 focus-visible:outline-pink-500 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-gray-600';
+
 const VIEW_MODES: { value: EditorViewMode; label: string; icon: typeof Pencil }[] = [
   { value: 'edit', label: '编辑', icon: Pencil },
   { value: 'preview', label: '预览', icon: Eye },
@@ -120,7 +138,10 @@ function MarkdownPreview({ content }: { content: string }) {
 
   return (
     <div className="markdown-preview h-full overflow-y-auto rounded-xl border border-pink-100 bg-white px-5 py-5 leading-7">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        remarkRehypeOptions={{ footnoteLabel: '脚注', footnoteLabelProperties: {}, footnoteBackLabel: '返回正文' }}
+      >
         {content}
       </ReactMarkdown>
     </div>
@@ -230,6 +251,14 @@ export function EditorMain({
     applyEditResult(applyMarkdownFormat(editorContent, currentTextareaSelection(), format));
   };
 
+  const applyIndent = (direction: 'in' | 'out') => {
+    if (composingRef.current) return false;
+    const result = applyMarkdownIndent(editorContent, currentTextareaSelection(), direction);
+    if (result.text === editorContent) return false;
+    applyEditResult(result);
+    return true;
+  };
+
   const handleEditorKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.nativeEvent.isComposing || composingRef.current || event.keyCode === 229) return;
     onContentSelectionChange(currentTextareaSelection());
@@ -260,8 +289,7 @@ export function EditorMain({
       return;
     }
     if (command.type === 'indent') {
-      event.preventDefault();
-      applyEditResult(applyMarkdownIndent(editorContent, selection, command.direction));
+      if (applyIndent(command.direction)) event.preventDefault();
       return;
     }
 
@@ -302,7 +330,7 @@ export function EditorMain({
       onSelect={handleSelect}
       onMouseUp={handleSelect}
       placeholder="开始写作..."
-      className="min-h-0 flex-1 w-full px-4 py-4 rounded-xl border border-pink-100 focus:outline-none focus:ring-2 focus:ring-pink-500 leading-7 resize-none bg-white"
+      className="min-h-0 flex-1 w-full px-4 py-4 rounded-xl border border-pink-100 focus:outline-none focus:ring-2 focus:ring-pink-500 leading-7 resize-none bg-white [tab-size:4]"
     />
   );
 
@@ -397,7 +425,7 @@ export function EditorMain({
                     disabled={!enabled || viewMode === 'preview'}
                     onMouseDown={(event) => event.preventDefault()}
                     onClick={() => navigateHistory(direction)}
-                    className="inline-flex h-10 w-10 items-center justify-center rounded-md text-gray-600 transition-[background-color,color,transform] hover:bg-pink-50 hover:text-pink-600 active:scale-[0.96] focus-visible:outline-2 focus-visible:outline-pink-500 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-gray-600"
+                    className={MARKDOWN_ACTION_BUTTON_CLASS}
                   >
                     <Icon size={16} aria-hidden="true" />
                   </button>
@@ -419,6 +447,35 @@ export function EditorMain({
                     </button>
                   );
                 })}
+              </div>
+              <div className="flex flex-wrap items-center gap-1">
+                {INDENT_TOOLS.map(({ direction, label, shortcut, icon: Icon }) => (
+                  <button
+                    key={direction}
+                    type="button"
+                    aria-label={label}
+                    title={`${label} ${shortcut}`}
+                    disabled={viewMode === 'preview'}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => applyIndent(direction)}
+                    className={MARKDOWN_ACTION_BUTTON_CLASS}
+                  >
+                    <Icon size={16} aria-hidden="true" />
+                  </button>
+                ))}
+                <select
+                  aria-label="更多 Markdown 格式"
+                  value=""
+                  disabled={viewMode === 'preview'}
+                  onChange={(event) => {
+                    const tool = EXTRA_MARKDOWN_TOOLS.find(({ format }) => format === event.currentTarget.value);
+                    if (tool) applyFormat(tool.format);
+                  }}
+                  className="min-h-10 rounded-md border border-gray-200 bg-white px-2 text-xs text-gray-600 focus-visible:outline-2 focus-visible:outline-pink-500 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <option value="" disabled>更多格式</option>
+                  {EXTRA_MARKDOWN_TOOLS.map(({ format, label }) => <option key={format} value={format}>{label}</option>)}
+                </select>
               </div>
               <div className="ml-auto flex rounded-lg bg-gray-100 p-1">
                 {VIEW_MODES.map((mode) => {
