@@ -293,7 +293,6 @@ async def test_memoir_print_journey(client, test_db, tmp_path, request, monkeypa
         )
         sources.extend((turn, session_id, event) for turn, event in zip(turns, events, strict=True))
         if index == 8:
-            await settle(test_db, project_id, artifacts)
             original, voice_id, event = sources[0]
             edited = corrected(original)
             changed = await json_response(
