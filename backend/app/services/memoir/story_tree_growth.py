@@ -766,8 +766,6 @@ async def _place_groups(
     on_placed: Callable[[str], Awaitable[None]],
 ) -> list[str]:
     placed: list[str] = []
-    plan = await load_plan_with_chapters(db, project_id)
-    chapter_by_title = {chapter.title: chapter.id for chapter in (plan.chapters if plan else [])}
     for group_index, group in enumerate(batch.groups):
         if group.action in {"leave_unassigned", "not_story"}:
             continue
@@ -778,10 +776,15 @@ async def _place_groups(
                 continue
             if not await _lock_growth_questions(db, project_id=project_id, batch=batch):
                 raise HTTPException(409, "提问已变化，请重新整理素材")
-            same_title_chapter_id = (
-                chapter_by_title.get(group.new_chapter_title) if group.action == "create_chapter" else None
-            )
-            chapter_id = group.chapter_id or same_title_chapter_id
+            chapter_id = group.chapter_id
+            if not target_section_id and group.action == "create_chapter":
+                # The preceding source checkpoint released the directory lock.
+                chapter_id = await db.scalar(
+                    select(MemoirBookPlanChapter.id)
+                    .where(MemoirBookPlanChapter.project_id == project_id, MemoirBookPlanChapter.title == group.new_chapter_title)
+                    .order_by(MemoirBookPlanChapter.sort_order.desc(), MemoirBookPlanChapter.id.desc())
+                    .limit(1)
+                )
             if not target_section_id and chapter_id and group.new_section_title:
                 concurrent_section = await _find_concurrent_group_section(
                     db, project_id=project_id, chapter_id=chapter_id, group=group, batch=batch,
@@ -792,7 +795,7 @@ async def _place_groups(
                     batch.section_chapters[target_section_id] = chapter_id
             if target_section_id:
                 request = MemoirSectionMaterialPlacementRequest(target_section_id=target_section_id)
-            elif group.action == "create_section" or same_title_chapter_id:
+            elif chapter_id:
                 request = MemoirSectionMaterialPlacementRequest(
                     target_chapter_id=chapter_id,
                     new_section_title=group.new_section_title,
@@ -817,7 +820,7 @@ async def _place_groups(
                     expected_source=batch.sources[utterance_id],
                     expected_section_version=batch.section_versions.get(target_section_id),
                     expected_chapter_updated_at=batch.chapter_updated_at.get(
-                        batch.section_chapters.get(target_section_id) or group.chapter_id or same_title_chapter_id
+                        batch.section_chapters.get(target_section_id) or chapter_id
                     ),
                     commit=False,
                 )
@@ -830,8 +833,6 @@ async def _place_groups(
                 select(MemoirSection.version).where(MemoirSection.id == target_section_id)
             )
             batch.section_chapters[target_section_id] = placement.chapter_id
-            if group.action == "create_chapter":
-                chapter_by_title.setdefault(group.new_chapter_title, placement.chapter_id)
             if placement.created_chapter:
                 batch.created_chapters[placement.chapter_id] = group.insert_before_chapter_id
             if placement.chapter_id not in batch.chapter_updated_at:

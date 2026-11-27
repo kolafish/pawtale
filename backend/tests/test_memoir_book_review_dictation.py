@@ -107,6 +107,12 @@ async def test_memoir_project_dictation_streams_for_owned_project(
         "把第一章放到第二章后面" if chapter_edit else "把第一张放到第二张后面"
     )
     assert normalize("宿舍第一张床靠走道。") == "宿舍第一张床靠走道。"
+    assert normalize("把第一张改名为《第一张标题页》") == (
+        "把第一章改名为《第一张标题页》" if chapter_edit else "把第一张改名为《第一张标题页》"
+    )
+    assert normalize("把第一章改名为第一张标题页") == "把第一章改名为第一张标题页"
+    if chapter_edit:
+        assert normalize("把第一章改名为《回忆录的张杰》") == "把第一章改名为《回忆录的张杰》"
     assert callable(calls["gateway"]["authorize_audio"])
     calls["gateway"]["asr_client_factory"]()
     assert calls["asr"] == calls["capacity"]

@@ -83,6 +83,17 @@ async def preview(client, monkeypatch, story, operations, *, questions=None, ins
     return response, fake
 
 
+@pytest.mark.parametrize("instruction", [
+    "把第一章改名为《第一张标题页》",
+    "把第一章改名为第一张标题页",
+    "把正文里的第一张标题页替换成第二张目录页",
+])
+async def test_voice_edit_preview_preserves_user_supplied_text(client, monkeypatch, story, instruction):
+    response, model = await preview(client, monkeypatch, story, [], instruction=instruction)
+    assert response.status_code == 200, response.text
+    assert model.inputs[0]["instruction"] == instruction
+
+
 async def apply(client, story, preview_data, operations=None):
     chosen = operations if operations is not None else [
         {
@@ -598,7 +609,7 @@ async def test_split_one_chapter_into_three_preserves_groups_and_independent_con
         instruction="第一章内容太多了，拆一下章节。\n拆成三张吧。",
     )
     assert response.status_code == 200, response.text
-    assert model.inputs[0]["instruction"] == "第一章内容太多了，拆一下章节。\n拆成三章吧。"
+    assert model.inputs[0]["instruction"] == "第一章内容太多了，拆一下章节。\n拆成三张吧。"
     data = response.json()
     assert len(json.loads(data["signature"])) == 2
     assert len((await _story(test_db, story["pid"]))["chapters"]) == len(before["chapters"])
