@@ -1,15 +1,18 @@
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
 from fastapi import HTTPException
 
 from app.routers import dictation_gateway
 from app.routers.memoir import dictation as dictation_router
 
 
+@pytest.mark.parametrize("chapter_edit", [False, True])
 async def test_memoir_project_dictation_streams_for_owned_project(
     test_db,
     monkeypatch,
+    chapter_edit,
 ):
     user = SimpleNamespace(id="user-1")
     calls: dict[str, Any] = {}
@@ -83,6 +86,7 @@ async def test_memoir_project_dictation_streams_for_owned_project(
         websocket,
         "project-1",
         test_db,
+        chapter_edit=chapter_edit,
     )
 
     assert websocket.accepted
@@ -98,7 +102,11 @@ async def test_memoir_project_dictation_streams_for_owned_project(
         "gateway": "memoir_project_dictation",
         "project_id": "project-1",
     }
-    assert calls["gateway"]["text_normalizer"]("把第一张放到第二张后面") == ("把第一章放到第二章后面")
+    normalize = calls["gateway"]["text_normalizer"]
+    assert normalize("把第一张放到第二张后面") == (
+        "把第一章放到第二章后面" if chapter_edit else "把第一张放到第二张后面"
+    )
+    assert normalize("宿舍第一张床靠走道。") == "宿舍第一张床靠走道。"
     assert callable(calls["gateway"]["authorize_audio"])
     calls["gateway"]["asr_client_factory"]()
     assert calls["asr"] == calls["capacity"]

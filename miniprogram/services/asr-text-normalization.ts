@@ -19,7 +19,9 @@ type ContextualHomophoneRule = {
 
 type AsrCorrectionRule = RegexRule | ContextualHomophoneRule;
 
-const NORMALIZATION_RULES: AsrCorrectionRule[] = ASR_CORRECTION_RULES_CONFIG.rules.map(compileRule);
+const NORMALIZATION_RULES: AsrCorrectionRule[] = ASR_CORRECTION_RULES_CONFIG.rules
+  .filter((rule) => rule.kind !== "regex" || !rule.chapter_edit_only)
+  .map(compileRule);
 
 export function normalizeMemoirAsrText(text: string): string {
   let normalized = text;

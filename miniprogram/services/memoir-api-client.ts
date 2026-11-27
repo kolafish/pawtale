@@ -82,10 +82,10 @@ export function memoirNarrativeProjectPath(projectId: string, suffix = ""): stri
   return `/api/memoir/projects/${encodeURIComponent(projectId)}${suffix}`;
 }
 
-export function memoirProjectDictationUrl(projectId: string): string {
+export function memoirProjectDictationUrl(projectId: string, { chapterEdit = false } = {}): string {
   const config = readBackendConfig();
   return config.wsBaseUrl
-    ? `${cleanBaseUrl(config.wsBaseUrl)}${memoirNarrativeProjectPath(projectId, "/dictation")}`
+    ? `${cleanBaseUrl(config.wsBaseUrl)}${memoirNarrativeProjectPath(projectId, "/dictation")}${chapterEdit ? "?chapter_edit=true" : ""}`
     : "";
 }
 

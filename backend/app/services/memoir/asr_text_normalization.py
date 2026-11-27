@@ -15,6 +15,7 @@ _RULES_RESOURCE = "asr_correction_rules.json"
 class _RegexRule:
     pattern: re.Pattern[str]
     replacement: str
+    chapter_edit_only: bool
 
 
 @dataclass(frozen=True)
@@ -25,16 +26,18 @@ class _ContextualHomophoneRule:
     after_patterns: tuple[re.Pattern[str], ...]
 
 
-def normalize_memoir_asr_text(text: str) -> str:
-    """Normalize high-frequency memoir/book terms commonly misheard by ASR."""
+def normalize_memoir_asr_text(text: str, *, chapter_edit: bool = False) -> str:
+    """Normalize known ASR terms for narration or chapter edit instructions."""
     normalized = text
     for rule in _normalization_rules():
         if isinstance(rule, _RegexRule):
+            if rule.chapter_edit_only != chapter_edit:
+                continue
             normalized = rule.pattern.sub(
                 lambda match, replacement=rule.replacement: _format_replacement(replacement, match),
                 normalized,
             )
-        else:
+        elif not chapter_edit:
             normalized = rule.pattern.sub(
                 lambda match, current=normalized, contextual_rule=rule: _contextual_homophone_replacement(
                     current,
@@ -91,6 +94,7 @@ def _load_rules_config() -> dict[str, Any]:
 def _compile_regex_rule(item: dict[str, Any]) -> _RegexRule:
     return _RegexRule(
         pattern=re.compile(_required_string(item, "pattern")),
+        chapter_edit_only=item.get("chapter_edit_only") is True,
         replacement=_required_string(item, "replacement"),
     )
 

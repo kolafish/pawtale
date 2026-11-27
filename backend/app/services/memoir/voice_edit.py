@@ -41,6 +41,7 @@ from app.services.ai_types import AITextClient
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir import term_corrections
 from app.services.memoir.access import load_memoir_project
+from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
 from app.services.memoir.automatic_book_draft import schedule_book_draft
 from app.services.memoir.book_plan_write_workflow import apply_book_plan_structure_command
 from app.services.memoir.book_structure_commands import moved_chapter_order
@@ -702,7 +703,9 @@ async def preview_voice_edit(db: AsyncSession, *, user_id: str, project_id: str,
     if not instruction:
         raise HTTPException(422, "请先说出或输入修改要求")
     extended = req.supports_extended_edits
-    payload, compact = _model_payload(instruction, project.title, story, extended=extended)
+    payload, compact = _model_payload(
+        normalize_memoir_asr_text(instruction, chapter_edit=True), project.title, story, extended=extended,
+    )
     model = (req.ai_model or "").strip() or project_ai_model(project)
     client = ai_client or get_ai_service(model)
     policy = ai_text_workload_policy(AITextWorkload.INTERACTIVE_STRUCTURED)

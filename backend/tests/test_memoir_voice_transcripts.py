@@ -3326,10 +3326,24 @@ def test_normalize_memoir_asr_text_corrects_chapter_homophones_in_book_context()
     assert normalize_memoir_asr_text("现在有几个张杰啊？") == "现在有几个章节啊？"
     assert normalize_memoir_asr_text("这条还没收入张杰。") == "这条还没收入章节。"
     assert normalize_memoir_asr_text("你不是一个人名的张杰，是书的张杰。") == "你不是一个人名的章节，是书的章节。"
-    assert normalize_memoir_asr_text("把第一张改名为童年往事。") == "把第一章改名为童年往事。"
-    assert normalize_memoir_asr_text("第一张和第二张换一下。") == "第一章和第二章换一下。"
-    assert normalize_memoir_asr_text("现在有几张啊？") == "现在有几章啊？"
+    assert normalize_memoir_asr_text("把第一张改名为童年往事。", chapter_edit=True) == "把第一章改名为童年往事。"
+    assert normalize_memoir_asr_text("第一张和第二张换一下。", chapter_edit=True) == "第一章和第二章换一下。"
+    assert normalize_memoir_asr_text("现在有几张啊？", chapter_edit=True) == "现在有几章啊？"
     assert normalize_memoir_asr_text("张杰这个人，在书里单独占了一章。") == "张杰这个人，在书里单独占了一章。"
+
+
+@pytest.mark.parametrize("text", [
+    "宿舍第一张床靠走道。",
+    "我顺着自己的印象另画一张，把学校放到染坊旁边。",
+    "摆着几张白椅，背后能看见船。",
+    "桌上只留了几张纸。",
+    "相册里现在有几张啊？",
+    "你有多少张照片？",
+    "第一张和第二张照片都留着。",
+])
+def test_memoir_asr_preserves_ordinary_classifiers(text):
+    assert normalize_memoir_asr_text(text) == text
+    assert normalize_memoir_asr_text(text, chapter_edit=True) == text
 
 
 def test_memoir_asr_correction_rule_files_stay_in_sync():

@@ -593,11 +593,12 @@ async def test_split_one_chapter_into_three_preserves_groups_and_independent_con
 ):
     story, operations = multiple_split_story
     before = await _story(test_db, story["pid"])
-    response, _ = await preview(
+    response, model = await preview(
         client, monkeypatch, story, operations, supports_chapter_split=True,
         instruction="第一章内容太多了，拆一下章节。\n拆成三张吧。",
     )
     assert response.status_code == 200, response.text
+    assert model.inputs[0]["instruction"] == "第一章内容太多了，拆一下章节。\n拆成三章吧。"
     data = response.json()
     assert len(json.loads(data["signature"])) == 2
     assert len((await _story(test_db, story["pid"]))["chapters"]) == len(before["chapters"])
