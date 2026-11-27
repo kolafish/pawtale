@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from functools import partial
+
 from fastapi import APIRouter, Depends, HTTPException, WebSocket
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,10 +41,6 @@ async def stream_memoir_project_dictation(
         await reject_websocket(websocket, "memoir_project_dictation_unavailable")
         return
 
-    def normalize(text: str) -> str:
-        text = normalize_memoir_asr_text(text)
-        return normalize_memoir_asr_text(text, chapter_edit=True) if chapter_edit else text
-
     await run_dictation_gateway(
         websocket,
         user_id=current_user.id,
@@ -51,7 +49,7 @@ async def stream_memoir_project_dictation(
             "gateway": "memoir_project_dictation",
             "project_id": project_id,
         },
-        text_normalizer=normalize,
+        text_normalizer=partial(normalize_memoir_asr_text, chapter_edit=chapter_edit),
         authorize_audio=audio_authorizer(db, current_user.id),
     )
 

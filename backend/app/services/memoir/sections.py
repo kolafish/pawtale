@@ -1142,6 +1142,19 @@ async def mark_section_structure_changed(
     )
 
 
+_GROWTH_APPEND_VERSIONS = "story_growth_append_versions"
+
+
+def _growth_append_floor(section: MemoirSection) -> int:
+    bounds = section.metadata_json.get(_GROWTH_APPEND_VERSIONS)
+    if (
+        isinstance(bounds, list) and len(bounds) == 2
+        and type(bounds[0]) is int and 1 <= bounds[0] < section.version == bounds[1]
+    ):
+        return bounds[0]
+    return section.version
+
+
 async def place_material(
     db: AsyncSession,
     *,
@@ -1225,9 +1238,17 @@ async def place_material(
         else None
     )
 
+    growth_append = (
+        expected_source is not None
+        and assigned_by == MemoirSectionMaterialAssignedBy.AI
+        and structure_updated_by == MemoirCreatedBy.AI
+    )
     if expected_section_version is not None and target is not None:
         await db.refresh(target, with_for_update=True)
-        if target.version != expected_section_version:
+        # Accept only a continuous run of verified automatic appends.
+        # Any other section write breaks the range by advancing its version.
+        floor = _growth_append_floor(target) if growth_append else target.version
+        if not floor <= expected_section_version <= target.version:
             raise HTTPException(status_code=409, detail="目标小节已变化，已放弃过时的自动归类")
     if expected_chapter_updated_at is not None and target_chapter_id is not None:
         if (
@@ -1332,6 +1353,7 @@ async def place_material(
         created_chapter = True
         created_section = True
 
+    append_floor = _growth_append_floor(target) if growth_append else None
     changed_ids |= await _move_materials(
         db,
         project_id=project_id,
@@ -1346,6 +1368,10 @@ async def place_material(
             else "manual_assignment"
         ),
     )
+    if append_floor is not None:
+        target.metadata_json = {
+            **target.metadata_json, _GROWTH_APPEND_VERSIONS: [append_floor, target.version],
+        }
     affected_chapter_ids = {target.chapter_id}
     if current_section is not None:
         affected_chapter_ids.add(current_section.chapter_id)

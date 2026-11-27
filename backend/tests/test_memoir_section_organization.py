@@ -2030,14 +2030,47 @@ def test_long_material_preview_covers_middle_and_keeps_short_material_complete()
 
 
 @pytest.mark.db_independent
-async def test_parallel_story_growth_keeps_shared_material_group_in_one_section(client, test_db):
+@pytest.mark.parametrize("overlap", ["same_sources", "different_tails", "new_chapter", "manual_rename"])
+async def test_parallel_story_growth_keeps_shared_material_group_in_one_section(client, test_db, overlap):
     from sqlalchemy.ext.asyncio import AsyncSession
+    from app.schemas.memoir_sections import MemoirSectionUpdateRequest
     from app.services.memoir.transcript_projection import source_text_hash
 
     project_id, chapters, _, tree = await _bootstrap_two_chapters(client, test_db)
-    texts = ("第一次去香山，我们在山门等到下雨。", "雨停后我们进了香山，沿着石阶走到山顶。")
+    texts = ("第一次去香山，我们在山门等到下雨。", "沿着石阶走到山顶。", "下山时我们去了茶馆。")
     sources = [await create_test_voice_transcript(client, test_db, text, project_id=project_id) for text in texts]
-    source_ids = [source["utterance_id"] for source in sources]
+    first_source, second_source, third_source = [source["utterance_id"] for source in sources]
+    first_groups = [story_tree_growth.GrowthGroup(
+        utterance_ids=[first_source, second_source], action="create_section",
+        chapter_id=chapters[0].id, new_section_title="香山遇雨",
+    )]
+    second_groups = first_groups
+    expected_first = [first_source]
+    expected_second = [second_source]
+    if overlap in {"different_tails", "manual_rename"}:
+        second_groups = [story_tree_growth.GrowthGroup(
+            utterance_ids=[first_source, third_source], action="create_section",
+            chapter_id=chapters[0].id, new_section_title="香山遇雨",
+        )]
+        expected_second = [third_source]
+        if overlap == "different_tails":
+            expected_first.append(second_source)
+    if overlap == "new_chapter":
+        first_groups = [
+            story_tree_growth.GrowthGroup(
+                utterance_ids=[first_source], action="create_section",
+                chapter_id=chapters[0].id, new_section_title="行前准备",
+            ),
+            story_tree_growth.GrowthGroup(
+                utterance_ids=[second_source, third_source], action="create_chapter",
+                new_chapter_title="郊游", new_section_title="香山遇雨",
+            ),
+        ]
+        second_groups = [story_tree_growth.GrowthGroup(
+            utterance_ids=[second_source], action="create_chapter",
+            new_chapter_title="郊游", new_section_title="香山遇雨",
+        )]
+        expected_first.append(third_source)
     batch = story_tree_growth.GrowthBatch(
         sources={
             source["utterance_id"]: (source_text_hash(text), source["transcript_version_id"])
@@ -2046,16 +2079,13 @@ async def test_parallel_story_growth_keeps_shared_material_group_in_one_section(
         section_versions={section["id"]: section["version"] for section in tree["sections"]},
         section_chapters={section["id"]: section["chapter_id"] for section in tree["sections"]},
         chapter_updated_at={chapter.id: chapter.updated_at for chapter in chapters},
-        groups=[story_tree_growth.GrowthGroup(
-            utterance_ids=source_ids, action="create_section",
-            chapter_id=chapters[0].id, new_section_title="香山遇雨",
-        )],
+        groups=first_groups,
     )
     parallel_batch = batch.model_copy(deep=True)
+    parallel_batch.groups = second_groups
     user_id = sources[0]["user_id"]
 
-    # Both workers classified the same source snapshot. The second writes
-    # after the first source checkpoint committed, before its next source.
+    # The second worker writes between the first worker's source checkpoints.
     async with AsyncSession(test_db.bind, expire_on_commit=False) as first, AsyncSession(
         test_db.bind, expire_on_commit=False,
     ) as second:
@@ -2064,21 +2094,35 @@ async def test_parallel_story_growth_keeps_shared_material_group_in_one_section(
 
         async def commit_first(utterance_id):
             await first.commit()
-            if utterance_id == source_ids[0]:
-                assert await story_tree_growth._place_groups(
-                    second, user_id=user_id, project_id=project_id, batch=parallel_batch, on_placed=commit_second,
-                ) == source_ids[1:]
-                await second.commit()
+            if utterance_id != first_source:
+                return
+            assert await story_tree_growth._place_groups(
+                second, user_id=user_id, project_id=project_id, batch=parallel_batch, on_placed=commit_second,
+            ) == expected_second
+            if overlap == "manual_rename":
+                target = await second.scalar(select(MemoirSection).where(
+                    MemoirSection.project_id == project_id, MemoirSection.title == "香山遇雨",
+                ))
+                await memoir_sections.update_section(
+                    second, user_id=user_id, project_id=project_id, section_id=target.id,
+                    req=MemoirSectionUpdateRequest(expected_version=target.version, title="用户重新命名"),
+                )
+            await second.commit()
 
         assert await story_tree_growth._place_groups(
             first, user_id=user_id, project_id=project_id, batch=batch, on_placed=commit_first,
-        ) == source_ids[:1]
+        ) == expected_first
 
+    title = "用户重新命名" if overlap == "manual_rename" else "香山遇雨"
     membership = (await test_db.execute(
-        select(MemoirSectionMaterial.utterance_id, MemoirSection.id, MemoirSection.title)
+        select(MemoirSectionMaterial.utterance_id, MemoirSection.id)
         .join(MemoirSection)
-        .where(MemoirSectionMaterial.utterance_id.in_(source_ids))
+        .where(MemoirSection.project_id == project_id, MemoirSection.title == title)
     )).all()
-    assert {row.utterance_id for row in membership} == set(source_ids)
-    assert {row.title for row in membership} == {"香山遇雨"}
+    expected = set(expected_first + expected_second) - ({first_source} if overlap == "new_chapter" else set())
+    assert {row.utterance_id for row in membership} == expected
     assert len({row.id for row in membership}) == 1
+    if overlap == "new_chapter":
+        assert len((await test_db.scalars(select(MemoirBookPlanChapter.id).where(
+            MemoirBookPlanChapter.project_id == project_id, MemoirBookPlanChapter.title == "郊游",
+        ))).all()) == 1
