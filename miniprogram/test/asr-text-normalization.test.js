@@ -34,9 +34,20 @@ test("normalizeMemoirAsrText corrects chapter homophones in book context", () =>
     normalizeMemoirAsrText("你不是一个人名的张杰，是书的张杰。"),
     "你不是一个人名的章节，是书的章节。",
   );
-  assert.equal(normalizeMemoirAsrText("把第一张改名为童年往事。"), "把第一章改名为童年往事。");
-  assert.equal(normalizeMemoirAsrText("第一张和第二张换一下。"), "第一章和第二章换一下。");
-  assert.equal(normalizeMemoirAsrText("现在有几张啊？"), "现在有几章啊？");
+});
+
+test("normalizeMemoirAsrText preserves classifiers in narration", () => {
+  for (const text of [
+    "宿舍第一张床靠走道。",
+    "我顺着自己的印象另画一张，把学校放到染坊旁边。",
+    "摆着几张白椅，背后能看见船。",
+    "桌上只留了几张纸。",
+    "现在有几张啊？",
+    "相册里有多少张照片？",
+    "第一张和第二张照片都留着。",
+  ]) {
+    assert.equal(normalizeMemoirAsrText(text), text);
+  }
 });
 
 test("normalizeMemoirAsrText preserves likely person names", () => {

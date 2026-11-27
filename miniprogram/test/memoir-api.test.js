@@ -726,6 +726,10 @@ test("book service APIs encode backend routes and selected AI model", async () =
     apiClient.memoirProjectDictationUrl("project/1"),
     "ws://backend.local:8000/api/memoir/projects/project%2F1/dictation",
   );
+  assert.equal(
+    apiClient.memoirProjectDictationUrl("project/1", { chapterEdit: true }),
+    "ws://backend.local:8000/api/memoir/projects/project%2F1/dictation?chapter_edit=true",
+  );
   const cases = [
     { call: () => api.getMemoirBookPlan("project/1"), method: "GET", url: `${base}/book-plan` },
     { call: () => api.updateMemoirBookChapterTitle("project/1", "chapter/1", { title: "新章名" }), method: "PATCH", url: `${base}/book-plan/chapters/chapter%2F1/title`, data: { title: "新章名" } },

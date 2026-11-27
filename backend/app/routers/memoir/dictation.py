@@ -22,6 +22,7 @@ async def stream_memoir_project_dictation(
     websocket: WebSocket,
     project_id: str,
     db: AsyncSession = Depends(get_db),
+    chapter_edit: bool = False,
 ):
     current_user = await authenticate_websocket(websocket, db)
     if current_user is None:
@@ -38,6 +39,10 @@ async def stream_memoir_project_dictation(
         await reject_websocket(websocket, "memoir_project_dictation_unavailable")
         return
 
+    def normalize(text: str) -> str:
+        text = normalize_memoir_asr_text(text)
+        return normalize_memoir_asr_text(text, chapter_edit=True) if chapter_edit else text
+
     await run_dictation_gateway(
         websocket,
         user_id=current_user.id,
@@ -46,7 +51,7 @@ async def stream_memoir_project_dictation(
             "gateway": "memoir_project_dictation",
             "project_id": project_id,
         },
-        text_normalizer=normalize_memoir_asr_text,
+        text_normalizer=normalize,
         authorize_audio=audio_authorizer(db, current_user.id),
     )
 

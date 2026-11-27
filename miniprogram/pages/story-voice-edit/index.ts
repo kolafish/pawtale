@@ -95,7 +95,7 @@ definePage<EditData>()({
   onLoad(query: PageQuery) {
     this.pageVisible = true;
     const projectId = queryParam(query, "projectId");
-    this.setData({ projectId, projectTitle: queryParam(query, "projectTitle"), gatewayUrl: memoirProjectDictationUrl(projectId) });
+    this.setData({ projectId, projectTitle: queryParam(query, "projectTitle"), gatewayUrl: memoirProjectDictationUrl(projectId, { chapterEdit: true }) });
     if (!projectId) this.setData({ error: "请从当前回忆录的首页进入语音编辑" });
   },
 
