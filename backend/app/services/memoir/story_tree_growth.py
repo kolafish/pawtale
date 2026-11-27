@@ -63,6 +63,7 @@ from app.services.memoir.section_regeneration import (
     SectionRegenerationNeedsMaterial,
     regenerate_chapter_sections,
 )
+from app.services.memoir.section_roles import requires_user_assignment
 from app.services.memoir.sections import finalize_section_changes, lock_chapter_structure, lock_plan_structure, lock_project_chapters, place_material
 from app.services.memoir.semantic_state import semantic_json_signature
 from app.services.memoir.transcript_projection import (
@@ -722,6 +723,40 @@ async def _lock_growth_questions(db: AsyncSession, *, project_id: str, batch: Gr
                for item in sources)
 
 
+async def _find_concurrent_group_section(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_id: str,
+    group: GrowthGroup,
+    batch: GrowthBatch,
+) -> MemoirSection | None:
+    # Material checkpoints release the directory lock. A different job may have
+    # started this group using the same input before the next checkpoint.
+    matches = (await db.execute(
+        select(MemoirSection, MemoirSectionMaterial)
+        .join(MemoirSectionMaterial, MemoirSectionMaterial.section_id == MemoirSection.id)
+        .where(
+            MemoirSection.project_id == project_id,
+            MemoirSection.chapter_id == chapter_id,
+            MemoirSection.title == group.new_section_title,
+            MemoirSection.status == MemoirSectionStatus.ACTIVE.value,
+            MemoirSection.include_in_book.is_(True),
+            MemoirSectionMaterial.utterance_id.in_(group.utterance_ids),
+            MemoirSectionMaterial.assigned_by == MemoirSectionMaterialAssignedBy.AI.value,
+            MemoirSectionMaterial.include_in_book.is_(True),
+        )
+        .execution_options(populate_existing=True)
+    )).all()
+    sections = {
+        section.id: section for section, material in matches
+        if section.id not in batch.section_versions
+        and material.transcript_version_id == batch.sources[material.utterance_id][1]
+        and not requires_user_assignment(section.metadata_json)
+    }
+    return next(iter(sections.values())) if len(sections) == 1 else None
+
+
 async def _place_groups(
     db: AsyncSession,
     *,
@@ -741,14 +776,25 @@ async def _place_groups(
             # A retry only rechecks the content boundary; it never moves existing stories.
             if utterance_id in batch.recovery_materials:
                 continue
+            if not await _lock_growth_questions(db, project_id=project_id, batch=batch):
+                raise HTTPException(409, "提问已变化，请重新整理素材")
             same_title_chapter_id = (
                 chapter_by_title.get(group.new_chapter_title) if group.action == "create_chapter" else None
             )
+            chapter_id = group.chapter_id or same_title_chapter_id
+            if not target_section_id and chapter_id and group.new_section_title:
+                concurrent_section = await _find_concurrent_group_section(
+                    db, project_id=project_id, chapter_id=chapter_id, group=group, batch=batch,
+                )
+                if concurrent_section is not None:
+                    target_section_id = concurrent_section.id
+                    batch.section_versions[target_section_id] = concurrent_section.version
+                    batch.section_chapters[target_section_id] = chapter_id
             if target_section_id:
                 request = MemoirSectionMaterialPlacementRequest(target_section_id=target_section_id)
             elif group.action == "create_section" or same_title_chapter_id:
                 request = MemoirSectionMaterialPlacementRequest(
-                    target_chapter_id=group.chapter_id or same_title_chapter_id,
+                    target_chapter_id=chapter_id,
                     new_section_title=group.new_section_title,
                 )
             elif group.action == "create_chapter":
@@ -758,8 +804,6 @@ async def _place_groups(
                 )
             else:
                 raise RuntimeError("故事树生长结果缺少目标小节")
-            if not await _lock_growth_questions(db, project_id=project_id, batch=batch):
-                raise HTTPException(409, "提问已变化，请重新整理素材")
             try:
                 placement = await place_material(
                     db,

@@ -2027,3 +2027,58 @@ def test_long_material_preview_covers_middle_and_keeps_short_material_complete()
     assert len(preview) <= 120
     assert "开头去上海" in preview and "中间到南昌学修车" in preview and "退休回成都" in preview
     assert "…" in preview
+
+
+@pytest.mark.db_independent
+async def test_parallel_story_growth_keeps_shared_material_group_in_one_section(client, test_db):
+    from sqlalchemy.ext.asyncio import AsyncSession
+    from app.services.memoir.transcript_projection import source_text_hash
+
+    project_id, chapters, _, tree = await _bootstrap_two_chapters(client, test_db)
+    texts = ("第一次去香山，我们在山门等到下雨。", "雨停后我们进了香山，沿着石阶走到山顶。")
+    sources = [await create_test_voice_transcript(client, test_db, text, project_id=project_id) for text in texts]
+    source_ids = [source["utterance_id"] for source in sources]
+    batch = story_tree_growth.GrowthBatch(
+        sources={
+            source["utterance_id"]: (source_text_hash(text), source["transcript_version_id"])
+            for source, text in zip(sources, texts, strict=True)
+        },
+        section_versions={section["id"]: section["version"] for section in tree["sections"]},
+        section_chapters={section["id"]: section["chapter_id"] for section in tree["sections"]},
+        chapter_updated_at={chapter.id: chapter.updated_at for chapter in chapters},
+        groups=[story_tree_growth.GrowthGroup(
+            utterance_ids=source_ids, action="create_section",
+            chapter_id=chapters[0].id, new_section_title="香山遇雨",
+        )],
+    )
+    parallel_batch = batch.model_copy(deep=True)
+    user_id = sources[0]["user_id"]
+
+    # Both workers classified the same source snapshot. The second writes
+    # after the first source checkpoint committed, before its next source.
+    async with AsyncSession(test_db.bind, expire_on_commit=False) as first, AsyncSession(
+        test_db.bind, expire_on_commit=False,
+    ) as second:
+        async def commit_second(_utterance_id):
+            await second.commit()
+
+        async def commit_first(utterance_id):
+            await first.commit()
+            if utterance_id == source_ids[0]:
+                assert await story_tree_growth._place_groups(
+                    second, user_id=user_id, project_id=project_id, batch=parallel_batch, on_placed=commit_second,
+                ) == source_ids[1:]
+                await second.commit()
+
+        assert await story_tree_growth._place_groups(
+            first, user_id=user_id, project_id=project_id, batch=batch, on_placed=commit_first,
+        ) == source_ids[:1]
+
+    membership = (await test_db.execute(
+        select(MemoirSectionMaterial.utterance_id, MemoirSection.id, MemoirSection.title)
+        .join(MemoirSection)
+        .where(MemoirSectionMaterial.utterance_id.in_(source_ids))
+    )).all()
+    assert {row.utterance_id for row in membership} == set(source_ids)
+    assert {row.title for row in membership} == {"香山遇雨"}
+    assert len({row.id for row in membership}) == 1
